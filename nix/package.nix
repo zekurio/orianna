@@ -51,19 +51,11 @@ stdenvNoCC.mkDerivation {
 
   src = fs.toSource {
     root = ../.;
-    fileset =
-      fs.difference
-        (fs.unions [
-          ../package.json
-          ../src
-          ../drizzle
-        ])
-        (
-          fs.unions [
-            (fs.fileFilter (f: lib.hasSuffix ".test.ts" f.name) ../src)
-            ../src/testing
-          ]
-        );
+    fileset = fs.unions [
+      ../package.json
+      ../src
+      ../drizzle
+    ];
   };
 
   nativeBuildInputs = [ makeWrapper ];

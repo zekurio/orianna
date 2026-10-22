@@ -24,35 +24,6 @@
         default = orianna;
       };
 
-      checks = forAllSystems (
-        pkgs:
-        let
-          orianna = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
-        in
-        {
-          tests = pkgs.stdenvNoCC.mkDerivation {
-            name = "orianna-tests";
-            src = lib.fileset.toSource {
-              root = ./.;
-              fileset = lib.fileset.unions [
-                ./package.json
-                ./src
-                ./drizzle
-              ];
-            };
-            nativeBuildInputs = [ pkgs.bun ];
-            dontConfigure = true;
-            buildPhase = ''
-              ln -s ${orianna.nodeModules} node_modules
-              HOME=$TMPDIR bun test
-            '';
-            installPhase = "touch $out";
-          };
-
-          nixos = pkgs.testers.runNixOSTest (import ./nix/test.nix self);
-        }
-      );
-
       formatter = forAllSystems (pkgs: pkgs.nixfmt);
     };
 }

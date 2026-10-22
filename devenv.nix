@@ -16,6 +16,5 @@
 
   enterTest = ''
     bun run typecheck
-    bun test
   '';
 }

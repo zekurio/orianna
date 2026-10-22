@@ -67,7 +67,7 @@ echo 'ORIANNA_TOKEN=...' > .env
 bun run dev
 ```
 
-`devenv test` runs the typechecker and the tests. After changing
+`devenv test` runs the typechecker. After changing
 `src/db/schema.ts`, run `bun run db:generate` and commit the new migration.
 
 ## Deployment on NixOS
@@ -99,6 +99,5 @@ bun run dev
 
 The service runs as a `DynamicUser` with its database in `/var/lib/orianna`.
 
-`nix flake check` runs the tests and a NixOS VM test. When `bun.lock` changes,
-update `outputHash` in `nix/package.nix`: set it to `lib.fakeHash`, run
+When `bun.lock` changes, update `outputHash` in `nix/package.nix`: set it to `lib.fakeHash`, run
 `nix build`, and copy the hash from the error.
