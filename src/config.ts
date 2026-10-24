@@ -4,15 +4,15 @@ import Value from "typebox/value";
 const Snowflake = Type.String({ pattern: "^[0-9]+$" });
 const Snowflakes = Type.Array(Snowflake, { default: [] });
 
-const EmojiConfigSchema = Type.Object(
+/** Shared by the `emoji` and `sticker` sections. */
+const ProposalConfigSchema = Type.Object(
   {
-    /** Channel where proposals are posted and voted on. */
-    channelId: Snowflake,
     votingHours: Type.Number({ exclusiveMinimum: 0, default: 48 }),
-    /** A proposal passes with at least this many yes votes and more yes than no. */
-    minYesVotes: Type.Integer({ minimum: 1, default: 3 }),
     maxOpenPerUser: Type.Integer({ minimum: 1, default: 3 }),
-    /** Should match the instance's `emoji_max_size` (512 KiB by default). */
+    /**
+     * Should match the instance's `emoji_max_size` / `sticker_max_size`
+     * (512 KiB for both by default).
+     */
     maxImageBytes: Type.Integer({ minimum: 1, default: 524288 }),
     /** Roles allowed to propose. Empty means everyone. */
     proposerRoleIds: Snowflakes,
@@ -26,6 +26,8 @@ export const ConfigSchema = Type.Object(
     instance: Type.String({ minLength: 1 }),
     /** The guild this bot serves. Messages from anywhere else are ignored. */
     guildId: Snowflake,
+    /** Channel where polls are posted and voted on. */
+    pollsChannelId: Snowflake,
     prefix: Type.String({ minLength: 1, default: "!" }),
     /** SQLite file. Relative paths resolve against the working directory. */
     database: Type.String({ minLength: 1, default: "./data/orianna.db" }),
@@ -35,13 +37,15 @@ export const ConfigSchema = Type.Object(
      */
     adminRoleIds: Snowflakes,
     /** Emoji proposals are disabled when this section is missing. */
-    emoji: Type.Optional(EmojiConfigSchema),
+    emoji: Type.Optional(ProposalConfigSchema),
+    /** Sticker proposals are disabled when this section is missing. */
+    sticker: Type.Optional(ProposalConfigSchema),
   },
   { additionalProperties: false },
 );
 
 export type Config = Type.Static<typeof ConfigSchema>;
-export type EmojiConfig = Type.Static<typeof EmojiConfigSchema>;
+export type ProposalConfig = Type.Static<typeof ProposalConfigSchema>;
 
 export class ConfigError extends Error {
   override name = "ConfigError";

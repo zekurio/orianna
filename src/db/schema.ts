@@ -23,6 +23,8 @@ export const polls = sqliteTable(
   "polls",
   {
     id: integer().primaryKey({ autoIncrement: true }),
+    /** What users see and type, e.g. `green-panther`. Never reused. */
+    slug: text().notNull(),
     /** Selects the close handler, e.g. "emoji-proposal". */
     kind: text().notNull(),
     guildId: text().notNull(),
@@ -42,6 +44,7 @@ export const polls = sqliteTable(
     closesAt: integer({ mode: "timestamp_ms" }).notNull(),
   },
   (t) => [
+    uniqueIndex("polls_slug_idx").on(t.slug),
     uniqueIndex("polls_message_id_idx").on(t.messageId),
     index("polls_status_closes_at_idx").on(t.status, t.closesAt),
   ],
@@ -61,18 +64,25 @@ export const votes = sqliteTable(
   (t) => [primaryKey({ columns: [t.pollId, t.userId, t.optionKey] })],
 );
 
-export const emojiProposals = sqliteTable(
-  "emoji_proposals",
+export const proposals = sqliteTable(
+  "proposals",
   {
-    /** Proposals share their poll's id, which is also what users type. */
+    /** Proposals share their poll's id; users refer to them by the poll's slug. */
     pollId: integer()
       .primaryKey()
       .references(() => polls.id, { onDelete: "cascade" }),
+    type: text({ enum: ["emoji", "sticker"] }).notNull(),
     name: text().notNull(),
-    /** Kept so the emoji can be created even if the original message is gone. */
+    /** Stickers only. */
+    description: text(),
+    /** Stickers only. */
+    tags: text({ mode: "json" }).$type<string[]>().notNull().default([]),
+    /** Kept so the expression can be created even if the original message is gone. */
     image: blob({ mode: "buffer" }).notNull(),
     contentType: text().notNull(),
     proposerId: text().notNull(),
+    /** Non-bot members who could see the vote channel when the proposal was made. */
+    requiredYes: integer().notNull().default(1),
     status: text({ enum: ["pending", "added", "rejected", "failed", "cancelled"] })
       .notNull()
       .default("pending"),
@@ -80,8 +90,9 @@ export const emojiProposals = sqliteTable(
     decision: text({ enum: ["approve", "reject"] }),
     decidedBy: text(),
     reason: text(),
-    emojiId: text(),
+    /** The created emoji or sticker. */
+    expressionId: text(),
     error: text(),
   },
-  (t) => [index("emoji_proposals_status_idx").on(t.status)],
+  (t) => [index("proposals_type_status_idx").on(t.type, t.status)],
 );

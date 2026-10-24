@@ -41,7 +41,9 @@ in
           instance = "https://chat.example.org";
           guildId = "1234567890";
           adminRoleIds = [ "2345678901" ];
-          emoji.channelId = "3456789012";
+          pollsChannelId = "3456789012";
+          emoji = { };
+          sticker = { };
         }
       '';
       type = lib.types.submodule {
@@ -55,6 +57,10 @@ in
           guildId = lib.mkOption {
             type = lib.types.str;
             description = "ID of the guild the bot serves.";
+          };
+          pollsChannelId = lib.mkOption {
+            type = lib.types.str;
+            description = "ID of the channel where polls are posted and voted on.";
           };
           database = lib.mkOption {
             type = lib.types.str;

@@ -6,6 +6,7 @@ import {
   type CommandContext,
   type CommandEntry,
   type OptionValue,
+  formatError,
   formatUsage,
   isGroup,
   UserError,
@@ -13,6 +14,10 @@ import {
 import { ArgumentError, nextWord, parseOptions } from "./options.ts";
 
 type BaseContext = Omit<CommandContext, "options">;
+
+const PAGE_STEPS: Record<string, number> = { "⬅": -1, "➡": 1 };
+/** Navigation stops after this long without a page turn. */
+const PAGE_IDLE_MS = 2 * 60_000;
 
 export class CommandRouter {
   readonly entries = new Map<string, CommandEntry>();
@@ -66,7 +71,7 @@ export class CommandRouter {
       options = parseOptions(command.options ?? [], input, messageAttachments(message));
     } catch (err) {
       if (!(err instanceof ArgumentError)) throw err;
-      await base.reply(`${err.message}\nUsage: ${usageLine(prefix, path, command)}`);
+      await base.error(`${err.message}\nUsage: ${usageLine(prefix, path, command)}`);
       return;
     }
 
@@ -82,17 +87,17 @@ export class CommandRouter {
     try {
       const refused = await command.guard?.(ctx);
       if (refused) {
-        await ctx.reply(refused);
+        await ctx.error(refused);
         return;
       }
       await command.run(ctx);
     } catch (err) {
       if (err instanceof UserError) {
-        await ctx.reply(err.message).catch(() => {});
+        await ctx.error(err.message).catch(() => {});
         return;
       }
       console.error(`command ${path} failed:`, err);
-      await ctx.reply("Something went wrong running that command.").catch(() => {});
+      await ctx.error("Something went wrong running that command.").catch(() => {});
     }
   }
 }
@@ -103,20 +108,86 @@ export function usageLine(prefix: string, path: string, command: Command): strin
 }
 
 function messageContext(bot: Bot, message: Message): BaseContext {
+  const reply = async (content: string) => {
+    const sent = await message.reply(content);
+    return {
+      async edit(content: string) {
+        await sent.edit({ content });
+      },
+    };
+  };
   return {
     bot,
     userId: message.author.id,
     guildId: message.guildId!,
     channelId: message.channelId,
-    async reply(content) {
-      const sent = await message.reply(content);
-      return {
-        async edit(content) {
-          await sent.edit({ content });
-        },
-      };
+    reply,
+    async replyPages(pages) {
+      if (pages.length <= 1) {
+        await reply(pages[0] ?? "");
+        return;
+      }
+      await sendPaginated(message, pages);
+    },
+    async error(text) {
+      await reply(formatError(text));
     },
   };
+}
+
+/**
+ * Replies with the first page and lets the invoking user turn pages with ⬅️ / ➡️
+ * reactions until they go idle. Their reactions are removed after each turn so
+ * the same arrow can be pressed again.
+ */
+async function sendPaginated(message: Message, pages: readonly string[]) {
+  let page = 0;
+  const render = () => `${pages[page]}\n\n*Page ${page + 1}/${pages.length}*`;
+
+  const sent = await message.reply(render());
+  const collector = sent.createReactionCollector({
+    filter: (_reaction, user) => user.id === message.author.id,
+  });
+
+  let idle: ReturnType<typeof setTimeout> | undefined;
+  const resetIdle = () => {
+    clearTimeout(idle);
+    idle = setTimeout(() => collector.stop("time"), PAGE_IDLE_MS);
+  };
+  // Page turns run one at a time so rapid presses can't race their edits.
+  let turns = Promise.resolve();
+  const report = (err: unknown) => console.warn("pagination failed:", err);
+
+  collector.on("collect", (reaction, user) => {
+    const name = reaction.emoji.name;
+    const step = name ? PAGE_STEPS[name.replaceAll("\uFE0F", "")] : undefined;
+    if (!step) return;
+    resetIdle();
+    turns = turns
+      .then(async () => {
+        await sent.removeReaction(name!, user.id).catch(() => {});
+        page = (page + step + pages.length) % pages.length;
+        await sent.edit({ content: render() });
+      })
+      .catch(report);
+  });
+
+  collector.on("end", () => {
+    clearTimeout(idle);
+    turns = turns
+      .then(async () => {
+        for (const emoji of Object.keys(PAGE_STEPS)) {
+          await sent.removeReaction(`${emoji}\uFE0F`).catch(() => {});
+        }
+      })
+      .catch(report);
+  });
+
+  resetIdle();
+  // Best effort: the user can still add the arrows themselves.
+  for (const emoji of Object.keys(PAGE_STEPS)) {
+    await sent.react(`${emoji}\uFE0F`).catch(report);
+  }
 }
 
 function messageAttachments(message: Message): Attachment[] {

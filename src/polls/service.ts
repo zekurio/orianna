@@ -2,6 +2,7 @@ import { and, asc, eq, isNull, lte, sql } from "drizzle-orm";
 import type { DB } from "../db/index.ts";
 import { type PollOption, polls, votes } from "../db/schema.ts";
 import type { PollFile, PollTransport } from "./transport.ts";
+import { normalizeSlug, pickSlug, randomSlug } from "./slug.ts";
 
 export type Poll = typeof polls.$inferSelect;
 
@@ -17,6 +18,11 @@ export interface PollHandler {
    * and it is retried, so this must be safe to run more than once.
    */
   onClose(poll: Poll, tally: Tally): Promise<void>;
+  /**
+   * Checked after votes change on an open poll. Returning true closes the
+   * poll right away instead of waiting for its deadline.
+   */
+  isDecided?(poll: Poll, tally: Tally): boolean;
 }
 
 export interface CreatePollInput {
@@ -42,6 +48,8 @@ export interface PollServiceOptions {
   now?: () => number;
   /** Delay before retrying handlers that threw. */
   retryMs?: number;
+  /** Generates candidate poll slugs. */
+  slug?: () => string;
 }
 
 const MAX_TIMEOUT = 2 ** 31 - 1;
@@ -51,6 +59,7 @@ export class PollService {
   private readonly resolving = new Set<number>();
   private readonly now: () => number;
   private readonly retryMs: number;
+  private readonly slug: () => string;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private running = false;
 
@@ -61,6 +70,7 @@ export class PollService {
   ) {
     this.now = options.now ?? Date.now;
     this.retryMs = options.retryMs ?? 60_000;
+    this.slug = options.slug ?? randomSlug;
   }
 
   register(kind: string, handler: PollHandler) {
@@ -70,6 +80,10 @@ export class PollService {
 
   get(id: number): Poll | undefined {
     return this.db.select().from(polls).where(eq(polls.id, id)).get();
+  }
+
+  bySlug(slug: string): Poll | undefined {
+    return this.db.select().from(polls).where(eq(polls.slug, normalizeSlug(slug))).get();
   }
 
   /** Stores the poll, posts it, and seeds one reaction per option. */
@@ -83,6 +97,8 @@ export class PollService {
       .insert(polls)
       .values({
         kind: input.kind,
+        // Checked against every poll ever made, so a slug always means one poll.
+        slug: pickSlug((slug) => this.bySlug(slug) !== undefined, this.slug),
         guildId: input.guildId,
         channelId: input.channelId,
         question: input.question,
@@ -185,7 +201,8 @@ export class PollService {
     const option = poll && findOption(poll, emoji);
     if (!poll || !option) return;
 
-    const replaced = this.castVote(poll.id, userId, option.key) ?? [];
+    const replaced = this.castVote(poll.id, userId, option.key);
+    if (replaced === null) return;
     for (const key of replaced) {
       const old = poll.options.find((o) => o.key === key);
       if (!old) continue;
@@ -193,6 +210,7 @@ export class PollService {
         .removeReaction(poll.channelId, messageId, old.emoji, userId)
         .catch((err) => console.warn(`poll ${poll.id}: could not remove reaction:`, err));
     }
+    await this.closeIfDecided(poll);
   }
 
   reactionRemoved(messageId: string, userId: string, emoji: ReactionEmoji) {
@@ -227,8 +245,18 @@ export class PollService {
         await this.reconcilePoll(poll, poll.messageId);
       } catch (err) {
         console.warn(`poll ${poll.id}: could not read reactions:`, err);
+        continue;
       }
+      // Votes cast while offline may already have decided it.
+      await this.closeIfDecided(poll);
     }
+  }
+
+  /** Closes an open poll early when its handler says the outcome is settled. */
+  private async closeIfDecided(poll: Poll) {
+    const handler = this.handlers.get(poll.kind);
+    if (!handler?.isDecided || !this.acceptsVotes(poll)) return;
+    if (handler.isDecided(poll, this.tally(poll))) await this.close(poll.id);
   }
 
   private async reconcilePoll(poll: Poll, messageId: string) {
@@ -438,9 +466,9 @@ export function renderPoll(poll: Poll, tally?: Tally): string {
   lines.push("");
   if (poll.status === "open") {
     const how = poll.mode === "single" ? "React to vote" : "React to vote, several choices allowed";
-    lines.push(`${how}. Closes ${timestamp(poll.closesAt)}. Poll #${poll.id}`);
+    lines.push(`${how}. Closes ${timestamp(poll.closesAt)}. Poll \`${poll.slug}\``);
   } else {
-    lines.push(`Poll #${poll.id}`);
+    lines.push(`Poll \`${poll.slug}\``);
   }
   return lines.join("\n");
 }

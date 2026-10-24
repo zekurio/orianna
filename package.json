@@ -12,7 +12,8 @@
   "dependencies": {
     "@fluxerjs/core": "^3.3.0",
     "drizzle-orm": "^0.45.4",
-    "typebox": "^1.4.3"
+    "typebox": "^1.4.3",
+    "unique-names-generator": "^4.7.1"
   },
   "devDependencies": {
     "@types/bun": "^1.4.3",

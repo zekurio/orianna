@@ -1,9 +1,9 @@
 # Orianna
 
 A bot for a self-hosted [Fluxer](https://fluxer.app) instance. Its first job is
-emoji proposals: members propose an emoji, the server votes on it, and the bot
-adds it if the vote passes. Nobody but the bot needs permission to create
-emojis.
+emoji and sticker proposals: members propose one, the server votes on it, and
+the bot adds it if the vote passes. Nobody but the bot needs permission to
+create expressions.
 
 Fluxer has no slash commands or buttons yet, so commands use a prefix and
 votes are reactions. Commands are written against an adapter-neutral interface
@@ -15,24 +15,43 @@ rewriting them.
 | Command | Who | |
 |---|---|---|
 | `!emoji propose <name>` + image attachment | anyone (or `proposerRoleIds`) | Start a vote on a new emoji |
-| `!emoji list` | anyone | Show open proposals |
-| `!emoji cancel <id>` | proposer or admin | Withdraw a proposal |
-| `!emoji approve <id> [reason]` | admin | End the vote early and add the emoji |
-| `!emoji reject <id> [reason]` | admin | End the vote early without adding it |
-| `!help`, `!ping` | anyone | |
+| `!sticker propose <name...> [--desc text] [--tags a, b]` + image attachment | anyone (or `proposerRoleIds`) | Start a vote on a new sticker |
+| `!emoji list`, `!sticker list` | anyone | Show open proposals |
+| `!emoji cancel <id>`, `!sticker cancel <id>` | proposer or admin | Withdraw a proposal |
+| `!emoji approve <id> [reason]`, `!sticker approve ...` | admin | End the vote early and add it |
+| `!emoji reject <id> [reason]`, `!sticker reject ...` | admin | End the vote early without adding it |
+| `!help` | anyone | List commands; flip pages with ⬅️ / ➡️ |
+| `!ping` | anyone | |
+
+Options written as `--name value` can go in any order after the other
+arguments, and their value runs until the next `--option`:
+
+```
+!sticker propose sad face --desc A very sad face --tags sad, cry
+```
+
+Every poll gets a random name like `green-panther`, shown at the bottom of the
+poll; `<id>` is that name. Names are never reused.
 
 Admins are the guild owner, members with Manage Expressions, and anyone with a
 role in `adminRoleIds`.
 
-A proposal passes when it has at least `minYesVotes` yes votes and more yes than
-no. Each member gets one vote; switching reactions moves the vote. The image is
+A proposal needs a yes vote from every member who could see the polls channel
+when it was posted, not counting bots, and more yes than no. The poll pings
+`@here`, and the number is fixed when the vote starts. The vote ends as soon as
+it has enough yes votes, otherwise after `votingHours`. Each member
+gets one vote; switching reactions moves the vote. The image is
 stored when the proposal is made, so deleting the original message doesn't
-matter. Names are 2–32 letters, digits or underscores, and images must be PNG,
-JPEG, GIF, WebP or AVIF.
+matter. Images must be PNG, JPEG, GIF, WebP or AVIF.
+
+Emoji names are 2–32 letters, digits or underscores. Sticker names are 2–30
+characters, spaces allowed; descriptions are up to 500 characters, and up to 10
+tags of up to 30 characters each.
 
 The bot needs these permissions in the guild: view and send messages, attach
-files, add reactions, manage messages (to remove a member's old vote reaction)
-and create expressions.
+files, add reactions, manage messages (to remove a member's old vote reaction
+and their page-turn reactions on `!help`),
+mention @everyone and @here (to ping the polls channel) and create expressions.
 
 ## Configuration
 
@@ -43,17 +62,17 @@ Unknown keys are an error. See [`config.example.json`](config.example.json).
 |---|---|---|
 | `instance` | required | Instance origin; the bot reads `/.well-known/fluxer` from it |
 | `guildId` | required | The guild to serve; everything else is ignored |
+| `pollsChannelId` | required | Where polls are posted and voted on |
 | `prefix` | `"!"` | |
 | `database` | `"./data/orianna.db"` | SQLite file, created and migrated on startup |
 | `adminRoleIds` | `[]` | Extra admin roles |
-| `emoji.channelId` | required | Where proposals are posted |
 | `emoji.votingHours` | `48` | |
-| `emoji.minYesVotes` | `3` | |
 | `emoji.maxOpenPerUser` | `3` | |
 | `emoji.maxImageBytes` | `524288` | Match your instance's `emoji_max_size` |
 | `emoji.proposerRoleIds` | `[]` | Roles allowed to propose; empty means everyone |
+| `sticker.*` | | Same keys as `emoji`; `maxImageBytes` should match `sticker_max_size` |
 
-Leave out the `emoji` section to turn proposals off.
+Leave out the `emoji` or `sticker` section to turn those proposals off.
 
 The token is read from the systemd credential `token` if present, otherwise
 from `ORIANNA_TOKEN`.
@@ -87,7 +106,9 @@ bun run dev
             settings = {
               instance = "https://chat.example.org";
               guildId = "1234567890";
-              emoji.channelId = "3456789012";
+              pollsChannelId = "3456789012";
+              emoji = { };
+              sticker = { };
             };
           };
         }

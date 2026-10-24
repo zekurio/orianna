@@ -1,13 +1,18 @@
 {
   "instance": "https://chat.example.org",
   "guildId": "000000000000000000",
+  "pollsChannelId": "000000000000000000",
   "prefix": "!",
   "database": "./data/orianna.db",
   "adminRoleIds": [],
   "emoji": {
-    "channelId": "000000000000000000",
     "votingHours": 48,
-    "minYesVotes": 3,
+    "maxOpenPerUser": 3,
+    "maxImageBytes": 524288,
+    "proposerRoleIds": []
+  },
+  "sticker": {
+    "votingHours": 48,
     "maxOpenPerUser": 3,
     "maxImageBytes": 524288,
     "proposerRoleIds": []

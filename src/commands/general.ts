@@ -12,6 +12,8 @@ export const ping = defineCommand({
   },
 });
 
+const HELP_PAGE_SIZE = 8;
+
 export const help = defineCommand({
   name: "help",
   description: "List available commands.",
@@ -22,6 +24,10 @@ export const help = defineCommand({
         ? entry.subcommands.map((c) => usageLine(prefix, `${entry.name} ${c.name}`, c))
         : [usageLine(prefix, entry.name, entry)],
     );
-    await ctx.reply(lines.join("\n"));
+    const pages: string[] = [];
+    for (let i = 0; i < lines.length; i += HELP_PAGE_SIZE) {
+      pages.push(["**Commands**", ...lines.slice(i, i + HELP_PAGE_SIZE)].join("\n"));
+    }
+    await ctx.replyPages(pages);
   },
 });

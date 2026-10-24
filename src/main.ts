@@ -5,9 +5,9 @@ import { help, ping } from "./commands/general.ts";
 import { CommandRouter } from "./commands/router.ts";
 import { ConfigError, loadConfig, readToken } from "./config.ts";
 import { openDatabase } from "./db/index.ts";
-import { emojiCommands } from "./emoji/commands.ts";
-import { FluxerEmojiGuild } from "./emoji/fluxer.ts";
-import { EMOJI_POLL_KIND, EmojiProposals } from "./emoji/proposals.ts";
+import { proposalCommands } from "./expressions/commands.ts";
+import { FluxerExpressionGuild } from "./expressions/fluxer.ts";
+import { EMOJI, ExpressionProposals, STICKER } from "./expressions/proposals.ts";
 import { FluxerGuildAccess } from "./permissions.ts";
 import { attachPollEvents, FluxerPollTransport } from "./polls/fluxer.ts";
 import { PollService } from "./polls/service.ts";
@@ -22,17 +22,23 @@ async function main() {
   const polls = new PollService(db, new FluxerPollTransport(client));
 
   const commands: CommandEntry[] = [ping, help];
-  if (config.emoji) {
-    const proposals = new EmojiProposals({
+  const guild = new FluxerExpressionGuild(client, config.guildId);
+  for (const [kind, section] of [
+    [EMOJI, config.emoji],
+    [STICKER, config.sticker],
+  ] as const) {
+    if (!section) continue;
+    const proposals = new ExpressionProposals(kind, {
       db,
       polls,
-      guild: new FluxerEmojiGuild(client, config.guildId),
+      guild,
       access,
-      config: config.emoji,
+      config: section,
       guildId: config.guildId,
+      channelId: config.pollsChannelId,
     });
-    polls.register(EMOJI_POLL_KIND, proposals);
-    commands.push(emojiCommands(proposals, config.emoji));
+    polls.register(kind.pollKind, proposals);
+    commands.push(proposalCommands(proposals, section, config.pollsChannelId));
   }
 
   const router = new CommandRouter(commands);
