@@ -33,7 +33,7 @@ in
     settings = lib.mkOption {
       description = ''
         Bot configuration, written to the JSON file the bot reads at startup.
-        See config.example.json and the README for every key. Unknown keys are
+        See src/config.ts for every key. Unknown keys are
         rejected when the bot starts.
       '';
       example = lib.literalExpression ''
