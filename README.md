@@ -14,8 +14,8 @@ rewriting them.
 
 | Command | Who | |
 |---|---|---|
-| `!emoji propose <name>` + image attachment | anyone (or `proposerRoleIds`) | Start a vote on a new emoji |
-| `!sticker propose <name...> [--desc text] [--tags a, b]` + image attachment | anyone (or `proposerRoleIds`) | Start a vote on a new sticker |
+| `!emoji propose <name>` + image attachment or link | anyone (or `proposerRoleIds`) | Start a vote on a new emoji |
+| `!sticker propose <name...> [--desc text] [--tags a, b]` + image attachment or link | anyone (or `proposerRoleIds`) | Start a vote on a new sticker |
 | `!emoji list`, `!sticker list` | anyone | Show open proposals |
 | `!emoji cancel <id>`, `!sticker cancel <id>` | proposer or admin | Withdraw a proposal |
 | `!emoji approve <id> [reason]`, `!sticker approve ...` | admin | End the vote early and add it |
@@ -28,6 +28,15 @@ arguments, and their value runs until the next `--option`:
 
 ```
 !sticker propose sad face --desc A very sad face --tags sad, cry
+```
+
+Instead of attaching the image, you can paste a direct `http(s)` link to it
+anywhere before the `--options`, optionally wrapped in `<...>` to hide the
+embed. The bot checks that the first bytes are an image before downloading the
+rest, so links to web pages are refused:
+
+```
+!emoji propose party_cat <https://example.org/party-cat.gif>
 ```
 
 Every poll gets a random name like `green-panther`, shown at the bottom of the

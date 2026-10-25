@@ -6,7 +6,7 @@ import { polls, proposals } from "../db/schema.ts";
 import type { GuildAccess } from "../permissions.ts";
 import type { Poll, PollHandler, PollService, Tally } from "../polls/service.ts";
 import { timestamp } from "../polls/service.ts";
-import { formatKiB, sniffImage } from "./image.ts";
+import { formatKiB, sniffImage, UNSUPPORTED_IMAGE } from "./image.ts";
 
 export type Proposal = typeof proposals.$inferSelect;
 export type ExpressionType = Proposal["type"];
@@ -187,7 +187,7 @@ export class ExpressionProposals implements PollHandler {
     }
 
     const type = sniffImage(image);
-    if (!type) throw new UserError("The image must be a PNG, JPEG, GIF, WebP or AVIF file.");
+    if (!type) throw new UserError(UNSUPPORTED_IMAGE);
     if (image.length > config.maxImageBytes) {
       throw new UserError(
         `The image is ${formatKiB(image.length)}; the limit is ${formatKiB(config.maxImageBytes)}.`,

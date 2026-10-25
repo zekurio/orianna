@@ -8,12 +8,18 @@ export interface ImageType {
 const ascii = (bytes: Uint8Array, start: number, end: number) =>
   String.fromCharCode(...bytes.subarray(start, end));
 
+/** Enough leading bytes for {@link sniffImage} to tell every format apart. */
+const SNIFF_BYTES = 12;
+const DOWNLOAD_TIMEOUT_MS = 15_000;
+
+export const UNSUPPORTED_IMAGE = "The image must be a PNG, JPEG, GIF, WebP or AVIF file.";
+
 /**
  * Detects the image format from its magic bytes. Fluxer accepts a few more
  * formats, but these are the ones that render everywhere.
  */
 export function sniffImage(bytes: Uint8Array): ImageType | null {
-  if (bytes.length < 12) return null;
+  if (bytes.length < SNIFF_BYTES) return null;
   if (bytes[0] === 0x89 && ascii(bytes, 1, 4) === "PNG") {
     return { ext: "png", mime: "image/png" };
   }
@@ -32,20 +38,53 @@ export function sniffImage(bytes: Uint8Array): ImageType | null {
   return null;
 }
 
-/** Downloads an attachment, refusing anything larger than `maxBytes`. */
+/**
+ * Downloads an attached or linked image, refusing anything larger than
+ * `maxBytes`. The magic bytes are checked as soon as they arrive, so a link to
+ * a web page or any other non-image is dropped without downloading the rest.
+ */
 export async function downloadImage(url: string, maxBytes: number): Promise<Uint8Array> {
   const tooLarge = () =>
     new UserError(`That image is too large; the limit is ${formatKiB(maxBytes)}.`);
+  const signal = AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS);
 
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`downloading ${url} failed: HTTP ${response.status}`);
+  try {
+    const response = await fetch(url, { signal });
+    if (!response.ok) {
+      throw new UserError(`Couldn't download the image (HTTP ${response.status}).`);
+    }
+    const declared = Number(response.headers.get("content-length"));
+
+    const chunks: Uint8Array[] = [];
+    let length = 0;
+    for await (const chunk of response.body ?? []) {
+      const sniffed = length >= SNIFF_BYTES;
+      chunks.push(chunk);
+      length += chunk.length;
+      if (!sniffed && length >= SNIFF_BYTES) {
+        if (!sniffImage(concat(chunks, length))) throw new UserError(UNSUPPORTED_IMAGE);
+        if (declared > maxBytes) throw tooLarge();
+      }
+      if (length > maxBytes) throw tooLarge();
+    }
+    if (length < SNIFF_BYTES) throw new UserError(UNSUPPORTED_IMAGE);
+    return concat(chunks, length);
+  } catch (err) {
+    if (err instanceof UserError) throw err;
+    console.warn(`downloading ${url} failed:`, err);
+    throw new UserError(
+      signal.aborted ? "Downloading the image timed out." : "Couldn't download the image.",
+    );
   }
-  const declared = Number(response.headers.get("content-length"));
-  if (declared > maxBytes) throw tooLarge();
+}
 
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes.length > maxBytes) throw tooLarge();
+function concat(chunks: readonly Uint8Array[], length: number): Uint8Array {
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
   return bytes;
 }
 

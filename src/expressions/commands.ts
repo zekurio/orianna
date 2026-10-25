@@ -24,7 +24,7 @@ export function proposalCommands(
 
   const proposeEmoji = defineCommand({
     name: "propose",
-    description: "Propose a new emoji; attach the image to your message.",
+    description: "Propose a new emoji; attach the image or paste a direct link to it.",
     options: [
       { name: "name", description: "Emoji name", type: "string" },
       { name: "image", description: "The emoji image", type: "attachment" },
@@ -41,7 +41,7 @@ export function proposalCommands(
 
   const proposeSticker = defineCommand({
     name: "propose",
-    description: "Propose a new sticker; attach the image to your message.",
+    description: "Propose a new sticker; attach the image or paste a direct link to it.",
     options: [
       { name: "name", description: "Sticker name; may contain spaces", type: "string", rest: true },
       { name: "image", description: "The sticker image", type: "attachment" },

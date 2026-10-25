@@ -24,11 +24,15 @@ export interface OptionSpec {
   named?: boolean;
 }
 
+/**
+ * A file for an attachment option. Prefix commands also accept a link in its
+ * place; nothing is known about a linked file until it's downloaded.
+ */
 export interface Attachment {
   url: string;
   filename: string;
   contentType: string | null;
-  size: number;
+  size: number | null;
 }
 
 interface OptionValues {
@@ -114,13 +118,13 @@ export function defineCommand<const O extends readonly OptionSpec[] = []>(
   return command;
 }
 
-/** e.g. `<name> <image: attachment> [reason...] [--tags tags]` */
+/** e.g. `<name> <image: attachment or link> [reason...] [--tags tags]` */
 export function formatUsage(options: readonly OptionSpec[] = []): string {
   return options
     .map((o) => {
       const label =
         o.type === "attachment"
-          ? `${o.name}: attachment`
+          ? `${o.name}: attachment or link`
           : o.named
             ? `--${o.name} ${o.name}`
             : o.rest

@@ -15,8 +15,9 @@ export function nextWord(input: string): { word: string; rest: string } | null {
 /**
  * Parses prefix-command input against option specs. Named options are taken
  * out first (`--name value`, see {@link OptionSpec.named}); the remaining words
- * fill string and integer options in order, and attachment options take the
- * message's attachments in order.
+ * fill string and integer options in order. Attachment options take the
+ * message's attachments in order, then links from the input once those run
+ * out, so a file can be linked instead of attached.
  */
 export function parseOptions(
   specs: readonly OptionSpec[],
@@ -25,8 +26,12 @@ export function parseOptions(
 ): Record<string, OptionValue> {
   const options: Record<string, OptionValue> = {};
   const { positional, named } = splitNamed(specs, input);
-  let remaining = positional;
+  const { text, links } = specs.some((s) => s.type === "attachment")
+    ? splitLinks(positional)
+    : { text: positional, links: [] };
+  let remaining = text;
   let nextAttachment = 0;
+  let nextLink = 0;
 
   const missing = (spec: OptionSpec) => {
     if (spec.required !== false) throw new ArgumentError(`missing ${spec.name}`);
@@ -41,8 +46,8 @@ export function parseOptions(
     }
 
     if (spec.type === "attachment") {
-      const attachment = attachments[nextAttachment++];
-      if (attachment) options[spec.name] = attachment;
+      const file = attachments[nextAttachment++] ?? links[nextLink++];
+      if (file) options[spec.name] = file;
       else missing(spec);
       continue;
     }
@@ -64,9 +69,28 @@ export function parseOptions(
     options[spec.name] = convert(spec, next.word);
   }
 
-  const extra = nextWord(remaining);
-  if (extra) throw new ArgumentError(`unexpected argument: ${extra.word}`);
+  const extra = nextWord(remaining)?.word ?? links[nextLink]?.url;
+  if (extra) throw new ArgumentError(`unexpected argument: ${extra}`);
   return options;
+}
+
+/** A whole word that is an http(s) link, optionally in `<...>` to suppress the embed. */
+const LINK = /(^|\s)<?(https?:\/\/[^\s<>]+)>?(?=\s|$)/gi;
+
+/**
+ * Takes links out of the input, leaving the other words in place. Only http(s)
+ * is recognised, so nothing like `file://` ever reaches `fetch`.
+ */
+function splitLinks(input: string): { text: string; links: Attachment[] } {
+  const links: Attachment[] = [];
+  const text = input.replace(LINK, (word, space: string, url: string) => {
+    if (!URL.canParse(url)) return word;
+    const { pathname, hostname } = new URL(url);
+    const filename = pathname.split("/").at(-1) || hostname;
+    links.push({ url, filename, contentType: null, size: null });
+    return space;
+  });
+  return { text, links };
 }
 
 function convert(spec: OptionSpec, text: string): OptionValue {
