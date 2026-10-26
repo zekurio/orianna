@@ -1,6 +1,8 @@
 import { and, asc, eq, isNull, lte, sql } from "drizzle-orm";
 import type { DB } from "../db/index.ts";
 import { type PollOption, polls, votes } from "../db/schema.ts";
+import { emojiKey, type ReactionEmoji, reactionKey } from "../emoji.ts";
+import type { ReactionListener } from "../reactions.ts";
 import type { PollFile, PollTransport } from "./transport.ts";
 import { normalizeSlug, pickSlug, randomSlug } from "./slug.ts";
 
@@ -38,12 +40,6 @@ export interface CreatePollInput {
   files?: PollFile[];
 }
 
-/** An emoji as reported by a reaction event. */
-export interface ReactionEmoji {
-  id?: string | null;
-  name: string | null;
-}
-
 export interface PollServiceOptions {
   now?: () => number;
   /** Delay before retrying handlers that threw. */
@@ -54,7 +50,7 @@ export interface PollServiceOptions {
 
 const MAX_TIMEOUT = 2 ** 31 - 1;
 
-export class PollService {
+export class PollService implements ReactionListener {
   private readonly handlers = new Map<string, PollHandler>();
   private readonly resolving = new Set<number>();
   private readonly now: () => number;
@@ -436,15 +432,11 @@ export class PollService {
   }
 }
 
-/** Matches a reaction to an option. Variation selectors are ignored. */
+/** Matches a reaction to an option. Custom emoji match by ID. */
 export function findOption(poll: Poll, emoji: ReactionEmoji): PollOption | undefined {
-  if (!emoji.name) return undefined;
-  const reacted = normalizeEmoji(emoji.id ? `${emoji.name}:${emoji.id}` : emoji.name);
-  return poll.options.find((o) => normalizeEmoji(o.emoji) === reacted);
-}
-
-function normalizeEmoji(emoji: string): string {
-  return emoji.replaceAll("️", "");
+  const reacted = reactionKey(emoji);
+  if (!reacted) return undefined;
+  return poll.options.find((o) => emojiKey(o.emoji) === reacted);
 }
 
 export function timestamp(date: Date, style: "R" | "f" = "R"): string {

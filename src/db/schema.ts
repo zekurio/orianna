@@ -96,3 +96,36 @@ export const proposals = sqliteTable(
   },
   (t) => [index("proposals_type_status_idx").on(t.type, t.status)],
 );
+
+export const roleMenus = sqliteTable(
+  "role_menus",
+  {
+    /** The menu's `name` in the config. */
+    name: text().primaryKey(),
+    channelId: text().notNull(),
+    messageId: text().notNull(),
+    /** JSON of the body last posted, so an unchanged menu isn't edited. */
+    rendered: text().notNull(),
+  },
+  (t) => [uniqueIndex("role_menus_message_id_idx").on(t.messageId)],
+);
+
+/**
+ * Reactions the bot gave a role for. Comparing these with the reactions on the
+ * message shows what changed while the bot was offline, without handing back
+ * roles that were taken away some other way.
+ */
+export const roleMenuReactions = sqliteTable(
+  "role_menu_reactions",
+  {
+    menu: text()
+      .notNull()
+      .references(() => roleMenus.name, { onDelete: "cascade" }),
+    roleId: text().notNull(),
+    userId: text().notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.menu, t.roleId, t.userId] }),
+    index("role_menu_reactions_user_id_idx").on(t.userId),
+  ],
+);

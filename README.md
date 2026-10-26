@@ -2,7 +2,8 @@
 
 A bot for a self-hosted [Fluxer](https://fluxer.app) instance. Members propose
 an emoji or sticker, the server votes on it with reactions, and the bot adds it
-if the vote passes.
+if the vote passes. Role menus let members pick roles, like announcement pings,
+by reacting to a message the bot keeps in sync with the config.
 
 Config keys are documented in [`src/config.ts`](src/config.ts) and NixOS module
 options in [`nix/module.nix`](nix/module.nix).

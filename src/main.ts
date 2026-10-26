@@ -9,8 +9,11 @@ import { proposalCommands } from "./expressions/commands.ts";
 import { FluxerExpressionGuild } from "./expressions/fluxer.ts";
 import { EMOJI, ExpressionProposals, STICKER } from "./expressions/proposals.ts";
 import { FluxerGuildAccess } from "./permissions.ts";
-import { attachPollEvents, FluxerPollTransport } from "./polls/fluxer.ts";
+import { FluxerPollTransport } from "./polls/fluxer.ts";
 import { PollService } from "./polls/service.ts";
+import { attachReactions } from "./reactions.ts";
+import { attachRoleMenuEvents, FluxerRoleGuild } from "./roles/fluxer.ts";
+import { RoleMenus } from "./roles/menus.ts";
 
 async function main() {
   const config = await loadConfig();
@@ -43,6 +46,8 @@ async function main() {
 
   const router = new CommandRouter(commands);
   const bot: Bot = { client, config, db, router, access, polls };
+  // Built even without a `roleMenus` section, so removing it takes the menus down.
+  const roleMenus = new RoleMenus(db, new FluxerRoleGuild(client, config.guildId), config.roleMenus);
 
   client.on(Events.Ready, () => {
     console.info(`logged in as ${client.user?.username} on ${config.instance}`);
@@ -51,11 +56,13 @@ async function main() {
       .reconcile()
       .catch((err) => console.error("poll reconcile failed:", err))
       .finally(() => polls.start());
+    void roleMenus.sync();
   });
   client.on(Events.MessageCreate, (message) => {
     void router.handleMessage(bot, message);
   });
-  attachPollEvents(client, polls);
+  attachReactions(client, polls, "poll");
+  attachRoleMenuEvents(client, roleMenus, config.guildId);
 
   const shutdown = async (signal: string) => {
     console.info(`received ${signal}, shutting down`);

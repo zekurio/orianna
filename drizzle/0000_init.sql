@@ -38,6 +38,23 @@ CREATE TABLE `proposals` (
 );
 --> statement-breakpoint
 CREATE INDEX `proposals_type_status_idx` ON `proposals` (`type`,`status`);--> statement-breakpoint
+CREATE TABLE `role_menu_reactions` (
+	`menu` text NOT NULL,
+	`role_id` text NOT NULL,
+	`user_id` text NOT NULL,
+	PRIMARY KEY(`menu`, `role_id`, `user_id`),
+	FOREIGN KEY (`menu`) REFERENCES `role_menus`(`name`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE INDEX `role_menu_reactions_user_id_idx` ON `role_menu_reactions` (`user_id`);--> statement-breakpoint
+CREATE TABLE `role_menus` (
+	`name` text PRIMARY KEY NOT NULL,
+	`channel_id` text NOT NULL,
+	`message_id` text NOT NULL,
+	`rendered` text NOT NULL
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `role_menus_message_id_idx` ON `role_menus` (`message_id`);--> statement-breakpoint
 CREATE TABLE `votes` (
 	`poll_id` integer NOT NULL,
 	`user_id` text NOT NULL,
