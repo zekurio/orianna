@@ -1,4 +1,5 @@
 import type { Bot } from "../bot.ts";
+import type { MessageBody } from "../messages/body.ts";
 
 // Commands are written against this module only. The prefix adapter in
 // router.ts turns a chat message into a CommandContext; slash commands will get
@@ -59,7 +60,7 @@ export class UserError extends Error {
 }
 
 export interface SentReply {
-  edit(content: string): Promise<void>;
+  edit(body: MessageBody): Promise<void>;
 }
 
 export interface CommandContext<O = {}> {
@@ -68,13 +69,16 @@ export interface CommandContext<O = {}> {
   guildId: string;
   channelId: string;
   options: O;
-  /** Answers the invoking user. */
-  reply(content: string): Promise<SentReply>;
+  /**
+   * Answers the invoking user. Mentions in the reply show but don't notify
+   * anyone; only the invoking user is pinged, by the reply itself.
+   */
+  reply(body: MessageBody): Promise<SentReply>;
   /**
    * Answers with pages the invoking user can flip through. A single page is
    * sent as a plain reply.
    */
-  replyPages(pages: readonly string[]): Promise<void>;
+  replyPages(pages: readonly MessageBody[]): Promise<void>;
   /**
    * Answers the invoking user with an error, formatted the same way everywhere.
    * Use `return ctx.error(...)` to stop a command; deeper code can throw
