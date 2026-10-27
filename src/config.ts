@@ -21,6 +21,17 @@ const ProposalConfigSchema = Type.Object(
   { additionalProperties: false },
 );
 
+const PollsConfigSchema = Type.Object(
+  {
+    /** How long a poll runs when it's given no duration. Polls run 4 weeks at most. */
+    defaultHours: Type.Number({ exclusiveMinimum: 0, maximum: 672, default: 24 }),
+    maxOpenPerUser: Type.Integer({ minimum: 1, default: 5 }),
+    /** Roles allowed to start polls. Empty means everyone. */
+    creatorRoleIds: Snowflakes,
+  },
+  { additionalProperties: false },
+);
+
 const RoleMenuOptionSchema = Type.Object(
   {
     /** A Unicode emoji, `name:id` or `<:name:id>` (`<a:name:id>` for an animated one). */
@@ -66,7 +77,7 @@ export const ConfigSchema = Type.Object(
     instance: Type.String({ minLength: 1 }),
     /** The guild this bot serves. Messages from anywhere else are ignored. */
     guildId: Snowflake,
-    /** Channel where polls are posted and voted on. */
+    /** Channel where emoji and sticker proposals are put to a vote. */
     pollsChannelId: Snowflake,
     prefix: Type.String({ minLength: 1, default: "!" }),
     /** SQLite file. Relative paths resolve against the working directory. */
@@ -81,6 +92,14 @@ export const ConfigSchema = Type.Object(
     /** Sticker proposals are disabled when this section is missing. */
     sticker: Type.Optional(ProposalConfigSchema),
     /**
+     * Polls members start with `!poll`, posted in the channel the command is
+     * used in. Disabled when this section is missing. The bot needs Send
+     * Messages, Embed Links and Add Reactions there, and Manage Messages to
+     * delete the `!poll` message, move votes in single-choice polls, and take
+     * back 🛑 from members who may not end a poll.
+     */
+    polls: Type.Optional(PollsConfigSchema),
+    /**
      * Messages where members react to give themselves roles. The bot posts and
      * updates them on startup. It needs Manage Roles, with its own role above
      * every menu role, and Send Messages, Embed Links, Add Reactions and Manage
@@ -94,6 +113,7 @@ export const ConfigSchema = Type.Object(
 
 export type Config = Type.Static<typeof ConfigSchema>;
 export type ProposalConfig = Type.Static<typeof ProposalConfigSchema>;
+export type PollsConfig = Type.Static<typeof PollsConfigSchema>;
 export type RoleMenusConfig = Type.Static<typeof RoleMenusSchema>;
 export type RoleMenuConfig = Type.Static<typeof RoleMenuSchema>;
 

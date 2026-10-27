@@ -1,8 +1,11 @@
+import type { MessageBody } from "../messages/body.ts";
+
 /** What the poll service needs from the chat platform. */
 export interface PollTransport {
   /** Posts a message and returns its id. */
-  post(channelId: string, content: string, files?: PollFile[]): Promise<string>;
-  edit(channelId: string, messageId: string, content: string): Promise<void>;
+  post(channelId: string, body: MessageBody, options?: PostOptions): Promise<string>;
+  /** Mentions in the new body don't notify anyone. */
+  edit(channelId: string, messageId: string, body: MessageBody): Promise<void>;
   react(channelId: string, messageId: string, emoji: string): Promise<void>;
   removeReaction(
     channelId: string,
@@ -12,6 +15,12 @@ export interface PollTransport {
   ): Promise<void>;
   /** Every non-bot user who reacted with `emoji`. */
   reactionUsers(channelId: string, messageId: string, emoji: string): Promise<string[]>;
+}
+
+export interface PostOptions {
+  files?: PollFile[];
+  /** Let mentions in the message notify people. Off unless asked for. */
+  mentions?: boolean;
 }
 
 export interface PollFile {

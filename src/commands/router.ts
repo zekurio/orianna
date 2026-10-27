@@ -134,6 +134,9 @@ function messageContext(bot: Bot, message: Message): BaseContext {
     async error(text) {
       await reply(formatError(text));
     },
+    async deleteInvocation() {
+      await message.delete().catch(() => {});
+    },
   };
 }
 

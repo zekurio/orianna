@@ -2,6 +2,7 @@ import { and, asc, eq, isNull, lte, sql } from "drizzle-orm";
 import type { DB } from "../db/index.ts";
 import { type PollOption, polls, votes } from "../db/schema.ts";
 import { emojiKey, type ReactionEmoji, reactionKey } from "../emoji.ts";
+import type { MessageBody } from "../messages/body.ts";
 import type { ReactionListener } from "../reactions.ts";
 import type { PollFile, PollTransport } from "./transport.ts";
 import { normalizeSlug, pickSlug, randomSlug } from "./slug.ts";
@@ -25,6 +26,17 @@ export interface PollHandler {
    * poll right away instead of waiting for its deadline.
    */
   isDecided?(poll: Poll, tally: Tally): boolean;
+  /**
+   * Renders the poll message. Polls of a kind with a renderer are also
+   * re-rendered shortly after their votes change, so they can show live
+   * results. Without one, {@link renderPoll} shows the counts once it closes.
+   */
+  render?(poll: Poll, tally: Tally): MessageBody;
+  /**
+   * Called when someone reacts to an open poll of this kind with an emoji that
+   * isn't one of its options.
+   */
+  onOtherReaction?(poll: Poll, userId: string, emoji: ReactionEmoji): Promise<void>;
 }
 
 export interface CreatePollInput {
@@ -38,12 +50,19 @@ export interface CreatePollInput {
   closesAt: Date;
   createdBy: string;
   files?: PollFile[];
+  /**
+   * Let mentions in the poll message notify people, e.g. an `@here` in the
+   * description. Off by default, since questions often come from users.
+   */
+  mentions?: boolean;
 }
 
 export interface PollServiceOptions {
   now?: () => number;
   /** Delay before retrying handlers that threw. */
   retryMs?: number;
+  /** How long votes are gathered before a live poll message is edited. */
+  refreshMs?: number;
   /** Generates candidate poll slugs. */
   slug?: () => string;
 }
@@ -53,8 +72,13 @@ const MAX_TIMEOUT = 2 ** 31 - 1;
 export class PollService implements ReactionListener {
   private readonly handlers = new Map<string, PollHandler>();
   private readonly resolving = new Set<number>();
+  /** Live polls waiting to be re-rendered, by poll id. */
+  private readonly refreshTimers = new Map<number, ReturnType<typeof setTimeout>>();
+  /** Live re-renders being sent, so closing can wait for them. */
+  private readonly refreshing = new Map<number, Promise<void>>();
   private readonly now: () => number;
   private readonly retryMs: number;
+  private readonly refreshMs: number;
   private readonly slug: () => string;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private running = false;
@@ -66,6 +90,7 @@ export class PollService implements ReactionListener {
   ) {
     this.now = options.now ?? Date.now;
     this.retryMs = options.retryMs ?? 60_000;
+    this.refreshMs = options.refreshMs ?? 2_000;
     this.slug = options.slug ?? randomSlug;
   }
 
@@ -80,6 +105,10 @@ export class PollService implements ReactionListener {
 
   bySlug(slug: string): Poll | undefined {
     return this.db.select().from(polls).where(eq(polls.slug, normalizeSlug(slug))).get();
+  }
+
+  byMessage(messageId: string): Poll | undefined {
+    return this.db.select().from(polls).where(eq(polls.messageId, messageId)).get();
   }
 
   /** Stores the poll, posts it, and seeds one reaction per option. */
@@ -110,11 +139,10 @@ export class PollService implements ReactionListener {
 
     let messageId: string;
     try {
-      messageId = await this.transport.post(
-        inserted.channelId,
-        renderPoll(inserted),
-        input.files,
-      );
+      messageId = await this.transport.post(inserted.channelId, this.body(inserted), {
+        files: input.files,
+        mentions: input.mentions,
+      });
     } catch (err) {
       this.db.delete(polls).where(eq(polls.id, inserted.id)).run();
       throw err;
@@ -194,11 +222,18 @@ export class PollService implements ReactionListener {
 
   async reactionAdded(messageId: string, userId: string, emoji: ReactionEmoji) {
     const poll = this.byMessage(messageId);
-    const option = poll && findOption(poll, emoji);
-    if (!poll || !option) return;
+    if (!poll) return;
+    const option = findOption(poll, emoji);
+    if (!option) {
+      if (poll.status === "open") {
+        await this.handlers.get(poll.kind)?.onOtherReaction?.(poll, userId, emoji);
+      }
+      return;
+    }
 
     const replaced = this.castVote(poll.id, userId, option.key);
     if (replaced === null) return;
+    this.refreshSoon(poll);
     for (const key of replaced) {
       const old = poll.options.find((o) => o.key === key);
       if (!old) continue;
@@ -212,7 +247,9 @@ export class PollService implements ReactionListener {
   reactionRemoved(messageId: string, userId: string, emoji: ReactionEmoji) {
     const poll = this.byMessage(messageId);
     const option = poll && findOption(poll, emoji);
-    if (poll && option) this.removeVote(poll.id, userId, option.key);
+    if (!poll || !option) return;
+    this.removeVote(poll.id, userId, option.key);
+    this.refreshSoon(poll);
   }
 
   /** All reactions, or all reactions of one emoji, were cleared by a moderator. */
@@ -227,6 +264,7 @@ export class PollService implements ReactionListener {
       conditions.push(eq(votes.optionKey, option.key));
     }
     this.db.delete(votes).where(and(...conditions)).run();
+    this.refreshSoon(poll);
   }
 
   /**
@@ -243,6 +281,7 @@ export class PollService implements ReactionListener {
         console.warn(`poll ${poll.id}: could not read reactions:`, err);
         continue;
       }
+      this.refreshSoon(poll);
       // Votes cast while offline may already have decided it.
       await this.closeIfDecided(poll);
     }
@@ -310,9 +349,10 @@ export class PollService implements ReactionListener {
       .get();
     if (!poll) return false;
 
+    await this.settleRefresh(poll.id);
     if (poll.messageId) {
       await this.transport
-        .edit(poll.channelId, poll.messageId, renderPoll(poll, this.tally(poll)))
+        .edit(poll.channelId, poll.messageId, this.body(poll, this.tally(poll)))
         .catch((err) => console.warn(`poll ${poll.id}: could not edit message:`, err));
     }
     await this.resolve(poll);
@@ -320,8 +360,11 @@ export class PollService implements ReactionListener {
     return true;
   }
 
-  /** Cancels an open poll without running its handler. */
-  async cancel(pollId: number): Promise<boolean> {
+  /**
+   * Cancels an open poll without running its handler. Pass `messageDeleted`
+   * when the poll message is gone, so it isn't edited.
+   */
+  async cancel(pollId: number, { messageDeleted = false } = {}): Promise<boolean> {
     const poll = this.db
       .update(polls)
       .set({ status: "cancelled" })
@@ -330,9 +373,10 @@ export class PollService implements ReactionListener {
       .get();
     if (!poll) return false;
 
-    if (poll.messageId) {
+    await this.settleRefresh(poll.id);
+    if (poll.messageId && !messageDeleted) {
       await this.transport
-        .edit(poll.channelId, poll.messageId, renderPoll(poll))
+        .edit(poll.channelId, poll.messageId, this.body(poll))
         .catch((err) => console.warn(`poll ${poll.id}: could not edit message:`, err));
     }
     this.schedule();
@@ -369,6 +413,8 @@ export class PollService implements ReactionListener {
   stop() {
     this.running = false;
     clearTimeout(this.timer);
+    for (const timer of this.refreshTimers.values()) clearTimeout(timer);
+    this.refreshTimers.clear();
   }
 
   private async runTick() {
@@ -423,8 +469,48 @@ export class PollService implements ReactionListener {
     }
   }
 
-  private byMessage(messageId: string): Poll | undefined {
-    return this.db.select().from(polls).where(eq(polls.messageId, messageId)).get();
+  /** The poll message, from the kind's renderer when it has one. */
+  private body(poll: Poll, tally?: Tally): MessageBody {
+    const handler = this.handlers.get(poll.kind);
+    if (handler?.render) return handler.render(poll, tally ?? this.tally(poll));
+    return renderPoll(poll, tally);
+  }
+
+  /**
+   * Re-renders a poll with live results once its votes have settled for a
+   * moment, so a burst of reactions costs one edit.
+   */
+  private refreshSoon(poll: Poll) {
+    if (poll.status !== "open" || !this.handlers.get(poll.kind)?.render) return;
+    if (this.refreshTimers.has(poll.id)) return;
+    const timer = setTimeout(() => {
+      this.refreshTimers.delete(poll.id);
+      this.refresh(poll.id);
+    }, this.refreshMs);
+    this.refreshTimers.set(poll.id, timer);
+  }
+
+  private refresh(pollId: number) {
+    // Chained, so an edit that's slow to land can't overwrite a newer one.
+    const previous = this.refreshing.get(pollId) ?? Promise.resolve();
+    const sent: Promise<void> = previous
+      .then(async () => {
+        const poll = this.get(pollId);
+        if (!poll?.messageId || poll.status !== "open") return;
+        await this.transport.edit(poll.channelId, poll.messageId, this.body(poll));
+      })
+      .catch((err) => console.warn(`poll ${pollId}: could not update results:`, err))
+      .finally(() => {
+        if (this.refreshing.get(pollId) === sent) this.refreshing.delete(pollId);
+      });
+    this.refreshing.set(pollId, sent);
+  }
+
+  /** Drops a pending re-render and waits for one in flight, so it can't land last. */
+  private async settleRefresh(pollId: number) {
+    clearTimeout(this.refreshTimers.get(pollId));
+    this.refreshTimers.delete(pollId);
+    await this.refreshing.get(pollId);
   }
 
   private acceptsVotes(poll: Poll): boolean {

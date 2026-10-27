@@ -17,6 +17,11 @@
     "maxImageBytes": 524288,
     "proposerRoleIds": []
   },
+  "polls": {
+    "defaultHours": 24,
+    "maxOpenPerUser": 5,
+    "creatorRoleIds": []
+  },
   "roleMenus": {
     "channelId": "000000000000000000",
     "menus": [

@@ -9,7 +9,9 @@ import { proposalCommands } from "./expressions/commands.ts";
 import { FluxerExpressionGuild } from "./expressions/fluxer.ts";
 import { EMOJI, ExpressionProposals, STICKER } from "./expressions/proposals.ts";
 import { FluxerGuildAccess } from "./permissions.ts";
-import { FluxerPollTransport } from "./polls/fluxer.ts";
+import { pollCommands } from "./polls/commands.ts";
+import { COMMUNITY_POLL, CommunityPolls } from "./polls/community.ts";
+import { attachPollMessageDeletes, FluxerPollTransport } from "./polls/fluxer.ts";
 import { PollService } from "./polls/service.ts";
 import { attachReactions } from "./reactions.ts";
 import { attachRoleMenuEvents, FluxerRoleGuild } from "./roles/fluxer.ts";
@@ -22,7 +24,8 @@ async function main() {
 
   const client = await Client.fromDiscovery(config.instance);
   const access = new FluxerGuildAccess(client, config.guildId, config.adminRoleIds);
-  const polls = new PollService(db, new FluxerPollTransport(client));
+  const pollTransport = new FluxerPollTransport(client, config.guildId);
+  const polls = new PollService(db, pollTransport);
 
   const commands: CommandEntry[] = [ping, help];
   const guild = new FluxerExpressionGuild(client, config.guildId);
@@ -43,6 +46,19 @@ async function main() {
     polls.register(kind.pollKind, proposals);
     commands.push(proposalCommands(proposals, section, config.pollsChannelId));
   }
+  let community: CommunityPolls | undefined;
+  if (config.polls) {
+    community = new CommunityPolls({
+      db,
+      polls,
+      chat: pollTransport,
+      access,
+      config: config.polls,
+      guildId: config.guildId,
+    });
+    polls.register(COMMUNITY_POLL, community);
+    commands.push(...pollCommands(community));
+  }
 
   const router = new CommandRouter(commands);
   const bot: Bot = { client, config, db, router, access, polls };
@@ -51,9 +67,10 @@ async function main() {
 
   client.on(Events.Ready, () => {
     console.info(`logged in as ${client.user?.username} on ${config.instance}`);
-    // Catch up on votes cast while offline before deadlines are processed.
+    // Catch up on votes and 🛑 reactions from while offline before deadlines are processed.
     void polls
       .reconcile()
+      .then(() => community?.reconcile())
       .catch((err) => console.error("poll reconcile failed:", err))
       .finally(() => polls.start());
     void roleMenus.sync();
@@ -62,6 +79,7 @@ async function main() {
     void router.handleMessage(bot, message);
   });
   attachReactions(client, polls, "poll");
+  if (community) attachPollMessageDeletes(client, community);
   attachRoleMenuEvents(client, roleMenus, config.guildId);
 
   const shutdown = async (signal: string) => {

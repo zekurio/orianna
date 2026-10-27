@@ -232,6 +232,8 @@ export class ExpressionProposals implements PollHandler {
       closesAt: new Date(this.now() + config.votingHours * 3_600_000),
       createdBy: proposerId,
       files: [{ name: `${name}.${type.ext}`, data: image }],
+      // Proposals ping @here, as they always have.
+      mentions: true,
     });
 
     db.insert(proposals)

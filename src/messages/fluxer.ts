@@ -9,6 +9,9 @@ import type { Embed, MessageBody } from "./body.ts";
 /** Nobody is notified. */
 export const NO_MENTIONS: AllowedMentionsOptions = { parse: [] };
 
+/** Every mention in the text notifies, `@everyone` and `@here` included. */
+export const ALL_MENTIONS: AllowedMentionsOptions = { parse: ["users", "roles", "everyone"] };
+
 /**
  * Only the author of the message being replied to is notified. Replies can
  * echo what the user typed, so a name like `@everyone` mustn't ping anyone.

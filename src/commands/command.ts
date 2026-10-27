@@ -85,6 +85,11 @@ export interface CommandContext<O = {}> {
    * `UserError` instead.
    */
   error(message: string): Promise<void>;
+  /**
+   * Deletes the message that ran the command, for commands whose result
+   * stands on its own. Does nothing when the bot isn't allowed to.
+   */
+  deleteInvocation(): Promise<void>;
 }
 
 /** How every adapter renders `ctx.error`. */
