@@ -1,3 +1,5 @@
+import Type from "typebox";
+import Value from "typebox/value";
 import { UserError } from "../commands/command.ts";
 import { downloadImage } from "./image.ts";
 
@@ -7,17 +9,21 @@ const API_TIMEOUT_MS = 15_000;
 const EMOTE_ID = /^(?:[0-9A-Za-z]{26}|[0-9a-f]{24})$/;
 const SITE_HOSTS = new Set(["7tv.app", "www.7tv.app", "old.7tv.app"]);
 
-interface SevenTvFile {
-  name: string;
-  format: string;
-  width: number;
-  size: number;
-}
-
-interface SevenTvEmote {
-  name: string;
-  host: { url: string; files: SevenTvFile[] };
-}
+/** The parts of `GET /v3/emotes/<id>` the bot uses; 7TV sends a lot more. */
+const SevenTvEmote = Type.Object({
+  name: Type.String(),
+  host: Type.Object({
+    url: Type.String(),
+    files: Type.Array(
+      Type.Object({
+        name: Type.String(),
+        format: Type.String(),
+        width: Type.Number(),
+        size: Type.Number(),
+      }),
+    ),
+  }),
+});
 
 /**
  * Picks the emote ID out of a 7TV link: an emote page
@@ -52,7 +58,11 @@ export async function fetchSevenTvEmote(
   }
   if (!response.ok) throw new UserError(`7TV answered with HTTP ${response.status}.`);
 
-  const emote = (await response.json()) as SevenTvEmote;
+  const emote: unknown = await response.json().catch(() => undefined);
+  if (!Value.Check(SevenTvEmote, emote)) {
+    console.warn(`7TV sent an unexpected answer for emote ${id}:`, emote);
+    throw new UserError("7TV sent an answer the bot doesn't understand; try again later.");
+  }
   // Fluxer refuses animated AVIF, and GIFs are many times the size of the WebP.
   const file = emote.host.files
     .filter((f) => f.format === "WEBP" && f.size <= maxBytes)

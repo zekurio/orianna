@@ -6,6 +6,7 @@ import { polls, proposalImages, proposals } from "../db/schema.ts";
 import type { GuildAccess } from "../permissions.ts";
 import type { Poll, PollHandler, PollService, Tally } from "../polls/service.ts";
 import { timestamp } from "../polls/service.ts";
+import { SOURCE_MAX_BYTES } from "./image.ts";
 import { cutImage, inspectImage, type ProcessedImage, pieceCount } from "./process.ts";
 
 export type Proposal = typeof proposals.$inferSelect;
@@ -247,6 +248,11 @@ export class ExpressionProposals implements PollHandler {
     private readonly deps: ExpressionProposalsDeps,
   ) {
     this.now = deps.now ?? Date.now;
+  }
+
+  /** Largest image worth downloading. */
+  get downloadLimit(): number {
+    return Math.max(SOURCE_MAX_BYTES, this.deps.config.maxImageBytes);
   }
 
   get(pollId: number): Proposal | undefined {

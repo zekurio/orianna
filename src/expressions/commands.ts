@@ -9,7 +9,7 @@ import {
 import { embedPages } from "../messages/body.ts";
 import { adminOnly, expressionManagersOnly } from "../permissions.ts";
 import { normalizeSlug } from "../polls/slug.ts";
-import { downloadImage, SOURCE_MAX_BYTES } from "./image.ts";
+import { downloadImage } from "./image.ts";
 import { type ExpressionInput, type ExpressionProposals, parseTags } from "./proposals.ts";
 import { fetchSevenTvEmote, sevenTvEmoteId } from "./seventv.ts";
 
@@ -70,8 +70,8 @@ export function proposalCommands(
 
     const emote = sevenTvEmoteId(options.image.url);
     const source = emote
-      ? await fetchSevenTvEmote(emote, SOURCE_MAX_BYTES)
-      : { name: undefined, image: await downloadImage(options.image.url, SOURCE_MAX_BYTES) };
+      ? await fetchSevenTvEmote(emote, proposals.downloadLimit)
+      : { name: undefined, image: await downloadImage(options.image.url, proposals.downloadLimit) };
 
     const name = options.name ?? (source.name !== undefined ? kind.fitName(source.name) : undefined);
     if (name === undefined) {

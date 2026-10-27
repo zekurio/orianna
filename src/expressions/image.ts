@@ -13,8 +13,9 @@ const SNIFF_BYTES = 12;
 const DOWNLOAD_TIMEOUT_MS = 15_000;
 
 /**
- * Largest image the bot downloads. Images over the configured limit are
- * scaled down until they fit, so this is well above it.
+ * Largest image the bot downloads, unless the configured limit is higher.
+ * Images over that limit are scaled down until they fit, so this is well
+ * above the default.
  */
 export const SOURCE_MAX_BYTES = 8 * 1024 * 1024;
 
