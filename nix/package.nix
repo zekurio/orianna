@@ -2,6 +2,7 @@
   lib,
   stdenvNoCC,
   bun,
+  imagemagick,
   makeWrapper,
 }:
 
@@ -69,10 +70,12 @@ stdenvNoCC.mkDerivation {
     ln -s ${nodeModules} $out/lib/orianna/node_modules
 
     # Bun runs the TypeScript directly. Its transpiler cache would try to write
-    # under $HOME, which a DynamicUser service doesn't have.
+    # under $HOME, which a DynamicUser service doesn't have. Emoji and sticker
+    # images are processed with ImageMagick's `magick`.
     makeWrapper ${lib.getExe bun} $out/bin/orianna \
       --add-flags "$out/lib/orianna/src/main.ts" \
-      --set-default BUN_RUNTIME_TRANSPILER_CACHE_PATH 0
+      --set-default BUN_RUNTIME_TRANSPILER_CACHE_PATH 0 \
+      --prefix PATH : ${lib.makeBinPath [ imagemagick ]}
     runHook postInstall
   '';
 

@@ -1,14 +1,15 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, count, eq } from "drizzle-orm";
 import { UserError } from "../commands/command.ts";
 import type { ProposalConfig } from "../config.ts";
 import type { DB } from "../db/index.ts";
-import { polls, proposals } from "../db/schema.ts";
+import { polls, proposalImages, proposals } from "../db/schema.ts";
 import type { GuildAccess } from "../permissions.ts";
 import type { Poll, PollHandler, PollService, Tally } from "../polls/service.ts";
 import { timestamp } from "../polls/service.ts";
-import { formatKiB, sniffImage, UNSUPPORTED_IMAGE } from "./image.ts";
+import { cutImage, inspectImage, type ProcessedImage, pieceCount } from "./process.ts";
 
 export type Proposal = typeof proposals.$inferSelect;
+export type ProposalImage = typeof proposalImages.$inferSelect;
 export type ExpressionType = Proposal["type"];
 
 export interface Expression {
@@ -22,13 +23,21 @@ export interface NewExpression {
   image: string;
   description: string | null;
   tags: string[];
+  /** For the audit log, which shows the bot as the one who added it. */
+  reason: string;
+}
+
+export interface CreatedExpression {
+  id: string;
+  /** How a message shows it, for emojis. */
+  mention?: string;
 }
 
 /** What expression proposals need from the guild. */
 export interface ExpressionGuild {
   list(type: ExpressionType): Promise<Expression[]>;
   /** Throws ExpressionRejected when Fluxer refuses it for good. */
-  create(type: ExpressionType, expression: NewExpression): Promise<string>;
+  create(type: ExpressionType, expression: NewExpression): Promise<CreatedExpression>;
   send(channelId: string, content: string, replyTo?: string): Promise<void>;
   /** IDs of the non-bot members who can see the channel. */
   voters(channelId: string): Promise<string[]>;
@@ -50,9 +59,24 @@ export interface ExpressionKind {
   plural: string;
   /** Throws UserError when Fluxer would refuse the name. */
   checkName(name: string): void;
+  /**
+   * Turns a name from elsewhere, like a 7TV emote's, into one Fluxer takes.
+   * Undefined when too little of it is left.
+   */
+  fitName(name: string): string | undefined;
+  /** How the name is written in messages, e.g. `` `:sadi:` ``. */
+  code(name: string): string;
   /** How the name is shown in messages, e.g. "emoji `:sadi:`". */
   display(name: string): string;
+  /** Most pieces a wide or tall image is cut into. */
+  maxPieces: number;
+  /** Longest side, in pixels, of an image the bot had to process. */
+  size: number;
+  /** Names for an image cut into `count` pieces; just the name for one. */
+  pieceNames(name: string, count: number): string[];
 }
+
+const EMOJI_NAME_MAX = 32;
 
 export const EMOJI: ExpressionKind = {
   type: "emoji",
@@ -66,10 +90,23 @@ export const EMOJI: ExpressionKind = {
       );
     }
   },
+  fitName(name) {
+    const fitted = name
+      .replace(/[^A-Za-z0-9_]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, EMOJI_NAME_MAX);
+    return fitted.length >= 2 ? fitted : undefined;
+  },
+  code: (name) => `\`:${name}:\``,
   display: (name) => `emoji \`:${name}:\``,
+  maxPieces: 5,
+  // What Fluxer's own client scales static emojis to.
+  size: 128,
+  pieceNames: (name, count) => numbered(name, count, "_", EMOJI_NAME_MAX),
 };
 
 // Limits from Fluxer's GuildStickerCreateRequest schema.
+const STICKER_NAME_MAX = 30;
 const STICKER_DESCRIPTION_MAX = 500;
 const STICKER_TAGS_MAX = 10;
 const STICKER_TAG_LENGTH_MAX = 30;
@@ -80,12 +117,31 @@ export const STICKER: ExpressionKind = {
   noun: "sticker",
   plural: "stickers",
   checkName(name) {
-    if (name.length < 2 || name.length > 30) {
-      throw new UserError("Sticker names must be 2 to 30 characters long.");
+    if (name.length < 2 || name.length > STICKER_NAME_MAX) {
+      throw new UserError(`Sticker names must be 2 to ${STICKER_NAME_MAX} characters long.`);
     }
   },
+  fitName(name) {
+    const fitted = name.trim().slice(0, STICKER_NAME_MAX).trimEnd();
+    return fitted.length >= 2 ? fitted : undefined;
+  },
+  code: (name) => `\`${name}\``,
   display: (name) => `sticker \`${name}\``,
+  // A message carries at most three stickers.
+  maxPieces: 3,
+  // What Fluxer's own client scales stickers to.
+  size: 320,
+  pieceNames: (name, count) => numbered(name, count, " ", STICKER_NAME_MAX),
 };
+
+/** `name_1`, `name_2`, ...: the name is cut short to leave room for the number. */
+function numbered(name: string, count: number, separator: string, max: number): string[] {
+  if (count === 1) return [name];
+  return Array.from({ length: count }, (_, i) => {
+    const suffix = `${separator}${i + 1}`;
+    return name.slice(0, max - suffix.length).trimEnd() + suffix;
+  });
+}
 
 /**
  * Splits `sad, cry,Sad` into `["sad", "cry"]`: trimmed, lowercased, empty
@@ -111,13 +167,21 @@ export function parseTags(input: string | undefined): string[] {
   return tags;
 }
 
-export interface ProposeInput {
+export interface ExpressionInput {
   name: string;
   image: Uint8Array;
   /** Stickers only. */
   description?: string;
   /** Stickers only. */
   tags?: string[];
+}
+
+/** Input that passed the checks, with its image ready for Fluxer. */
+interface Draft {
+  name: string;
+  description: string | null;
+  tags: string[];
+  pieces: (ProcessedImage & { name: string })[];
 }
 
 export interface ExpressionProposalsDeps {
@@ -151,6 +215,16 @@ export class ExpressionProposals implements PollHandler {
       .get();
   }
 
+  /** The images a proposal adds, in order. */
+  images(pollId: number): ProposalImage[] {
+    return this.deps.db
+      .select()
+      .from(proposalImages)
+      .where(eq(proposalImages.pollId, pollId))
+      .orderBy(asc(proposalImages.position))
+      .all();
+  }
+
   pending(): { proposal: Proposal; poll: Poll }[] {
     return this.deps.db
       .select({ proposal: proposals, poll: polls })
@@ -161,24 +235,17 @@ export class ExpressionProposals implements PollHandler {
       .all();
   }
 
-  async propose(proposerId: string, input: ProposeInput): Promise<Poll> {
+  /** Puts the expression up for a vote. Returns the poll and the names it would add. */
+  async propose(proposerId: string, input: ExpressionInput): Promise<{ poll: Poll; names: string[] }> {
     const { config, db, access, guild } = this.deps;
     const { kind } = this;
-    const { name, image } = input;
-    const description = input.description?.trim() || null;
-    const tags = input.tags ?? [];
 
-    kind.checkName(name);
-    if (description && description.length > STICKER_DESCRIPTION_MAX) {
-      throw new UserError(`Descriptions can be at most ${STICKER_DESCRIPTION_MAX} characters long.`);
-    }
     if (
       config.proposerRoleIds.length > 0 &&
       !(await access.hasAnyRole(proposerId, config.proposerRoleIds))
     ) {
       throw new UserError(`You don't have a role that can propose ${kind.plural}.`);
     }
-
     const open = this.pending().filter((p) => p.proposal.proposerId === proposerId);
     if (open.length >= config.maxOpenPerUser) {
       throw new UserError(
@@ -186,24 +253,8 @@ export class ExpressionProposals implements PollHandler {
       );
     }
 
-    const type = sniffImage(image);
-    if (!type) throw new UserError(UNSUPPORTED_IMAGE);
-    if (image.length > config.maxImageBytes) {
-      throw new UserError(
-        `The image is ${formatKiB(image.length)}; the limit is ${formatKiB(config.maxImageBytes)}.`,
-      );
-    }
-
-    const lower = name.toLowerCase();
-    if ((await guild.list(kind.type)).some((e) => e.name.toLowerCase() === lower)) {
-      throw new UserError(`The ${kind.display(name)} already exists.`);
-    }
-    const duplicate = this.pending().find((p) => p.proposal.name.toLowerCase() === lower);
-    if (duplicate) {
-      throw new UserError(
-        `The ${kind.display(name)} is already up for a vote in poll \`${duplicate.poll.slug}\`.`,
-      );
-    }
+    const { name, description, tags, pieces } = await this.draft(input);
+    const names = pieces.map((p) => p.name);
 
     // Everyone who can see the polls channel right now has to vote yes; people
     // who join later don't raise the bar for votes already running.
@@ -213,6 +264,7 @@ export class ExpressionProposals implements PollHandler {
     const details = [
       description && `> ${description}`,
       tags.length > 0 && `Tags: ${tags.map((t) => `\`${t}\``).join(", ")}`,
+      names.length > 1 && `Cut into ${names.length} ${kind.plural}: ${names.map(kind.code).join(" ")}`,
     ].filter(Boolean);
     const poll = await this.deps.polls.create({
       kind: kind.pollKind,
@@ -231,25 +283,56 @@ export class ExpressionProposals implements PollHandler {
       mode: "single",
       closesAt: new Date(this.now() + config.votingHours * 3_600_000),
       createdBy: proposerId,
-      files: [{ name: `${name}.${type.ext}`, data: image }],
+      files: pieces.map((p) => ({ name: `${p.name}.${p.type.ext}`, data: p.image })),
       // Proposals ping @here, as they always have.
       mentions: true,
     });
 
-    db.insert(proposals)
-      .values({
-        pollId: poll.id,
-        type: kind.type,
-        name,
-        description,
-        tags,
-        image: Buffer.from(image),
-        contentType: type.mime,
-        proposerId,
-        requiredYes,
-      })
-      .run();
-    return poll;
+    db.transaction((tx) => {
+      tx.insert(proposals)
+        .values({ pollId: poll.id, type: kind.type, name, description, tags, proposerId, requiredYes })
+        .run();
+      tx.insert(proposalImages)
+        .values(
+          pieces.map((p, position) => ({
+            pollId: poll.id,
+            position,
+            name: p.name,
+            image: Buffer.from(p.image),
+            contentType: p.type.mime,
+          })),
+        )
+        .run();
+    });
+    return { poll, names };
+  }
+
+  /** Adds the expression right away, without a vote. */
+  async add(userId: string, input: ExpressionInput): Promise<CreatedExpression[]> {
+    const { kind } = this;
+    const { description, tags, pieces } = await this.draft(input);
+
+    const created: CreatedExpression[] = [];
+    for (const piece of pieces) {
+      try {
+        created.push(
+          await this.deps.guild.create(kind.type, {
+            name: piece.name,
+            image: dataUrl(piece.type.mime, piece.image),
+            description,
+            tags,
+            reason: `Added without a vote by user ${userId}`,
+          }),
+        );
+      } catch (err) {
+        if (!(err instanceof ExpressionRejected)) throw err;
+        const added = pieces.slice(0, created.length).map((p) => kind.code(p.name));
+        const before =
+          added.length > 0 ? `${added.join(" ")} ${added.length === 1 ? "was" : "were"} added, but ` : "";
+        throw new UserError(`${before}Fluxer refused the ${kind.display(piece.name)}: ${err.message}`);
+      }
+    }
+    return created;
   }
 
   /** An admin approves or rejects before the vote ends. */
@@ -318,36 +401,109 @@ export class ExpressionProposals implements PollHandler {
       return;
     }
 
-    let expressionId: string;
-    try {
-      // A previous attempt may have created it before the bot went down.
-      const existing = (await this.deps.guild.list(this.kind.type)).find(
-        (e) => e.name === proposal.name,
-      );
-      expressionId =
-        existing?.id ??
-        (await this.deps.guild.create(this.kind.type, {
-          name: proposal.name,
-          image: `data:${proposal.contentType};base64,${proposal.image.toString("base64")}`,
-          description: proposal.description,
-          tags: proposal.tags,
-        }));
-    } catch (err) {
-      if (!(err instanceof ExpressionRejected)) throw err;
-      this.setStatus(poll.id, { status: "failed", error: err.message });
-      await this.announce(
-        poll,
-        `${mention} ${subject} was approved (${why}) but Fluxer refused it: ${err.message}`,
-      );
-      return;
+    const images = this.images(poll.id);
+    let existing: Expression[] | undefined;
+    for (const image of images) {
+      // Pieces added by an earlier attempt are skipped.
+      if (image.expressionId) continue;
+      try {
+        // A previous attempt may also have added it before the bot went down.
+        existing ??= await this.deps.guild.list(this.kind.type);
+        const expressionId =
+          existing.find((e) => e.name === image.name)?.id ??
+          (
+            await this.deps.guild.create(this.kind.type, {
+              name: image.name,
+              image: dataUrl(image.contentType, image.image),
+              description: proposal.description,
+              tags: proposal.tags,
+              reason: `Voted in with poll ${poll.slug}, proposed by user ${proposal.proposerId}`,
+            })
+          ).id;
+        this.deps.db
+          .update(proposalImages)
+          .set({ expressionId })
+          .where(
+            and(eq(proposalImages.pollId, poll.id), eq(proposalImages.position, image.position)),
+          )
+          .run();
+      } catch (err) {
+        if (!(err instanceof ExpressionRejected)) throw err;
+        this.setStatus(poll.id, { status: "failed", error: err.message });
+        const refused = images.length > 1 ? this.kind.code(image.name) : "it";
+        await this.announce(
+          poll,
+          `${mention} ${subject} was approved (${why}) but Fluxer refused ${refused}: ${err.message}`,
+        );
+        return;
+      }
     }
 
-    this.setStatus(poll.id, { status: "added", expressionId });
-    await this.announce(poll, `${mention} ${subject} has been added (${why}).`);
+    this.setStatus(poll.id, { status: "added" });
+    const as = images.length > 1 ? ` as ${images.map((i) => this.kind.code(i.name)).join(" ")}` : "";
+    await this.announce(poll, `${mention} ${subject} has been added${as} (${why}).`);
   }
 
   describe(proposal: Proposal, poll: Poll): string {
-    return `\`${poll.slug}\` ${this.kind.display(proposal.name)} by <@${proposal.proposerId}>, needs ${proposal.requiredYes} yes, closes ${timestamp(poll.closesAt)}`;
+    const pieces =
+      this.deps.db
+        .select({ n: count() })
+        .from(proposalImages)
+        .where(eq(proposalImages.pollId, poll.id))
+        .get()?.n ?? 1;
+    const cut = pieces > 1 ? ` in ${pieces} pieces` : "";
+    return `\`${poll.slug}\` ${this.kind.display(proposal.name)}${cut} by <@${proposal.proposerId}>, needs ${proposal.requiredYes} yes, closes ${timestamp(poll.closesAt)}`;
+  }
+
+  /** Checks the input and gets its image ready, cut into pieces if it's wide or tall. */
+  private async draft(input: ExpressionInput): Promise<Draft> {
+    const { kind } = this;
+    const description = input.description?.trim() || null;
+
+    kind.checkName(input.name);
+    if (description && description.length > STICKER_DESCRIPTION_MAX) {
+      throw new UserError(`Descriptions can be at most ${STICKER_DESCRIPTION_MAX} characters long.`);
+    }
+
+    const info = await inspectImage(input.image);
+    const names = kind.pieceNames(input.name, pieceCount(info, kind.maxPieces));
+    await this.checkNamesFree(names);
+    const images = await cutImage(input.image, info, {
+      count: names.length,
+      size: kind.size,
+      maxBytes: this.deps.config.maxImageBytes,
+    });
+    return {
+      name: input.name,
+      description,
+      tags: input.tags ?? [],
+      pieces: images.map((image, i) => ({ ...image, name: names[i]! })),
+    };
+  }
+
+  /** Throws when one of the names is taken or already up for a vote. */
+  private async checkNamesFree(names: string[]) {
+    const { kind } = this;
+    const wanted = new Set(names.map((n) => n.toLowerCase()));
+
+    const existing = (await this.deps.guild.list(kind.type)).find((e) =>
+      wanted.has(e.name.toLowerCase()),
+    );
+    if (existing) throw new UserError(`The ${kind.display(existing.name)} already exists.`);
+
+    const pending = this.deps.db
+      .select({ name: proposalImages.name, slug: polls.slug })
+      .from(proposalImages)
+      .innerJoin(proposals, eq(proposals.pollId, proposalImages.pollId))
+      .innerJoin(polls, eq(polls.id, proposalImages.pollId))
+      .where(and(eq(proposals.type, kind.type), eq(proposals.status, "pending")))
+      .all()
+      .find((p) => wanted.has(p.name.toLowerCase()));
+    if (pending) {
+      throw new UserError(
+        `The ${kind.display(pending.name)} is already up for a vote in poll \`${pending.slug}\`.`,
+      );
+    }
   }
 
   private requirePending(slug: string): { proposal: Proposal; poll: Poll } {
@@ -375,4 +531,8 @@ function passes(proposal: Proposal, tally: Tally): boolean {
   const yes = tally.counts.yes ?? 0;
   const no = tally.counts.no ?? 0;
   return yes >= proposal.requiredYes && yes > no;
+}
+
+function dataUrl(mime: string, image: Uint8Array): string {
+  return `data:${mime};base64,${Buffer.from(image).toString("base64")}`;
 }

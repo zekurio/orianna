@@ -44,7 +44,7 @@ async function main() {
       channelId: config.pollsChannelId,
     });
     polls.register(kind.pollKind, proposals);
-    commands.push(proposalCommands(proposals, section, config.pollsChannelId));
+    commands.push(proposalCommands(proposals, config.pollsChannelId));
   }
   let community: CommunityPolls | undefined;
   if (config.polls) {

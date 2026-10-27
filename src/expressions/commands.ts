@@ -1,10 +1,17 @@
-import { type CommandGroup, defineCommand } from "../commands/command.ts";
-import type { ProposalConfig } from "../config.ts";
+import {
+  type Attachment,
+  type Command,
+  type CommandContext,
+  type CommandGroup,
+  defineCommand,
+  UserError,
+} from "../commands/command.ts";
 import { embedPages } from "../messages/body.ts";
-import { adminOnly } from "../permissions.ts";
+import { adminOnly, expressionManagersOnly } from "../permissions.ts";
 import { normalizeSlug } from "../polls/slug.ts";
-import { downloadImage } from "./image.ts";
-import { type ExpressionProposals, parseTags } from "./proposals.ts";
+import { downloadImage, SOURCE_MAX_BYTES } from "./image.ts";
+import { type ExpressionInput, type ExpressionProposals, parseTags } from "./proposals.ts";
+import { fetchSevenTvEmote, sevenTvEmoteId } from "./seventv.ts";
 
 const id = { name: "id", description: "Poll name, e.g. green-panther", type: "string" } as const;
 const reason = {
@@ -15,53 +22,122 @@ const reason = {
   rest: true,
 } as const;
 
+const emojiOptions = [
+  {
+    name: "name",
+    description: "Emoji name; a 7TV emote brings its own",
+    type: "string",
+    required: false,
+  },
+  { name: "image", description: "The emoji image or a 7TV emote", type: "attachment" },
+] as const;
+
+const stickerOptions = [
+  {
+    name: "name",
+    description: "Sticker name, which may contain spaces; a 7TV emote brings its own",
+    type: "string",
+    required: false,
+    rest: true,
+  },
+  { name: "image", description: "The sticker image or a 7TV emote", type: "attachment" },
+  { name: "desc", description: "What the sticker shows", type: "string", required: false, named: true },
+  { name: "tags", description: "Comma-separated search tags", type: "string", required: false, named: true },
+] as const;
+
+/** What the propose and add commands take, for either kind. */
+interface InputOptions {
+  name?: string;
+  image: Attachment;
+  desc?: string;
+  tags?: string;
+}
+
 const LIST_PAGE_SIZE = 10;
 
 /** `!emoji ...` or `!sticker ...`, depending on the proposals' kind. */
 export function proposalCommands(
   proposals: ExpressionProposals,
-  config: ProposalConfig,
   pollsChannelId: string,
 ): CommandGroup {
   const { kind } = proposals;
+  const linkHelp = "attach the image, or paste a link to it or to a 7TV emote";
 
-  const proposeEmoji = defineCommand({
-    name: "propose",
-    description: "Propose a new emoji; attach the image or paste a direct link to it.",
-    options: [
-      { name: "name", description: "Emoji name", type: "string" },
-      { name: "image", description: "The emoji image", type: "attachment" },
-    ],
-    async run(ctx) {
-      kind.checkName(ctx.options.name);
-      const image = await downloadImage(ctx.options.image.url, config.maxImageBytes);
-      const poll = await proposals.propose(ctx.userId, { name: ctx.options.name, image });
-      await ctx.reply(
-        `Poll \`${poll.slug}\` for the ${kind.display(ctx.options.name)} is up for a vote in <#${poll.channelId}>.`,
-      );
-    },
-  });
+  /** Checks what's cheap first, then downloads the image. */
+  async function readInput(options: InputOptions): Promise<ExpressionInput> {
+    if (options.name !== undefined) kind.checkName(options.name);
+    const tags = parseTags(options.tags);
 
-  const proposeSticker = defineCommand({
-    name: "propose",
-    description: "Propose a new sticker; attach the image or paste a direct link to it.",
-    options: [
-      { name: "name", description: "Sticker name; may contain spaces", type: "string", rest: true },
-      { name: "image", description: "The sticker image", type: "attachment" },
-      { name: "desc", description: "What the sticker shows", type: "string", required: false, named: true },
-      { name: "tags", description: "Comma-separated search tags", type: "string", required: false, named: true },
-    ],
-    async run(ctx) {
-      const { name, desc } = ctx.options;
-      kind.checkName(name);
-      const tags = parseTags(ctx.options.tags);
-      const image = await downloadImage(ctx.options.image.url, config.maxImageBytes);
-      const poll = await proposals.propose(ctx.userId, { name, image, description: desc, tags });
-      await ctx.reply(
-        `Poll \`${poll.slug}\` for the ${kind.display(name)} is up for a vote in <#${poll.channelId}>.`,
+    const emote = sevenTvEmoteId(options.image.url);
+    const source = emote
+      ? await fetchSevenTvEmote(emote, SOURCE_MAX_BYTES)
+      : { name: undefined, image: await downloadImage(options.image.url, SOURCE_MAX_BYTES) };
+
+    const name = options.name ?? (source.name !== undefined ? kind.fitName(source.name) : undefined);
+    if (name === undefined) {
+      throw new UserError(
+        source.name === undefined
+          ? `Give the ${kind.noun} a name.`
+          : `\`${source.name}\` doesn't work as a ${kind.noun} name; give it one.`,
       );
-    },
-  });
+    }
+    return { name, image: source.image, description: options.desc, tags };
+  }
+
+  async function propose(ctx: CommandContext<InputOptions>) {
+    const input = await readInput(ctx.options);
+    const { poll, names } = await proposals.propose(ctx.userId, input);
+    const cut =
+      names.length > 1
+        ? ` The image was cut into ${names.length} ${kind.plural}: ${names.map(kind.code).join(" ")}.`
+        : "";
+    await ctx.reply(
+      `Poll \`${poll.slug}\` for the ${kind.display(input.name)} is up for a vote in <#${poll.channelId}>.${cut}`,
+    );
+  }
+
+  async function add(ctx: CommandContext<InputOptions>) {
+    const input = await readInput(ctx.options);
+    const created = await proposals.add(ctx.userId, input);
+    const mentions = created.map((c) => c.mention).filter(Boolean);
+    const cut = created.length > 1 ? ` as ${created.length} ${kind.plural}` : "";
+    // Without spaces, the pieces of a wide emoji line up.
+    const shown = mentions.length > 0 ? `: ${mentions.join("")}` : ".";
+    await ctx.reply(`Added the ${kind.display(input.name)}${cut}${shown}`);
+  }
+
+  const inputCommands: Command[] =
+    kind.type === "sticker"
+      ? [
+          defineCommand({
+            name: "propose",
+            description: `Propose a new sticker; ${linkHelp}.`,
+            options: stickerOptions,
+            run: propose,
+          }),
+          defineCommand({
+            name: "add",
+            description: "Add a sticker without a vote (Manage Expressions).",
+            options: stickerOptions,
+            guard: expressionManagersOnly,
+            run: add,
+          }),
+        ]
+      : [
+          defineCommand({
+            name: "propose",
+            description: `Propose a new emoji; ${linkHelp}.`,
+            options: emojiOptions,
+            run: propose,
+          }),
+          defineCommand({
+            name: "add",
+            description: "Add an emoji without a vote (Manage Expressions).",
+            options: emojiOptions,
+            guard: expressionManagersOnly,
+            run: add,
+          }),
+        ];
 
   const list = defineCommand({
     name: "list",
@@ -116,12 +192,6 @@ export function proposalCommands(
   return {
     name: kind.type,
     description: `${kind.noun[0]!.toUpperCase()}${kind.noun.slice(1)} proposals.`,
-    subcommands: [
-      kind.type === "sticker" ? proposeSticker : proposeEmoji,
-      list,
-      approve,
-      reject,
-      cancel,
-    ],
+    subcommands: [...inputCommands, list, approve, reject, cancel],
   };
 }

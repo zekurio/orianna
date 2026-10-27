@@ -44,14 +44,15 @@ export class FluxerExpressionGuild implements ExpressionGuild {
       .map((m) => m.id);
   }
 
-  async create(type: ExpressionType, { name, image, description, tags }: NewExpression) {
+  async create(type: ExpressionType, { name, image, description, tags, reason }: NewExpression) {
     const guild = await this.client.guilds.resolve(this.guildId);
     try {
-      const created =
-        type === "emoji"
-          ? await guild.createEmoji({ name, image })
-          : await guild.createSticker({ name, image, description, tags });
-      return created.id;
+      if (type === "emoji") {
+        const emoji = await guild.createEmoji({ name, image, reason });
+        return { id: emoji.id, mention: emoji.toString() };
+      }
+      const sticker = await guild.createSticker({ name, image, description, tags, reason });
+      return { id: sticker.id };
     } catch (err) {
       // fluxer.js HTTP errors carry `isRetryable` (429 and 5xx). Anything
       // else from the API is final; network errors have no flag and retry.

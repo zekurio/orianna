@@ -77,9 +77,6 @@ export const proposals = sqliteTable(
     description: text(),
     /** Stickers only. */
     tags: text({ mode: "json" }).$type<string[]>().notNull().default([]),
-    /** Kept so the expression can be created even if the original message is gone. */
-    image: blob({ mode: "buffer" }).notNull(),
-    contentType: text().notNull(),
     proposerId: text().notNull(),
     /** Non-bot members who could see the vote channel when the proposal was made. */
     requiredYes: integer().notNull().default(1),
@@ -90,11 +87,32 @@ export const proposals = sqliteTable(
     decision: text({ enum: ["approve", "reject"] }),
     decidedBy: text(),
     reason: text(),
-    /** The created emoji or sticker. */
-    expressionId: text(),
     error: text(),
   },
   (t) => [index("proposals_type_status_idx").on(t.type, t.status)],
+);
+
+/**
+ * What a proposal adds: one image, or the pieces of a wide or tall image, each
+ * of which becomes its own emoji or sticker.
+ */
+export const proposalImages = sqliteTable(
+  "proposal_images",
+  {
+    pollId: integer()
+      .notNull()
+      .references(() => proposals.pollId, { onDelete: "cascade" }),
+    /** Left to right, or top to bottom. */
+    position: integer().notNull(),
+    /** Of the emoji or sticker it becomes. */
+    name: text().notNull(),
+    /** Kept so the expression can be created even if the original message is gone. */
+    image: blob({ mode: "buffer" }).notNull(),
+    contentType: text().notNull(),
+    /** The created emoji or sticker. */
+    expressionId: text(),
+  },
+  (t) => [primaryKey({ columns: [t.pollId, t.position] })],
 );
 
 export const roleMenus = sqliteTable(
