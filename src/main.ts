@@ -7,6 +7,7 @@ import { ConfigError, loadConfig, readToken } from "./config.ts";
 import { openDatabase } from "./db/index.ts";
 import { proposalCommands } from "./expressions/commands.ts";
 import { FluxerExpressionGuild } from "./expressions/fluxer.ts";
+import { checkImageMagick } from "./expressions/process.ts";
 import { EMOJI, ExpressionProposals, STICKER } from "./expressions/proposals.ts";
 import { FluxerGuildAccess } from "./permissions.ts";
 import { pollCommands } from "./polls/commands.ts";
@@ -45,6 +46,14 @@ async function main() {
     });
     polls.register(kind.pollKind, proposals);
     commands.push(proposalCommands(proposals, config.pollsChannelId));
+  }
+  if (config.emoji || config.sticker) {
+    // Polls and role menus work without ImageMagick, so this only warns.
+    void checkImageMagick().then((problems) => {
+      for (const problem of problems) {
+        console.error(`emoji and sticker images won't work: ${problem}`);
+      }
+    });
   }
   let community: CommunityPolls | undefined;
   if (config.polls) {
