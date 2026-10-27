@@ -15,6 +15,8 @@ export type ExpressionType = Proposal["type"];
 export interface Expression {
   id: string;
   name: string;
+  /** Whether the bot added it. */
+  mine: boolean;
 }
 
 export interface NewExpression {
@@ -38,12 +40,17 @@ export interface ExpressionGuild {
   list(type: ExpressionType): Promise<Expression[]>;
   /** Throws ExpressionRejected when Fluxer refuses it for good. */
   create(type: ExpressionType, expression: NewExpression): Promise<CreatedExpression>;
+  /**
+   * Deletes an expression; one that is already gone counts as deleted.
+   * Throws ExpressionRejected when Fluxer refuses for good.
+   */
+  remove(type: ExpressionType, id: string, reason: string): Promise<void>;
   send(channelId: string, content: string, replyTo?: string): Promise<void>;
   /** IDs of the non-bot members who can see the channel. */
   voters(channelId: string): Promise<string[]>;
 }
 
-/** Fluxer refused the expression (bad image, slot limit, ...); retrying won't help. */
+/** Fluxer refused the request (bad image, slot limit, missing permission, ...); retrying won't help. */
 export class ExpressionRejected extends Error {
   override name = "ExpressionRejected";
 }
@@ -184,6 +191,37 @@ interface Draft {
   pieces: (ProcessedImage & { name: string })[];
 }
 
+/** One emoji or sticker being added, and how far it got. */
+interface Piece {
+  position: number;
+  name: string;
+  /** `data:` URL of the image. */
+  image: string;
+  /** Set once Fluxer has it, possibly by an earlier attempt. */
+  expressionId: string | null;
+}
+
+interface AddOptions {
+  description: string | null;
+  tags: string[];
+  /** For the audit log. */
+  reason: string;
+  /**
+   * Keep what was added when Fluxer can't be reached, for a later attempt to
+   * pick up. Without it, those errors roll back too.
+   */
+  resume: boolean;
+  /** Stores a piece's ID as soon as it is added or deleted. */
+  save?(piece: Piece, expressionId: string | null): void;
+}
+
+type AddOutcome =
+  | { status: "added"; created: CreatedExpression[] }
+  /** A piece couldn't be added; the ones before it were rolled back, except `kept`. */
+  | { status: "refused"; piece: string; problem: string; kept: string[] }
+  /** Only without `resume`: something else went wrong, and was rolled back except `kept`. */
+  | { status: "failed"; error: unknown; kept: string[] };
+
 export interface ExpressionProposalsDeps {
   db: DB;
   polls: PollService;
@@ -307,32 +345,38 @@ export class ExpressionProposals implements PollHandler {
     return { poll, names };
   }
 
-  /** Adds the expression right away, without a vote. */
+  /**
+   * Adds the expression right away, without a vote. The pieces of a cut image
+   * go in together or not at all.
+   */
   async add(userId: string, input: ExpressionInput): Promise<CreatedExpression[]> {
     const { kind } = this;
-    const { description, tags, pieces } = await this.draft(input);
+    const { name, description, tags, pieces } = await this.draft(input);
 
-    const created: CreatedExpression[] = [];
-    for (const piece of pieces) {
-      try {
-        created.push(
-          await this.deps.guild.create(kind.type, {
-            name: piece.name,
-            image: dataUrl(piece.type.mime, piece.image),
-            description,
-            tags,
-            reason: `Added without a vote by user ${userId}`,
-          }),
+    const outcome = await this.addPieces(
+      pieces.map((p, position) => ({
+        position,
+        name: p.name,
+        image: dataUrl(p.type.mime, p.image),
+        expressionId: null,
+      })),
+      { description, tags, reason: `Added without a vote by user ${userId}`, resume: false },
+    );
+    switch (outcome.status) {
+      case "added":
+        return outcome.created;
+      case "refused":
+        throw new UserError(
+          pieces.length === 1
+            ? `Couldn't add the ${kind.display(name)}: ${outcome.problem}.`
+            : `Couldn't add ${kind.code(outcome.piece)}: ${outcome.problem}. ` +
+                rolledBack(kind, pieces.length, outcome.kept),
         );
-      } catch (err) {
-        if (!(err instanceof ExpressionRejected)) throw err;
-        const added = pieces.slice(0, created.length).map((p) => kind.code(p.name));
-        const before =
-          added.length > 0 ? `${added.join(" ")} ${added.length === 1 ? "was" : "were"} added, but ` : "";
-        throw new UserError(`${before}Fluxer refused the ${kind.display(piece.name)}: ${err.message}`);
-      }
+      case "failed":
+        if (outcome.kept.length === 0) throw outcome.error;
+        console.error(`adding the ${kind.noun} ${name} failed:`, outcome.error);
+        throw new UserError(`Adding the ${kind.display(name)} failed. ${notRemoved(kind, outcome.kept)}`);
     }
-    return created;
   }
 
   /** An admin approves or rejects before the vote ends. */
@@ -402,41 +446,33 @@ export class ExpressionProposals implements PollHandler {
     }
 
     const images = this.images(poll.id);
-    let existing: Expression[] | undefined;
-    for (const image of images) {
-      // Pieces added by an earlier attempt are skipped.
-      if (image.expressionId) continue;
-      try {
-        // A previous attempt may also have added it before the bot went down.
-        existing ??= await this.deps.guild.list(this.kind.type);
-        const expressionId =
-          existing.find((e) => e.name === image.name)?.id ??
-          (
-            await this.deps.guild.create(this.kind.type, {
-              name: image.name,
-              image: dataUrl(image.contentType, image.image),
-              description: proposal.description,
-              tags: proposal.tags,
-              reason: `Voted in with poll ${poll.slug}, proposed by user ${proposal.proposerId}`,
-            })
-          ).id;
-        this.deps.db
-          .update(proposalImages)
-          .set({ expressionId })
-          .where(
-            and(eq(proposalImages.pollId, poll.id), eq(proposalImages.position, image.position)),
-          )
-          .run();
-      } catch (err) {
-        if (!(err instanceof ExpressionRejected)) throw err;
-        this.setStatus(poll.id, { status: "failed", error: err.message });
-        const refused = images.length > 1 ? this.kind.code(image.name) : "it";
-        await this.announce(
-          poll,
-          `${mention} ${subject} was approved (${why}) but Fluxer refused ${refused}: ${err.message}`,
-        );
-        return;
-      }
+    const outcome = await this.addPieces(
+      images.map((image) => ({
+        position: image.position,
+        name: image.name,
+        image: dataUrl(image.contentType, image.image),
+        expressionId: image.expressionId,
+      })),
+      {
+        description: proposal.description,
+        tags: proposal.tags,
+        reason: `Voted in with poll ${poll.slug}, proposed by user ${proposal.proposerId}`,
+        // Network trouble leaves the poll closed; the next attempt picks up here.
+        resume: true,
+        save: (piece, expressionId) => this.setExpressionId(poll.id, piece.position, expressionId),
+      },
+    );
+    if (outcome.status === "failed") throw outcome.error;
+    if (outcome.status === "refused") {
+      this.setStatus(poll.id, { status: "failed", error: outcome.problem });
+      await this.announce(
+        poll,
+        images.length === 1
+          ? `${mention} ${subject} was approved (${why}) but couldn't be added: ${outcome.problem}.`
+          : `${mention} ${subject} was approved (${why}) but ${this.kind.code(outcome.piece)} ` +
+              `couldn't be added: ${outcome.problem}. ${rolledBack(this.kind, images.length, outcome.kept)}`,
+      );
+      return;
     }
 
     this.setStatus(poll.id, { status: "added" });
@@ -515,6 +551,101 @@ export class ExpressionProposals implements PollHandler {
     return { proposal, poll };
   }
 
+  /**
+   * Adds the pieces that have no ID yet, in order, so that they go in together
+   * or not at all. When Fluxer refuses one, or someone else has since added an
+   * expression with its name, the pieces added so far are deleted again.
+   */
+  private async addPieces(pieces: Piece[], options: AddOptions): Promise<AddOutcome> {
+    const { guild } = this.deps;
+    const { kind } = this;
+    const created: CreatedExpression[] = [];
+    let current: Piece | undefined;
+    let refusal: { piece: string; problem: string } | undefined;
+
+    try {
+      const existing = await guild.list(kind.type);
+      for (const piece of pieces) {
+        if (piece.expressionId) continue;
+        current = piece;
+        const lower = piece.name.toLowerCase();
+        const same = existing.find((e) => e.name.toLowerCase() === lower);
+        // When resuming, the bot may have added it just before it went down,
+        // without saving the ID. Anyone else's is in the way.
+        if (same && !(options.resume && same.mine)) {
+          refusal = {
+            piece: piece.name,
+            problem: `another ${kind.noun} with that name was added in the meantime`,
+          };
+          break;
+        }
+        let id = same?.id;
+        if (!id) {
+          const added = await guild.create(kind.type, {
+            name: piece.name,
+            image: piece.image,
+            description: options.description,
+            tags: options.tags,
+            reason: options.reason,
+          });
+          created.push(added);
+          id = added.id;
+        }
+        this.setPieceId(piece, id, options);
+      }
+    } catch (err) {
+      if (!(err instanceof ExpressionRejected)) {
+        if (options.resume) throw err;
+        const kept = await this.removePieces(pieces, `Rolled back: adding ${current?.name} failed`, options);
+        return { status: "failed", error: err, kept };
+      }
+      refusal = { piece: current!.name, problem: `Fluxer refused it (${err.message})` };
+    }
+
+    if (!refusal) return { status: "added", created };
+    const kept = await this.removePieces(
+      pieces,
+      `Rolled back: ${refusal.piece} couldn't be added`,
+      options,
+    );
+    return { status: "refused", ...refusal, kept };
+  }
+
+  /**
+   * Deletes the pieces that have an ID and returns the names of those left
+   * in the guild. When resuming, errors other than a refusal are thrown
+   * instead; the next attempt runs into the same problem and finishes the job.
+   */
+  private async removePieces(pieces: Piece[], reason: string, options: AddOptions): Promise<string[]> {
+    const kept: string[] = [];
+    for (const piece of pieces) {
+      if (!piece.expressionId) continue;
+      try {
+        await this.deps.guild.remove(this.kind.type, piece.expressionId, reason);
+      } catch (err) {
+        if (options.resume && !(err instanceof ExpressionRejected)) throw err;
+        console.warn(`could not roll back the ${this.kind.display(piece.name)}:`, err);
+        kept.push(piece.name);
+        continue;
+      }
+      this.setPieceId(piece, null, options);
+    }
+    return kept;
+  }
+
+  private setPieceId(piece: Piece, expressionId: string | null, options: AddOptions) {
+    piece.expressionId = expressionId;
+    options.save?.(piece, expressionId);
+  }
+
+  private setExpressionId(pollId: number, position: number, expressionId: string | null) {
+    this.deps.db
+      .update(proposalImages)
+      .set({ expressionId })
+      .where(and(eq(proposalImages.pollId, pollId), eq(proposalImages.position, position)))
+      .run();
+  }
+
   private setStatus(pollId: number, values: Partial<Proposal>) {
     this.deps.db.update(proposals).set(values).where(eq(proposals.pollId, pollId)).run();
   }
@@ -531,6 +662,17 @@ function passes(proposal: Proposal, tally: Tally): boolean {
   const yes = tally.counts.yes ?? 0;
   const no = tally.counts.no ?? 0;
   return yes >= proposal.requiredYes && yes > no;
+}
+
+/** What a rollback of `count` pieces left behind, as a sentence. */
+function rolledBack(kind: ExpressionKind, count: number, kept: string[]): string {
+  return kept.length === 0 ? `None of the ${count} ${kind.plural} were added.` : notRemoved(kind, kept);
+}
+
+/** e.g. "`:sadi_1:` couldn't be removed again; it has to be deleted by hand." */
+function notRemoved(kind: ExpressionKind, names: string[]): string {
+  const subject = names.length === 1 ? "it has" : "they have";
+  return `${names.map(kind.code).join(" ")} couldn't be removed again; ${subject} to be deleted by hand.`;
 }
 
 function dataUrl(mime: string, image: Uint8Array): string {

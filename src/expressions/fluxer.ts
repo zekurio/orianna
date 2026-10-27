@@ -4,6 +4,7 @@ import {
   type GuildMember,
   OverwriteType,
   PermissionFlags,
+  Routes,
 } from "@fluxerjs/core";
 import {
   type ExpressionGuild,
@@ -19,9 +20,14 @@ export class FluxerExpressionGuild implements ExpressionGuild {
   ) {}
 
   async list(type: ExpressionType) {
-    const guild = await this.client.guilds.resolve(this.guildId);
-    const items = type === "emoji" ? await guild.fetchEmojis() : await guild.fetchStickers();
-    return items.map((e) => ({ id: e.id, name: e.name }));
+    // fetchEmojis() and fetchStickers() drop `user`, who added each one.
+    const route =
+      type === "emoji" ? Routes.guildEmojis(this.guildId) : Routes.guildStickers(this.guildId);
+    const items = await this.client.rest.get<{ id: string; name: string; user?: { id: string } }[]>(
+      route,
+    );
+    const botId = this.client.user?.id;
+    return items.map((e) => ({ id: e.id, name: e.name, mine: !!botId && e.user?.id === botId }));
   }
 
   async voters(channelId: string) {
@@ -54,12 +60,18 @@ export class FluxerExpressionGuild implements ExpressionGuild {
       const sticker = await guild.createSticker({ name, image, description, tags, reason });
       return { id: sticker.id };
     } catch (err) {
-      // fluxer.js HTTP errors carry `isRetryable` (429 and 5xx). Anything
-      // else from the API is final; network errors have no flag and retry.
-      if ((err as { isRetryable?: boolean }).isRetryable === false) {
-        throw new ExpressionRejected((err as Error).message);
-      }
-      throw err;
+      throw refusedForGood(err) ? new ExpressionRejected((err as Error).message) : err;
+    }
+  }
+
+  async remove(type: ExpressionType, id: string, reason: string) {
+    const guild = await this.client.guilds.resolve(this.guildId);
+    try {
+      const expression = type === "emoji" ? await guild.fetchEmoji(id) : await guild.fetchSticker(id);
+      await expression.delete(reason);
+    } catch (err) {
+      if ((err as { statusCode?: number }).statusCode === 404) return;
+      throw refusedForGood(err) ? new ExpressionRejected((err as Error).message) : err;
     }
   }
 
@@ -69,6 +81,14 @@ export class FluxerExpressionGuild implements ExpressionGuild {
       replyTo: replyTo ? { channelId, messageId: replyTo, guildId: this.guildId } : undefined,
     });
   }
+}
+
+/**
+ * fluxer.js HTTP errors carry `isRetryable` (429 and 5xx). Anything else from
+ * the API is final; network errors have no flag and are retried.
+ */
+function refusedForGood(err: unknown): boolean {
+  return (err as { isRetryable?: boolean }).isRetryable === false;
 }
 
 /**
