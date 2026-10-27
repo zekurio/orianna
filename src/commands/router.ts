@@ -1,5 +1,7 @@
 import type { Message } from "@fluxerjs/core";
 import type { Bot } from "../bot.ts";
+import { appendFooter, type MessageBody } from "../messages/body.ts";
+import { editOptions, REPLY_MENTION, sendOptions } from "../messages/fluxer.ts";
 import {
   type Attachment,
   type Command,
@@ -108,11 +110,11 @@ export function usageLine(prefix: string, path: string, command: Command): strin
 }
 
 function messageContext(bot: Bot, message: Message): BaseContext {
-  const reply = async (content: string) => {
-    const sent = await message.reply(content);
+  const reply = async (body: MessageBody) => {
+    const sent = await message.reply(sendOptions(body, REPLY_MENTION));
     return {
-      async edit(content: string) {
-        await sent.edit({ content });
+      async edit(body: MessageBody) {
+        await sent.edit(editOptions(body, REPLY_MENTION));
       },
     };
   };
@@ -132,6 +134,9 @@ function messageContext(bot: Bot, message: Message): BaseContext {
     async error(text) {
       await reply(formatError(text));
     },
+    async deleteInvocation() {
+      await message.delete().catch(() => {});
+    },
   };
 }
 
@@ -140,11 +145,11 @@ function messageContext(bot: Bot, message: Message): BaseContext {
  * reactions until they go idle. Their reactions are removed after each turn so
  * the same arrow can be pressed again.
  */
-async function sendPaginated(message: Message, pages: readonly string[]) {
+async function sendPaginated(message: Message, pages: readonly MessageBody[]) {
   let page = 0;
-  const render = () => `${pages[page]}\n\n*Page ${page + 1}/${pages.length}*`;
+  const render = () => appendFooter(pages[page]!, `Page ${page + 1}/${pages.length}`);
 
-  const sent = await message.reply(render());
+  const sent = await message.reply(sendOptions(render(), REPLY_MENTION));
   const collector = sent.createReactionCollector({
     filter: (_reaction, user) => user.id === message.author.id,
   });
@@ -167,7 +172,7 @@ async function sendPaginated(message: Message, pages: readonly string[]) {
       .then(async () => {
         await sent.removeReaction(name!, user.id).catch(() => {});
         page = (page + step + pages.length) % pages.length;
-        await sent.edit({ content: render() });
+        await sent.edit(editOptions(render(), REPLY_MENTION));
       })
       .catch(report);
   });

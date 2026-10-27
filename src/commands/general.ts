@@ -1,3 +1,4 @@
+import { embedPages } from "../messages/body.ts";
 import { defineCommand, isGroup } from "./command.ts";
 import { usageLine } from "./router.ts";
 
@@ -24,10 +25,6 @@ export const help = defineCommand({
         ? entry.subcommands.map((c) => usageLine(prefix, `${entry.name} ${c.name}`, c))
         : [usageLine(prefix, entry.name, entry)],
     );
-    const pages: string[] = [];
-    for (let i = 0; i < lines.length; i += HELP_PAGE_SIZE) {
-      pages.push(["**Commands**", ...lines.slice(i, i + HELP_PAGE_SIZE)].join("\n"));
-    }
-    await ctx.replyPages(pages);
+    await ctx.replyPages(embedPages("Commands", lines, HELP_PAGE_SIZE));
   },
 });

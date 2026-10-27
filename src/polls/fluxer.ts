@@ -1,21 +1,34 @@
 import { type Client, Events } from "@fluxerjs/core";
-import type { PollService } from "./service.ts";
-import type { PollFile, PollTransport } from "./transport.ts";
+import type { MessageBody } from "../messages/body.ts";
+import { ALL_MENTIONS, editOptions, NO_MENTIONS, sendOptions } from "../messages/fluxer.ts";
+import type { CommunityPollChat, CommunityPolls } from "./community.ts";
+import type { PollTransport, PostOptions } from "./transport.ts";
 
-export class FluxerPollTransport implements PollTransport {
-  constructor(private readonly client: Client) {}
+export class FluxerPollTransport implements PollTransport, CommunityPollChat {
+  constructor(
+    private readonly client: Client,
+    private readonly guildId: string,
+  ) {}
 
-  async post(channelId: string, content: string, files?: PollFile[]) {
+  async post(channelId: string, body: MessageBody, options: PostOptions = {}) {
     const message = await this.client.channels.send(channelId, {
-      content,
-      files: files?.map((f) => ({ name: f.name, data: f.data })),
+      ...sendOptions(body, options.mentions ? ALL_MENTIONS : NO_MENTIONS),
+      files: options.files?.map((f) => ({ name: f.name, data: f.data })),
     });
     return message.id;
   }
 
-  async edit(channelId: string, messageId: string, content: string) {
+  async edit(channelId: string, messageId: string, body: MessageBody) {
     const message = await this.client.channels.fetchMessage(channelId, messageId);
-    await message.edit({ content });
+    await message.edit(editOptions(body, NO_MENTIONS));
+  }
+
+  async reply(channelId: string, messageId: string, content: string, notify: readonly string[]) {
+    await this.client.channels.send(channelId, {
+      content,
+      replyTo: { channelId, messageId, guildId: this.guildId },
+      allowedMentions: { parse: [], users: [...notify] },
+    });
   }
 
   async react(channelId: string, messageId: string, emoji: string) {
@@ -26,6 +39,11 @@ export class FluxerPollTransport implements PollTransport {
   async removeReaction(channelId: string, messageId: string, emoji: string, userId: string) {
     const message = await this.client.channels.fetchMessage(channelId, messageId);
     await message.removeReaction(emoji, userId);
+  }
+
+  async clearReaction(channelId: string, messageId: string, emoji: string) {
+    const message = await this.client.channels.fetchMessage(channelId, messageId);
+    await message.removeReactionEmoji(emoji);
   }
 
   async reactionUsers(channelId: string, messageId: string, emoji: string) {
@@ -39,50 +57,28 @@ export class FluxerPollTransport implements PollTransport {
       after = page.nextAfter;
     }
   }
+
+  async emojiIds() {
+    const guild = await this.client.guilds.resolve(this.guildId);
+    return (await guild.fetchEmojis()).map((e) => e.id);
+  }
+
+  /** The same link the Fluxer app copies for a message. */
+  messageLink(channelId: string, messageId: string) {
+    const webapp = this.client.instance.endpoints.webapp.replace(/\/+$/, "");
+    return `${webapp}/channels/${this.guildId}/${channelId}/${messageId}`;
+  }
 }
 
-/** Feeds reaction events into the poll service, skipping bots. */
-export function attachPollEvents(client: Client, polls: PollService) {
-  const isBot = (userId: string, bot: boolean | undefined) =>
-    bot === true || userId === client.user?.id;
-  const report = (err: unknown) => console.error("poll reaction handling failed:", err);
-
-  client.on(Events.MessageReactionAdd, (p) => {
-    if (isBot(p.userId, p.user?.bot)) return;
-    polls.reactionAdded(p.messageId, p.userId, p.emoji).catch(report);
-  });
-
-  client.on(Events.MessageReactionAddMany, (p) => {
-    void (async () => {
-      for (const r of p.reactions) {
-        if (isBot(r.userId, r.member?.user.bot)) continue;
-        await polls.reactionAdded(p.messageId, r.userId, r.emoji);
-      }
-    })().catch(report);
-  });
-
-  client.on(Events.MessageReactionRemove, (p) => {
-    if (isBot(p.userId, p.user?.bot)) return;
-    try {
-      polls.reactionRemoved(p.messageId, p.userId, p.emoji);
-    } catch (err) {
-      report(err);
-    }
-  });
-
-  client.on(Events.MessageReactionRemoveAll, (p) => {
-    try {
-      polls.reactionsCleared(p.messageId);
-    } catch (err) {
-      report(err);
-    }
-  });
-
-  client.on(Events.MessageReactionRemoveEmoji, (p) => {
-    try {
-      polls.reactionsCleared(p.messageId, p.emoji);
-    } catch (err) {
-      report(err);
-    }
+/** Calls off community polls whose message is deleted. */
+export function attachPollMessageDeletes(client: Client, community: CommunityPolls) {
+  const deleted = (messageId: string) => {
+    community
+      .messageDeleted(messageId)
+      .catch((err) => console.error("poll message delete handling failed:", err));
+  };
+  client.on(Events.MessageDelete, (message) => deleted(message.id));
+  client.on(Events.MessageDeleteBulk, (p) => {
+    for (const id of p.ids) deleted(id);
   });
 }

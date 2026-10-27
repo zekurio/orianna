@@ -16,5 +16,34 @@
     "maxOpenPerUser": 3,
     "maxImageBytes": 524288,
     "proposerRoleIds": []
+  },
+  "polls": {
+    "defaultHours": 24,
+    "maxOpenPerUser": 5,
+    "creatorRoleIds": []
+  },
+  "roleMenus": {
+    "channelId": "000000000000000000",
+    "menus": [
+      {
+        "name": "notifications",
+        "title": "Notifications",
+        "description": "Pick what you'd like to be pinged for.",
+        "options": [
+          { "emoji": "📣", "roleId": "100000000000000001", "description": "server news and downtime" },
+          { "emoji": "🎉", "roleId": "100000000000000002", "description": "game nights and watch parties" }
+        ]
+      },
+      {
+        "name": "colour",
+        "title": "Name colour",
+        "description": "One colour at a time.",
+        "mode": "single",
+        "options": [
+          { "emoji": "🟦", "roleId": "100000000000000003" },
+          { "emoji": "🟥", "roleId": "100000000000000004" }
+        ]
+      }
+    ]
   }
 }

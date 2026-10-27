@@ -1,5 +1,6 @@
 import { type CommandGroup, defineCommand } from "../commands/command.ts";
 import type { ProposalConfig } from "../config.ts";
+import { embedPages } from "../messages/body.ts";
 import { adminOnly } from "../permissions.ts";
 import { normalizeSlug } from "../polls/slug.ts";
 import { downloadImage } from "./image.ts";
@@ -13,6 +14,8 @@ const reason = {
   required: false,
   rest: true,
 } as const;
+
+const LIST_PAGE_SIZE = 10;
 
 /** `!emoji ...` or `!sticker ...`, depending on the proposals' kind. */
 export function proposalCommands(
@@ -65,11 +68,12 @@ export function proposalCommands(
     description: `Show open ${kind.noun} proposals.`,
     async run(ctx) {
       const open = proposals.pending();
-      await ctx.reply(
-        open.length === 0
-          ? `There are no open ${kind.noun} proposals.`
-          : open.map((p) => proposals.describe(p.proposal, p.poll)).join("\n"),
-      );
+      if (open.length === 0) {
+        await ctx.reply(`There are no open ${kind.noun} proposals.`);
+        return;
+      }
+      const lines = open.map((p) => proposals.describe(p.proposal, p.poll));
+      await ctx.replyPages(embedPages(`Open ${kind.noun} proposals`, lines, LIST_PAGE_SIZE));
     },
   });
 
