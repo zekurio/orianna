@@ -130,7 +130,7 @@ export const STICKER: ExpressionKind = {
     }
   },
   fitName(name) {
-    const fitted = name.trim().slice(0, STICKER_NAME_MAX).trimEnd();
+    const fitted = truncate(name.trim(), STICKER_NAME_MAX).trimEnd();
     return fitted.length >= 2 ? fitted : undefined;
   },
   code: (name) => `\`${name}\``,
@@ -147,8 +147,23 @@ function numbered(name: string, count: number, separator: string, max: number): 
   if (count === 1) return [name];
   return Array.from({ length: count }, (_, i) => {
     const suffix = `${separator}${i + 1}`;
-    return name.slice(0, max - suffix.length).trimEnd() + suffix;
+    return truncate(name, max - suffix.length).trimEnd() + suffix;
   });
+}
+
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+/**
+ * Cuts text to at most `max` UTF-16 code units, which is how Fluxer counts,
+ * without splitting a character such as an emoji.
+ */
+function truncate(text: string, max: number): string {
+  let cut = "";
+  for (const { segment } of graphemes.segment(text)) {
+    if (cut.length + segment.length > max) break;
+    cut += segment;
+  }
+  return cut;
 }
 
 /**
