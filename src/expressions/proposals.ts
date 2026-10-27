@@ -237,6 +237,10 @@ export interface ExpressionProposalsDeps {
 /** Proposals for one kind of expression; register one instance per kind. */
 export class ExpressionProposals implements PollHandler {
   private readonly now: () => number;
+  /** Lowercased names a command is adding or proposing right now. */
+  private readonly reserved = new Set<string>();
+  /** Proposals each user has in the works, which count towards `maxOpenPerUser`. */
+  private readonly preparing = new Map<string, number>();
 
   constructor(
     readonly kind: ExpressionKind,
@@ -275,7 +279,7 @@ export class ExpressionProposals implements PollHandler {
 
   /** Puts the expression up for a vote. Returns the poll and the names it would add. */
   async propose(proposerId: string, input: ExpressionInput): Promise<{ poll: Poll; names: string[] }> {
-    const { config, db, access, guild } = this.deps;
+    const { config, access } = this.deps;
     const { kind } = this;
 
     if (
@@ -284,14 +288,34 @@ export class ExpressionProposals implements PollHandler {
     ) {
       throw new UserError(`You don't have a role that can propose ${kind.plural}.`);
     }
-    const open = this.pending().filter((p) => p.proposal.proposerId === proposerId);
-    if (open.length >= config.maxOpenPerUser) {
+    // Proposals still being prepared count too, so commands sent at the same
+    // time can't get past the limit while their images are processed.
+    const preparing = this.preparing.get(proposerId) ?? 0;
+    const open =
+      this.pending().filter((p) => p.proposal.proposerId === proposerId).length + preparing;
+    if (open >= config.maxOpenPerUser) {
       throw new UserError(
-        `You already have ${open.length} open ${kind.noun} proposals; wait for one to finish first.`,
+        `You already have ${open} open ${kind.noun} proposals; wait for one to finish first.`,
       );
     }
 
-    const { name, description, tags, pieces } = await this.draft(input);
+    this.preparing.set(proposerId, preparing + 1);
+    try {
+      return await this.withDraft(input, (draft) => this.post(proposerId, draft));
+    } finally {
+      const left = this.preparing.get(proposerId)! - 1;
+      if (left > 0) this.preparing.set(proposerId, left);
+      else this.preparing.delete(proposerId);
+    }
+  }
+
+  /** Posts the poll for a proposal and stores it. */
+  private async post(
+    proposerId: string,
+    { name, description, tags, pieces }: Draft,
+  ): Promise<{ poll: Poll; names: string[] }> {
+    const { config, db, guild } = this.deps;
+    const { kind } = this;
     const names = pieces.map((p) => p.name);
 
     // Everyone who can see the polls channel right now has to vote yes; people
@@ -350,8 +374,14 @@ export class ExpressionProposals implements PollHandler {
    * go in together or not at all.
    */
   async add(userId: string, input: ExpressionInput): Promise<CreatedExpression[]> {
+    return this.withDraft(input, (draft) => this.addNow(userId, draft));
+  }
+
+  private async addNow(
+    userId: string,
+    { name, description, tags, pieces }: Draft,
+  ): Promise<CreatedExpression[]> {
     const { kind } = this;
-    const { name, description, tags, pieces } = await this.draft(input);
 
     const outcome = await this.addPieces(
       pieces.map((p, position) => ({
@@ -491,8 +521,12 @@ export class ExpressionProposals implements PollHandler {
     return `\`${poll.slug}\` ${this.kind.display(proposal.name)}${cut} by <@${proposal.proposerId}>, needs ${proposal.requiredYes} yes, closes ${timestamp(poll.closesAt)}`;
   }
 
-  /** Checks the input and gets its image ready, cut into pieces if it's wide or tall. */
-  private async draft(input: ExpressionInput): Promise<Draft> {
+  /**
+   * Checks the input, gets its image ready and hands the result to `use`.
+   * The names stay reserved until `use` is done, so another command can't take
+   * them while this one is still processing the image or posting the poll.
+   */
+  private async withDraft<T>(input: ExpressionInput, use: (draft: Draft) => Promise<T>): Promise<T> {
     const { kind } = this;
     const description = input.description?.trim() || null;
 
@@ -503,29 +537,35 @@ export class ExpressionProposals implements PollHandler {
 
     const info = await inspectImage(input.image);
     const names = kind.pieceNames(input.name, pieceCount(info, kind.maxPieces));
-    await this.checkNamesFree(names);
-    const images = await cutImage(input.image, info, {
-      count: names.length,
-      size: kind.size,
-      maxBytes: this.deps.config.maxImageBytes,
-    });
-    return {
-      name: input.name,
-      description,
-      tags: input.tags ?? [],
-      pieces: images.map((image, i) => ({ ...image, name: names[i]! })),
-    };
+    this.reserve(names);
+    try {
+      await this.checkNotInGuild(names);
+      const images = await cutImage(input.image, info, {
+        count: names.length,
+        size: kind.size,
+        maxBytes: this.deps.config.maxImageBytes,
+      });
+      return await use({
+        name: input.name,
+        description,
+        tags: input.tags ?? [],
+        pieces: images.map((image, i) => ({ ...image, name: names[i]! })),
+      });
+    } finally {
+      for (const name of names) this.reserved.delete(name.toLowerCase());
+    }
   }
 
-  /** Throws when one of the names is taken or already up for a vote. */
-  private async checkNamesFree(names: string[]) {
+  /**
+   * Claims the names, or throws when one is up for a vote or being added by
+   * another command. Nothing in here awaits, so two commands can't both pass.
+   */
+  private reserve(names: string[]) {
     const { kind } = this;
-    const wanted = new Set(names.map((n) => n.toLowerCase()));
+    const wanted = names.map((n) => n.toLowerCase());
 
-    const existing = (await this.deps.guild.list(kind.type)).find((e) =>
-      wanted.has(e.name.toLowerCase()),
-    );
-    if (existing) throw new UserError(`The ${kind.display(existing.name)} already exists.`);
+    const busy = names.find((n) => this.reserved.has(n.toLowerCase()));
+    if (busy) throw new UserError(`Someone else is adding the ${kind.display(busy)} right now.`);
 
     const pending = this.deps.db
       .select({ name: proposalImages.name, slug: polls.slug })
@@ -534,12 +574,23 @@ export class ExpressionProposals implements PollHandler {
       .innerJoin(polls, eq(polls.id, proposalImages.pollId))
       .where(and(eq(proposals.type, kind.type), eq(proposals.status, "pending")))
       .all()
-      .find((p) => wanted.has(p.name.toLowerCase()));
+      .find((p) => wanted.includes(p.name.toLowerCase()));
     if (pending) {
       throw new UserError(
         `The ${kind.display(pending.name)} is already up for a vote in poll \`${pending.slug}\`.`,
       );
     }
+
+    for (const name of wanted) this.reserved.add(name);
+  }
+
+  /** Throws when the guild already has one of the names. */
+  private async checkNotInGuild(names: string[]) {
+    const wanted = new Set(names.map((n) => n.toLowerCase()));
+    const existing = (await this.deps.guild.list(this.kind.type)).find((e) =>
+      wanted.has(e.name.toLowerCase()),
+    );
+    if (existing) throw new UserError(`The ${this.kind.display(existing.name)} already exists.`);
   }
 
   private requirePending(slug: string): { proposal: Proposal; poll: Poll } {
