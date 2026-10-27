@@ -1,6 +1,5 @@
 import {
   type Attachment,
-  type Command,
   type CommandContext,
   type CommandGroup,
   defineCommand,
@@ -106,38 +105,23 @@ export function proposalCommands(
     await ctx.reply(`Added the ${kind.display(input.name)}${cut}${shown}`);
   }
 
-  const inputCommands: Command[] =
-    kind.type === "sticker"
-      ? [
-          defineCommand({
-            name: "propose",
-            description: `Propose a new sticker; ${linkHelp}.`,
-            options: stickerOptions,
-            run: propose,
-          }),
-          defineCommand({
-            name: "add",
-            description: "Add a sticker without a vote (Manage Expressions).",
-            options: stickerOptions,
-            guard: expressionManagersOnly,
-            run: add,
-          }),
-        ]
-      : [
-          defineCommand({
-            name: "propose",
-            description: `Propose a new emoji; ${linkHelp}.`,
-            options: emojiOptions,
-            run: propose,
-          }),
-          defineCommand({
-            name: "add",
-            description: "Add an emoji without a vote (Manage Expressions).",
-            options: emojiOptions,
-            guard: expressionManagersOnly,
-            run: add,
-          }),
-        ];
+  // Emoji and sticker options differ, but both fit InputOptions.
+  const options = kind.type === "sticker" ? stickerOptions : emojiOptions;
+  const inputCommands = [
+    defineCommand({
+      name: "propose",
+      description: `Propose a new ${kind.noun}; ${linkHelp}.`,
+      options,
+      run: propose,
+    }),
+    defineCommand({
+      name: "add",
+      description: `Add the ${kind.noun} right away, without a vote (Manage Expressions).`,
+      options,
+      guard: expressionManagersOnly,
+      run: add,
+    }),
+  ];
 
   const list = defineCommand({
     name: "list",

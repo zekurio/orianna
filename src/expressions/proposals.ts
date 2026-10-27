@@ -85,6 +85,7 @@ export interface ExpressionKind {
 }
 
 const EMOJI_NAME_MAX = 32;
+const EMOJI_NAME = new RegExp(`^[A-Za-z0-9_]{2,${EMOJI_NAME_MAX}}$`);
 
 export const EMOJI: ExpressionKind = {
   type: "emoji",
@@ -92,9 +93,9 @@ export const EMOJI: ExpressionKind = {
   noun: "emoji",
   plural: "emojis",
   checkName(name) {
-    if (!/^[A-Za-z0-9_]{2,32}$/.test(name)) {
+    if (!EMOJI_NAME.test(name)) {
       throw new UserError(
-        "Emoji names must be 2 to 32 characters long and use only letters, digits and underscores.",
+        `Emoji names must be 2 to ${EMOJI_NAME_MAX} characters long and use only letters, digits and underscores.`,
       );
     }
   },
@@ -537,7 +538,7 @@ export class ExpressionProposals implements PollHandler {
         .select({ n: count() })
         .from(proposalImages)
         .where(eq(proposalImages.pollId, poll.id))
-        .get()?.n ?? 1;
+        .get()!.n;
     const cut = pieces > 1 ? ` in ${pieces} pieces` : "";
     return `\`${poll.slug}\` ${this.kind.display(proposal.name)}${cut} by <@${proposal.proposerId}>, needs ${proposal.requiredYes} yes, closes ${timestamp(poll.closesAt)}`;
   }
