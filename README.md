@@ -14,7 +14,7 @@ options in [`nix/module.nix`](nix/module.nix).
 
 ```sh
 cp config.example.json config.json
-echo 'ORIANNA_TOKEN=...' > .env
+echo 'FLUXER_BOT_TOKEN=...' > .env
 bun install
 bun run dev
 ```

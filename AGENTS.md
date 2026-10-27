@@ -4,7 +4,7 @@
 
 The dev shell comes from devenv (`devenv.nix`), and direnv loads it through
 `.envrc`. It provides bun and sqlite, runs `bun install` on entry, and sets
-`ORIANNA_CONFIG=./config.json`. Bun reads `ORIANNA_TOKEN` from `.env` on its
+`ORIANNA_CONFIG=./config.json`. Bun reads `FLUXER_BOT_TOKEN` from `.env` on its
 own.
 
 Outside direnv, prefix commands with `devenv shell`, for example

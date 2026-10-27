@@ -11,7 +11,7 @@
     };
   };
 
-  # The bot token comes from ORIANNA_TOKEN in .env, which bun loads automatically.
+  # The bot token comes from FLUXER_BOT_TOKEN in .env, which bun loads automatically.
   env.ORIANNA_CONFIG = "./config.json";
 
   enterTest = ''

@@ -198,7 +198,7 @@ export async function loadConfig(
 
 /**
  * Reads the bot token from the systemd credential `token` when running as a
- * service, falling back to ORIANNA_TOKEN for local development.
+ * service, falling back to FLUXER_BOT_TOKEN for local development.
  */
 export async function readToken(env = process.env): Promise<string> {
   const credentials = env.CREDENTIALS_DIRECTORY;
@@ -210,10 +210,10 @@ export async function readToken(env = process.env): Promise<string> {
     }
   }
 
-  const token = env.ORIANNA_TOKEN?.trim();
+  const token = env.FLUXER_BOT_TOKEN?.trim();
   if (token) return token;
 
   throw new ConfigError(
-    "no bot token: set ORIANNA_TOKEN or provide a `token` systemd credential",
+    "no bot token: set FLUXER_BOT_TOKEN or provide a `token` systemd credential",
   );
 }
