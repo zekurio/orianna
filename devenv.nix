@@ -1,7 +1,11 @@
 { pkgs, ... }:
 
 {
-  packages = [ pkgs.sqlite ];
+  # The bot processes emoji and sticker images with ImageMagick's `magick`.
+  packages = [
+    pkgs.sqlite
+    pkgs.imagemagick
+  ];
 
   languages.javascript = {
     enable = true;

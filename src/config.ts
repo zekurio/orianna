@@ -12,7 +12,7 @@ const ProposalConfigSchema = Type.Object(
     maxOpenPerUser: Type.Integer({ minimum: 1, default: 3 }),
     /**
      * Should match the instance's `emoji_max_size` / `sticker_max_size`
-     * (512 KiB for both by default).
+     * (512 KiB for both by default). Larger images are scaled down to fit.
      */
     maxImageBytes: Type.Integer({ minimum: 1, default: 524288 }),
     /** Roles allowed to propose. Empty means everyone. */

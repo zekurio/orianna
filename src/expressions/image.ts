@@ -12,6 +12,13 @@ const ascii = (bytes: Uint8Array, start: number, end: number) =>
 const SNIFF_BYTES = 12;
 const DOWNLOAD_TIMEOUT_MS = 15_000;
 
+/**
+ * Largest image the bot downloads, unless the configured limit is higher.
+ * Images over that limit are scaled down until they fit, so this is well
+ * above the default.
+ */
+export const SOURCE_MAX_BYTES = 8 * 1024 * 1024;
+
 export const UNSUPPORTED_IMAGE = "The image must be a PNG, JPEG, GIF, WebP or AVIF file.";
 
 /**
@@ -36,6 +43,11 @@ export function sniffImage(bytes: Uint8Array): ImageType | null {
     return { ext: "avif", mime: "image/avif" };
   }
   return null;
+}
+
+/** An animated AVIF, which Fluxer refuses. */
+export function isAvifSequence(bytes: Uint8Array): boolean {
+  return bytes.length >= SNIFF_BYTES && ascii(bytes, 4, 12) === "ftypavis";
 }
 
 /**

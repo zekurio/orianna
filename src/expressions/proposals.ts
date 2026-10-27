@@ -1,19 +1,23 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, count, eq } from "drizzle-orm";
 import { UserError } from "../commands/command.ts";
 import type { ProposalConfig } from "../config.ts";
 import type { DB } from "../db/index.ts";
-import { polls, proposals } from "../db/schema.ts";
+import { polls, proposalImages, proposals } from "../db/schema.ts";
 import type { GuildAccess } from "../permissions.ts";
 import type { Poll, PollHandler, PollService, Tally } from "../polls/service.ts";
 import { timestamp } from "../polls/service.ts";
-import { formatKiB, sniffImage, UNSUPPORTED_IMAGE } from "./image.ts";
+import { SOURCE_MAX_BYTES } from "./image.ts";
+import { cutImage, inspectImage, type ProcessedImage, pieceCount } from "./process.ts";
 
 export type Proposal = typeof proposals.$inferSelect;
+export type ProposalImage = typeof proposalImages.$inferSelect;
 export type ExpressionType = Proposal["type"];
 
 export interface Expression {
   id: string;
   name: string;
+  /** Whether the bot added it. */
+  mine: boolean;
 }
 
 export interface NewExpression {
@@ -22,19 +26,32 @@ export interface NewExpression {
   image: string;
   description: string | null;
   tags: string[];
+  /** For the audit log, which shows the bot as the one who added it. */
+  reason: string;
+}
+
+export interface CreatedExpression {
+  id: string;
+  /** How a message shows it, for emojis. */
+  mention?: string;
 }
 
 /** What expression proposals need from the guild. */
 export interface ExpressionGuild {
   list(type: ExpressionType): Promise<Expression[]>;
   /** Throws ExpressionRejected when Fluxer refuses it for good. */
-  create(type: ExpressionType, expression: NewExpression): Promise<string>;
+  create(type: ExpressionType, expression: NewExpression): Promise<CreatedExpression>;
+  /**
+   * Deletes an expression; one that is already gone counts as deleted.
+   * Throws ExpressionRejected when Fluxer refuses for good.
+   */
+  remove(type: ExpressionType, id: string, reason: string): Promise<void>;
   send(channelId: string, content: string, replyTo?: string): Promise<void>;
   /** IDs of the non-bot members who can see the channel. */
   voters(channelId: string): Promise<string[]>;
 }
 
-/** Fluxer refused the expression (bad image, slot limit, ...); retrying won't help. */
+/** Fluxer refused the request (bad image, slot limit, missing permission, ...); retrying won't help. */
 export class ExpressionRejected extends Error {
   override name = "ExpressionRejected";
 }
@@ -50,9 +67,25 @@ export interface ExpressionKind {
   plural: string;
   /** Throws UserError when Fluxer would refuse the name. */
   checkName(name: string): void;
+  /**
+   * Turns a name from elsewhere, like a 7TV emote's, into one Fluxer takes.
+   * Undefined when too little of it is left.
+   */
+  fitName(name: string): string | undefined;
+  /** How the name is written in messages, e.g. `` `:sadi:` ``. */
+  code(name: string): string;
   /** How the name is shown in messages, e.g. "emoji `:sadi:`". */
   display(name: string): string;
+  /** Most pieces a wide or tall image is cut into. */
+  maxPieces: number;
+  /** Longest side, in pixels, of an image the bot had to process. */
+  size: number;
+  /** Names for an image cut into `count` pieces; just the name for one. */
+  pieceNames(name: string, count: number): string[];
 }
+
+const EMOJI_NAME_MAX = 32;
+const EMOJI_NAME = new RegExp(`^[A-Za-z0-9_]{2,${EMOJI_NAME_MAX}}$`);
 
 export const EMOJI: ExpressionKind = {
   type: "emoji",
@@ -60,16 +93,29 @@ export const EMOJI: ExpressionKind = {
   noun: "emoji",
   plural: "emojis",
   checkName(name) {
-    if (!/^[A-Za-z0-9_]{2,32}$/.test(name)) {
+    if (!EMOJI_NAME.test(name)) {
       throw new UserError(
-        "Emoji names must be 2 to 32 characters long and use only letters, digits and underscores.",
+        `Emoji names must be 2 to ${EMOJI_NAME_MAX} characters long and use only letters, digits and underscores.`,
       );
     }
   },
+  fitName(name) {
+    const fitted = name
+      .replace(/[^A-Za-z0-9_]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, EMOJI_NAME_MAX);
+    return fitted.length >= 2 ? fitted : undefined;
+  },
+  code: (name) => `\`:${name}:\``,
   display: (name) => `emoji \`:${name}:\``,
+  maxPieces: 5,
+  // What Fluxer's own client scales static emojis to.
+  size: 128,
+  pieceNames: (name, count) => numbered(name, count, "_", EMOJI_NAME_MAX),
 };
 
 // Limits from Fluxer's GuildStickerCreateRequest schema.
+const STICKER_NAME_MAX = 30;
 const STICKER_DESCRIPTION_MAX = 500;
 const STICKER_TAGS_MAX = 10;
 const STICKER_TAG_LENGTH_MAX = 30;
@@ -80,12 +126,46 @@ export const STICKER: ExpressionKind = {
   noun: "sticker",
   plural: "stickers",
   checkName(name) {
-    if (name.length < 2 || name.length > 30) {
-      throw new UserError("Sticker names must be 2 to 30 characters long.");
+    if (name.length < 2 || name.length > STICKER_NAME_MAX) {
+      throw new UserError(`Sticker names must be 2 to ${STICKER_NAME_MAX} characters long.`);
     }
   },
+  fitName(name) {
+    const fitted = truncate(name.trim(), STICKER_NAME_MAX).trimEnd();
+    return fitted.length >= 2 ? fitted : undefined;
+  },
+  code: (name) => `\`${name}\``,
   display: (name) => `sticker \`${name}\``,
+  // A message carries at most three stickers.
+  maxPieces: 3,
+  // What Fluxer's own client scales stickers to.
+  size: 320,
+  pieceNames: (name, count) => numbered(name, count, " ", STICKER_NAME_MAX),
 };
+
+/** `name_1`, `name_2`, ...: the name is cut short to leave room for the number. */
+function numbered(name: string, count: number, separator: string, max: number): string[] {
+  if (count === 1) return [name];
+  return Array.from({ length: count }, (_, i) => {
+    const suffix = `${separator}${i + 1}`;
+    return truncate(name, max - suffix.length).trimEnd() + suffix;
+  });
+}
+
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+/**
+ * Cuts text to at most `max` UTF-16 code units, which is how Fluxer counts,
+ * without splitting a character such as an emoji.
+ */
+function truncate(text: string, max: number): string {
+  let cut = "";
+  for (const { segment } of graphemes.segment(text)) {
+    if (cut.length + segment.length > max) break;
+    cut += segment;
+  }
+  return cut;
+}
 
 /**
  * Splits `sad, cry,Sad` into `["sad", "cry"]`: trimmed, lowercased, empty
@@ -111,7 +191,7 @@ export function parseTags(input: string | undefined): string[] {
   return tags;
 }
 
-export interface ProposeInput {
+export interface ExpressionInput {
   name: string;
   image: Uint8Array;
   /** Stickers only. */
@@ -119,6 +199,45 @@ export interface ProposeInput {
   /** Stickers only. */
   tags?: string[];
 }
+
+/** Input that passed the checks, with its image ready for Fluxer. */
+interface Draft {
+  name: string;
+  description: string | null;
+  tags: string[];
+  pieces: (ProcessedImage & { name: string })[];
+}
+
+/** One emoji or sticker being added, and how far it got. */
+interface Piece {
+  position: number;
+  name: string;
+  /** `data:` URL of the image. */
+  image: string;
+  /** Set once Fluxer has it, possibly by an earlier attempt. */
+  expressionId: string | null;
+}
+
+interface AddOptions {
+  description: string | null;
+  tags: string[];
+  /** For the audit log. */
+  reason: string;
+  /**
+   * Keep what was added when Fluxer can't be reached, for a later attempt to
+   * pick up. Without it, those errors roll back too.
+   */
+  resume: boolean;
+  /** Stores a piece's ID as soon as it is added or deleted. */
+  save?(piece: Piece, expressionId: string | null): void;
+}
+
+type AddOutcome =
+  | { status: "added"; created: CreatedExpression[] }
+  /** A piece couldn't be added; the ones before it were rolled back, except `kept`. */
+  | { status: "refused"; piece: string; problem: string; kept: string[] }
+  /** Only without `resume`: something else went wrong, and was rolled back except `kept`. */
+  | { status: "failed"; error: unknown; kept: string[] };
 
 export interface ExpressionProposalsDeps {
   db: DB;
@@ -135,6 +254,10 @@ export interface ExpressionProposalsDeps {
 /** Proposals for one kind of expression; register one instance per kind. */
 export class ExpressionProposals implements PollHandler {
   private readonly now: () => number;
+  /** Lowercased names a command is adding or proposing right now. */
+  private readonly reserved = new Set<string>();
+  /** Proposals each user has in the works, which count towards `maxOpenPerUser`. */
+  private readonly preparing = new Map<string, number>();
 
   constructor(
     readonly kind: ExpressionKind,
@@ -143,12 +266,27 @@ export class ExpressionProposals implements PollHandler {
     this.now = deps.now ?? Date.now;
   }
 
+  /** Largest image worth downloading. */
+  get downloadLimit(): number {
+    return Math.max(SOURCE_MAX_BYTES, this.deps.config.maxImageBytes);
+  }
+
   get(pollId: number): Proposal | undefined {
     return this.deps.db
       .select()
       .from(proposals)
       .where(and(eq(proposals.pollId, pollId), eq(proposals.type, this.kind.type)))
       .get();
+  }
+
+  /** The images a proposal adds, in order. */
+  images(pollId: number): ProposalImage[] {
+    return this.deps.db
+      .select()
+      .from(proposalImages)
+      .where(eq(proposalImages.pollId, pollId))
+      .orderBy(asc(proposalImages.position))
+      .all();
   }
 
   pending(): { proposal: Proposal; poll: Poll }[] {
@@ -161,49 +299,46 @@ export class ExpressionProposals implements PollHandler {
       .all();
   }
 
-  async propose(proposerId: string, input: ProposeInput): Promise<Poll> {
-    const { config, db, access, guild } = this.deps;
+  /** Puts the expression up for a vote. Returns the poll and the names it would add. */
+  async propose(proposerId: string, input: ExpressionInput): Promise<{ poll: Poll; names: string[] }> {
+    const { config, access } = this.deps;
     const { kind } = this;
-    const { name, image } = input;
-    const description = input.description?.trim() || null;
-    const tags = input.tags ?? [];
 
-    kind.checkName(name);
-    if (description && description.length > STICKER_DESCRIPTION_MAX) {
-      throw new UserError(`Descriptions can be at most ${STICKER_DESCRIPTION_MAX} characters long.`);
-    }
     if (
       config.proposerRoleIds.length > 0 &&
       !(await access.hasAnyRole(proposerId, config.proposerRoleIds))
     ) {
       throw new UserError(`You don't have a role that can propose ${kind.plural}.`);
     }
-
-    const open = this.pending().filter((p) => p.proposal.proposerId === proposerId);
-    if (open.length >= config.maxOpenPerUser) {
+    // Proposals still being prepared count too, so commands sent at the same
+    // time can't get past the limit while their images are processed.
+    const preparing = this.preparing.get(proposerId) ?? 0;
+    const open =
+      this.pending().filter((p) => p.proposal.proposerId === proposerId).length + preparing;
+    if (open >= config.maxOpenPerUser) {
       throw new UserError(
-        `You already have ${open.length} open ${kind.noun} proposals; wait for one to finish first.`,
+        `You already have ${open} open ${kind.noun} proposals; wait for one to finish first.`,
       );
     }
 
-    const type = sniffImage(image);
-    if (!type) throw new UserError(UNSUPPORTED_IMAGE);
-    if (image.length > config.maxImageBytes) {
-      throw new UserError(
-        `The image is ${formatKiB(image.length)}; the limit is ${formatKiB(config.maxImageBytes)}.`,
-      );
+    this.preparing.set(proposerId, preparing + 1);
+    try {
+      return await this.withDraft(input, (draft) => this.post(proposerId, draft));
+    } finally {
+      const left = this.preparing.get(proposerId)! - 1;
+      if (left > 0) this.preparing.set(proposerId, left);
+      else this.preparing.delete(proposerId);
     }
+  }
 
-    const lower = name.toLowerCase();
-    if ((await guild.list(kind.type)).some((e) => e.name.toLowerCase() === lower)) {
-      throw new UserError(`The ${kind.display(name)} already exists.`);
-    }
-    const duplicate = this.pending().find((p) => p.proposal.name.toLowerCase() === lower);
-    if (duplicate) {
-      throw new UserError(
-        `The ${kind.display(name)} is already up for a vote in poll \`${duplicate.poll.slug}\`.`,
-      );
-    }
+  /** Posts the poll for a proposal and stores it. */
+  private async post(
+    proposerId: string,
+    { name, description, tags, pieces }: Draft,
+  ): Promise<{ poll: Poll; names: string[] }> {
+    const { config, db, guild } = this.deps;
+    const { kind } = this;
+    const names = pieces.map((p) => p.name);
 
     // Everyone who can see the polls channel right now has to vote yes; people
     // who join later don't raise the bar for votes already running.
@@ -213,6 +348,7 @@ export class ExpressionProposals implements PollHandler {
     const details = [
       description && `> ${description}`,
       tags.length > 0 && `Tags: ${tags.map((t) => `\`${t}\``).join(", ")}`,
+      names.length > 1 && `Cut into ${names.length} ${kind.plural}: ${names.map(kind.code).join(" ")}`,
     ].filter(Boolean);
     const poll = await this.deps.polls.create({
       kind: kind.pollKind,
@@ -231,25 +367,68 @@ export class ExpressionProposals implements PollHandler {
       mode: "single",
       closesAt: new Date(this.now() + config.votingHours * 3_600_000),
       createdBy: proposerId,
-      files: [{ name: `${name}.${type.ext}`, data: image }],
+      files: pieces.map((p) => ({ name: `${p.name}.${p.type.ext}`, data: p.image })),
       // Proposals ping @here, as they always have.
       mentions: true,
     });
 
-    db.insert(proposals)
-      .values({
-        pollId: poll.id,
-        type: kind.type,
-        name,
-        description,
-        tags,
-        image: Buffer.from(image),
-        contentType: type.mime,
-        proposerId,
-        requiredYes,
-      })
-      .run();
-    return poll;
+    db.transaction((tx) => {
+      tx.insert(proposals)
+        .values({ pollId: poll.id, type: kind.type, name, description, tags, proposerId, requiredYes })
+        .run();
+      tx.insert(proposalImages)
+        .values(
+          pieces.map((p, position) => ({
+            pollId: poll.id,
+            position,
+            name: p.name,
+            image: Buffer.from(p.image),
+            contentType: p.type.mime,
+          })),
+        )
+        .run();
+    });
+    return { poll, names };
+  }
+
+  /**
+   * Adds the expression right away, without a vote. The pieces of a cut image
+   * go in together or not at all.
+   */
+  async add(userId: string, input: ExpressionInput): Promise<CreatedExpression[]> {
+    return this.withDraft(input, (draft) => this.addNow(userId, draft));
+  }
+
+  private async addNow(
+    userId: string,
+    { name, description, tags, pieces }: Draft,
+  ): Promise<CreatedExpression[]> {
+    const { kind } = this;
+
+    const outcome = await this.addPieces(
+      pieces.map((p, position) => ({
+        position,
+        name: p.name,
+        image: dataUrl(p.type.mime, p.image),
+        expressionId: null,
+      })),
+      { description, tags, reason: `Added without a vote by user ${userId}`, resume: false },
+    );
+    switch (outcome.status) {
+      case "added":
+        return outcome.created;
+      case "refused":
+        throw new UserError(
+          pieces.length === 1
+            ? `Couldn't add the ${kind.display(name)}: ${outcome.problem}.`
+            : `Couldn't add ${kind.code(outcome.piece)}: ${outcome.problem}. ` +
+                rolledBack(kind, pieces.length, outcome.kept),
+        );
+      case "failed":
+        if (outcome.kept.length === 0) throw outcome.error;
+        console.error(`adding the ${kind.noun} ${name} failed:`, outcome.error);
+        throw new UserError(`Adding the ${kind.display(name)} failed. ${notRemoved(kind, outcome.kept)}`);
+    }
   }
 
   /** An admin approves or rejects before the vote ends. */
@@ -318,36 +497,122 @@ export class ExpressionProposals implements PollHandler {
       return;
     }
 
-    let expressionId: string;
-    try {
-      // A previous attempt may have created it before the bot went down.
-      const existing = (await this.deps.guild.list(this.kind.type)).find(
-        (e) => e.name === proposal.name,
-      );
-      expressionId =
-        existing?.id ??
-        (await this.deps.guild.create(this.kind.type, {
-          name: proposal.name,
-          image: `data:${proposal.contentType};base64,${proposal.image.toString("base64")}`,
-          description: proposal.description,
-          tags: proposal.tags,
-        }));
-    } catch (err) {
-      if (!(err instanceof ExpressionRejected)) throw err;
-      this.setStatus(poll.id, { status: "failed", error: err.message });
+    const images = this.images(poll.id);
+    const outcome = await this.addPieces(
+      images.map((image) => ({
+        position: image.position,
+        name: image.name,
+        image: dataUrl(image.contentType, image.image),
+        expressionId: image.expressionId,
+      })),
+      {
+        description: proposal.description,
+        tags: proposal.tags,
+        reason: `Voted in with poll ${poll.slug}, proposed by user ${proposal.proposerId}`,
+        // Network trouble leaves the poll closed; the next attempt picks up here.
+        resume: true,
+        save: (piece, expressionId) => this.setExpressionId(poll.id, piece.position, expressionId),
+      },
+    );
+    if (outcome.status === "failed") throw outcome.error;
+    if (outcome.status === "refused") {
+      this.setStatus(poll.id, { status: "failed", error: outcome.problem });
       await this.announce(
         poll,
-        `${mention} ${subject} was approved (${why}) but Fluxer refused it: ${err.message}`,
+        images.length === 1
+          ? `${mention} ${subject} was approved (${why}) but couldn't be added: ${outcome.problem}.`
+          : `${mention} ${subject} was approved (${why}) but ${this.kind.code(outcome.piece)} ` +
+              `couldn't be added: ${outcome.problem}. ${rolledBack(this.kind, images.length, outcome.kept)}`,
       );
       return;
     }
 
-    this.setStatus(poll.id, { status: "added", expressionId });
-    await this.announce(poll, `${mention} ${subject} has been added (${why}).`);
+    this.setStatus(poll.id, { status: "added" });
+    const as = images.length > 1 ? ` as ${images.map((i) => this.kind.code(i.name)).join(" ")}` : "";
+    await this.announce(poll, `${mention} ${subject} has been added${as} (${why}).`);
   }
 
   describe(proposal: Proposal, poll: Poll): string {
-    return `\`${poll.slug}\` ${this.kind.display(proposal.name)} by <@${proposal.proposerId}>, needs ${proposal.requiredYes} yes, closes ${timestamp(poll.closesAt)}`;
+    const pieces =
+      this.deps.db
+        .select({ n: count() })
+        .from(proposalImages)
+        .where(eq(proposalImages.pollId, poll.id))
+        .get()!.n;
+    const cut = pieces > 1 ? ` in ${pieces} pieces` : "";
+    return `\`${poll.slug}\` ${this.kind.display(proposal.name)}${cut} by <@${proposal.proposerId}>, needs ${proposal.requiredYes} yes, closes ${timestamp(poll.closesAt)}`;
+  }
+
+  /**
+   * Checks the input, gets its image ready and hands the result to `use`.
+   * The names stay reserved until `use` is done, so another command can't take
+   * them while this one is still processing the image or posting the poll.
+   */
+  private async withDraft<T>(input: ExpressionInput, use: (draft: Draft) => Promise<T>): Promise<T> {
+    const { kind } = this;
+    const description = input.description?.trim() || null;
+
+    kind.checkName(input.name);
+    if (description && description.length > STICKER_DESCRIPTION_MAX) {
+      throw new UserError(`Descriptions can be at most ${STICKER_DESCRIPTION_MAX} characters long.`);
+    }
+
+    const info = await inspectImage(input.image);
+    const names = kind.pieceNames(input.name, pieceCount(info, kind.maxPieces));
+    this.reserve(names);
+    try {
+      await this.checkNotInGuild(names);
+      const images = await cutImage(input.image, info, {
+        count: names.length,
+        size: kind.size,
+        maxBytes: this.deps.config.maxImageBytes,
+      });
+      return await use({
+        name: input.name,
+        description,
+        tags: input.tags ?? [],
+        pieces: images.map((image, i) => ({ ...image, name: names[i]! })),
+      });
+    } finally {
+      for (const name of names) this.reserved.delete(name.toLowerCase());
+    }
+  }
+
+  /**
+   * Claims the names, or throws when one is up for a vote or being added by
+   * another command. Nothing in here awaits, so two commands can't both pass.
+   */
+  private reserve(names: string[]) {
+    const { kind } = this;
+    const wanted = names.map((n) => n.toLowerCase());
+
+    const busy = names.find((n) => this.reserved.has(n.toLowerCase()));
+    if (busy) throw new UserError(`Someone else is adding the ${kind.display(busy)} right now.`);
+
+    const pending = this.deps.db
+      .select({ name: proposalImages.name, slug: polls.slug })
+      .from(proposalImages)
+      .innerJoin(proposals, eq(proposals.pollId, proposalImages.pollId))
+      .innerJoin(polls, eq(polls.id, proposalImages.pollId))
+      .where(and(eq(proposals.type, kind.type), eq(proposals.status, "pending")))
+      .all()
+      .find((p) => wanted.includes(p.name.toLowerCase()));
+    if (pending) {
+      throw new UserError(
+        `The ${kind.display(pending.name)} is already up for a vote in poll \`${pending.slug}\`.`,
+      );
+    }
+
+    for (const name of wanted) this.reserved.add(name);
+  }
+
+  /** Throws when the guild already has one of the names. */
+  private async checkNotInGuild(names: string[]) {
+    const wanted = new Set(names.map((n) => n.toLowerCase()));
+    const existing = (await this.deps.guild.list(this.kind.type)).find((e) =>
+      wanted.has(e.name.toLowerCase()),
+    );
+    if (existing) throw new UserError(`The ${this.kind.display(existing.name)} already exists.`);
   }
 
   private requirePending(slug: string): { proposal: Proposal; poll: Poll } {
@@ -357,6 +622,101 @@ export class ExpressionProposals implements PollHandler {
       throw new UserError(`There is no open ${this.kind.noun} proposal \`${slug}\`.`);
     }
     return { proposal, poll };
+  }
+
+  /**
+   * Adds the pieces that have no ID yet, in order, so that they go in together
+   * or not at all. When Fluxer refuses one, or someone else has since added an
+   * expression with its name, the pieces added so far are deleted again.
+   */
+  private async addPieces(pieces: Piece[], options: AddOptions): Promise<AddOutcome> {
+    const { guild } = this.deps;
+    const { kind } = this;
+    const created: CreatedExpression[] = [];
+    let current: Piece | undefined;
+    let refusal: { piece: string; problem: string } | undefined;
+
+    try {
+      const existing = await guild.list(kind.type);
+      for (const piece of pieces) {
+        if (piece.expressionId) continue;
+        current = piece;
+        const lower = piece.name.toLowerCase();
+        const same = existing.find((e) => e.name.toLowerCase() === lower);
+        // When resuming, the bot may have added it just before it went down,
+        // without saving the ID. Anyone else's is in the way.
+        if (same && !(options.resume && same.mine)) {
+          refusal = {
+            piece: piece.name,
+            problem: `another ${kind.noun} with that name was added in the meantime`,
+          };
+          break;
+        }
+        let id = same?.id;
+        if (!id) {
+          const added = await guild.create(kind.type, {
+            name: piece.name,
+            image: piece.image,
+            description: options.description,
+            tags: options.tags,
+            reason: options.reason,
+          });
+          created.push(added);
+          id = added.id;
+        }
+        this.setPieceId(piece, id, options);
+      }
+    } catch (err) {
+      if (!(err instanceof ExpressionRejected)) {
+        if (options.resume) throw err;
+        const kept = await this.removePieces(pieces, `Rolled back: adding ${current?.name} failed`, options);
+        return { status: "failed", error: err, kept };
+      }
+      refusal = { piece: current!.name, problem: `Fluxer refused it (${err.message})` };
+    }
+
+    if (!refusal) return { status: "added", created };
+    const kept = await this.removePieces(
+      pieces,
+      `Rolled back: ${refusal.piece} couldn't be added`,
+      options,
+    );
+    return { status: "refused", ...refusal, kept };
+  }
+
+  /**
+   * Deletes the pieces that have an ID and returns the names of those left
+   * in the guild. When resuming, errors other than a refusal are thrown
+   * instead; the next attempt runs into the same problem and finishes the job.
+   */
+  private async removePieces(pieces: Piece[], reason: string, options: AddOptions): Promise<string[]> {
+    const kept: string[] = [];
+    for (const piece of pieces) {
+      if (!piece.expressionId) continue;
+      try {
+        await this.deps.guild.remove(this.kind.type, piece.expressionId, reason);
+      } catch (err) {
+        if (options.resume && !(err instanceof ExpressionRejected)) throw err;
+        console.warn(`could not roll back the ${this.kind.display(piece.name)}:`, err);
+        kept.push(piece.name);
+        continue;
+      }
+      this.setPieceId(piece, null, options);
+    }
+    return kept;
+  }
+
+  private setPieceId(piece: Piece, expressionId: string | null, options: AddOptions) {
+    piece.expressionId = expressionId;
+    options.save?.(piece, expressionId);
+  }
+
+  private setExpressionId(pollId: number, position: number, expressionId: string | null) {
+    this.deps.db
+      .update(proposalImages)
+      .set({ expressionId })
+      .where(and(eq(proposalImages.pollId, pollId), eq(proposalImages.position, position)))
+      .run();
   }
 
   private setStatus(pollId: number, values: Partial<Proposal>) {
@@ -375,4 +735,19 @@ function passes(proposal: Proposal, tally: Tally): boolean {
   const yes = tally.counts.yes ?? 0;
   const no = tally.counts.no ?? 0;
   return yes >= proposal.requiredYes && yes > no;
+}
+
+/** What a rollback of `count` pieces left behind, as a sentence. */
+function rolledBack(kind: ExpressionKind, count: number, kept: string[]): string {
+  return kept.length === 0 ? `None of the ${count} ${kind.plural} were added.` : notRemoved(kind, kept);
+}
+
+/** e.g. "`:sadi_1:` couldn't be removed again; it has to be deleted by hand." */
+function notRemoved(kind: ExpressionKind, names: string[]): string {
+  const subject = names.length === 1 ? "it has" : "they have";
+  return `${names.map(kind.code).join(" ")} couldn't be removed again; ${subject} to be deleted by hand.`;
+}
+
+function dataUrl(mime: string, image: Uint8Array): string {
+  return `data:${mime};base64,${Buffer.from(image).toString("base64")}`;
 }
