@@ -1,5 +1,6 @@
 import type { Bot } from "../bot.ts";
 import type { MessageBody } from "../messages/body.ts";
+import type { MemberPermissions, Permission } from "../permissions/rules.ts";
 
 // Commands are written against this module only. The prefix adapter in
 // router.ts turns a chat message into a CommandContext; slash commands will get
@@ -97,14 +98,12 @@ export function formatError(message: string): string {
   return `⚠️ ${message}`;
 }
 
-/** Returns a reason to refuse the command, or undefined to allow it. */
-export type Guard = (ctx: CommandContext<unknown>) => Promise<string | undefined>;
-
 export interface Command<O extends readonly OptionSpec[] = readonly OptionSpec[]> {
   name: string;
   description: string;
   options?: O;
-  guard?: Guard;
+  /** Members without it are refused, and `!help` leaves the command out for them. */
+  permission?: Permission;
   run(ctx: CommandContext<Options<O>>): Promise<void>;
 }
 
@@ -118,6 +117,10 @@ export type CommandEntry = Command | CommandGroup;
 
 export function isGroup(entry: CommandEntry): entry is CommandGroup {
   return "subcommands" in entry;
+}
+
+export function mayRun(command: Command, permissions: MemberPermissions): boolean {
+  return command.permission === undefined || permissions.has(command.permission);
 }
 
 /** Identity function that infers option names and types for `run`. */

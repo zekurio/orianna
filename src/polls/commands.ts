@@ -21,6 +21,7 @@ export function pollCommands(community: CommunityPolls): CommandEntry[] {
         rest: true,
       },
     ],
+    permission: "polls.create",
     async run(ctx) {
       await community.start(ctx.userId, ctx.channelId, ctx.options.question);
       // The poll stands in for the command, the way a slash command's reply would.

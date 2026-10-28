@@ -5,7 +5,7 @@ import type { DB } from "../db/index.ts";
 import { type PollOption, polls } from "../db/schema.ts";
 import { emojiKey, type ParsedEmoji, parseEmoji, type ReactionEmoji, reactionKey } from "../emoji.ts";
 import { ACCENT, type MessageBody } from "../messages/body.ts";
-import type { GuildAccess } from "../permissions.ts";
+import type { GuildAccess } from "../permissions/rules.ts";
 import { HOUR, looksLikeDuration, MINUTE, parseDuration, plural, WEEK } from "./duration.ts";
 import { type Poll, type PollHandler, type PollService, type Tally, timestamp } from "./service.ts";
 import type { PollTransport } from "./transport.ts";
@@ -13,7 +13,7 @@ import type { PollTransport } from "./transport.ts";
 /** Poll kind of the polls members start with `!poll`. */
 export const COMMUNITY_POLL = "poll";
 
-/** Reacting with this ends a poll early, when it's the poll's creator or an admin. */
+/** Ends a poll early when its creator, or someone with `polls.end-any`, reacts with it. */
 const STOP = "🛑";
 
 const QUESTION_MAX = 250;
@@ -109,14 +109,7 @@ export class CommunityPolls implements PollHandler {
 
   /** Posts a poll in `channelId`. `text` is read by {@link parsePollInput}. */
   async start(userId: string, channelId: string, text: string): Promise<Poll> {
-    const { config, access, chat } = this.deps;
-    if (
-      config.creatorRoleIds.length > 0 &&
-      !(await access.hasAnyRole(userId, config.creatorRoleIds))
-    ) {
-      throw new UserError("You don't have a role that can start polls.");
-    }
-
+    const { config, chat } = this.deps;
     const input = parsePollInput(text);
     await this.checkCustomEmoji(input.options);
 
@@ -142,7 +135,10 @@ export class CommunityPolls implements PollHandler {
     return poll;
   }
 
-  /** 🛑 from the creator or an admin ends the poll; anyone else's is taken back. */
+  /**
+   * 🛑 from the creator, or someone with `polls.end-any`, ends the poll.
+   * Anyone else's is taken back.
+   */
   async onOtherReaction(poll: Poll, userId: string, emoji: ReactionEmoji) {
     if (reactionKey(emoji) !== emojiKey(STOP)) return;
     if (await this.mayEnd(poll, userId)) {
@@ -215,7 +211,7 @@ export class CommunityPolls implements PollHandler {
   }
 
   private async mayEnd(poll: Poll, userId: string): Promise<boolean> {
-    return poll.createdBy === userId || (await this.deps.access.isAdmin(userId));
+    return poll.createdBy === userId || (await this.deps.access.can(userId, "polls.end-any"));
   }
 
   private async takeBackStop(poll: Poll, userId: string) {

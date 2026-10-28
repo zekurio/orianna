@@ -6,7 +6,6 @@ import {
   UserError,
 } from "../commands/command.ts";
 import { embedPages } from "../messages/body.ts";
-import { adminOnly, expressionManagersOnly } from "../permissions.ts";
 import { normalizeSlug } from "../polls/slug.ts";
 import { downloadImage } from "./image.ts";
 import { type ExpressionInput, type ExpressionProposals, parseTags } from "./proposals.ts";
@@ -112,13 +111,14 @@ export function proposalCommands(
       name: "propose",
       description: `Propose a new ${kind.noun}; ${linkHelp}.`,
       options,
+      permission: `${kind.type}.propose`,
       run: propose,
     }),
     defineCommand({
       name: "add",
-      description: `Add the ${kind.noun} right away, without a vote (Manage Expressions).`,
+      description: `Add the ${kind.noun} right away, without a vote.`,
       options,
-      guard: expressionManagersOnly,
+      permission: `${kind.type}.add`,
       run: add,
     }),
   ];
@@ -141,7 +141,7 @@ export function proposalCommands(
     name: "approve",
     description: `End the vote early and add the ${kind.noun}.`,
     options: [id, reason],
-    guard: adminOnly,
+    permission: `${kind.type}.decide`,
     async run(ctx) {
       await proposals.decide(ctx.options.id, ctx.userId, "approve", ctx.options.reason);
       await ctx.reply(
@@ -154,7 +154,7 @@ export function proposalCommands(
     name: "reject",
     description: `End the vote early without adding the ${kind.noun}.`,
     options: [id, reason],
-    guard: adminOnly,
+    permission: `${kind.type}.decide`,
     async run(ctx) {
       await proposals.decide(ctx.options.id, ctx.userId, "reject", ctx.options.reason);
       await ctx.reply(
@@ -165,7 +165,7 @@ export function proposalCommands(
 
   const cancel = defineCommand({
     name: "cancel",
-    description: "Withdraw a proposal (proposer or admin).",
+    description: `Withdraw your proposal, or anyone's with \`${kind.type}.cancel-any\`.`,
     options: [id],
     async run(ctx) {
       await proposals.cancel(ctx.options.id, ctx.userId);

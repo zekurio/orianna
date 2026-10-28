@@ -1,9 +1,9 @@
 import Type from "typebox";
 import Value from "typebox/value";
 import { parseEmoji } from "./emoji.ts";
+import { ruleProblem } from "./permissions/rules.ts";
 
 const Snowflake = Type.String({ pattern: "^[0-9]+$" });
-const Snowflakes = Type.Array(Snowflake, { default: [] });
 
 /** Shared by the `emoji` and `sticker` sections. */
 const ProposalConfigSchema = Type.Object(
@@ -15,8 +15,6 @@ const ProposalConfigSchema = Type.Object(
      * (512 KiB for both by default). Larger images are scaled down to fit.
      */
     maxImageBytes: Type.Integer({ minimum: 1, default: 524288 }),
-    /** Roles allowed to propose. Empty means everyone. */
-    proposerRoleIds: Snowflakes,
   },
   { additionalProperties: false },
 );
@@ -26,10 +24,24 @@ const PollsConfigSchema = Type.Object(
     /** How long a poll runs when it's given no duration. Polls run 4 weeks at most. */
     defaultHours: Type.Number({ exclusiveMinimum: 0, maximum: 672, default: 24 }),
     maxOpenPerUser: Type.Integer({ minimum: 1, default: 5 }),
-    /** Roles allowed to start polls. Empty means everyone. */
-    creatorRoleIds: Snowflakes,
   },
   { additionalProperties: false },
+);
+
+/** Rules are lists like `["+emoji.*", "-emoji.decide"]`; see `permissions` below. */
+const PermissionsSchema = Type.Object(
+  {
+    /**
+     * Rules for every member. Setting it replaces the default, which lets
+     * everyone propose emojis and stickers and start polls.
+     */
+    everyone: Type.Array(Type.String(), {
+      default: ["+emoji.propose", "+sticker.propose", "+polls.create"],
+    }),
+    /** Rules for members with a role, keyed by role ID. */
+    roles: Type.Record(Type.String(), Type.Array(Type.String()), { default: {} }),
+  },
+  { additionalProperties: false, default: {} },
 );
 
 const RoleMenuOptionSchema = Type.Object(
@@ -83,10 +95,29 @@ export const ConfigSchema = Type.Object(
     /** SQLite file. Relative paths resolve against the working directory. */
     database: Type.String({ minLength: 1, default: "./data/orianna.db" }),
     /**
-     * Roles allowed to run admin commands, in addition to the guild owner and
-     * members with Manage Expressions.
+     * Who may do what, as rules like `+emoji.add` to allow and `-polls.*` to
+     * deny. A rule names one permission, a group like `emoji.*`, or `*` for
+     * all of them:
+     *
+     * - `emoji.propose`: put an emoji up for a vote
+     * - `emoji.add`: add an emoji without a vote
+     * - `emoji.decide`: approve or reject a proposal before the vote ends
+     * - `emoji.cancel-any`: withdraw anyone's proposal, not just one's own
+     * - `sticker.propose`, `sticker.add`, `sticker.decide`, `sticker.cancel-any`
+     * - `polls.create`: start a poll with `!poll`
+     * - `polls.end-any`: end anyone's poll early with 🛑, not just one's own
+     *
+     * The most specific rule that names a permission decides it, so
+     * `-emoji.decide` beats `+emoji.*`, which beats `+*`. Between rules that
+     * are just as specific, a role's rule beats Manage Expressions, which beats
+     * `everyone`, and a higher role beats a lower one. A permission no rule
+     * names is denied.
+     *
+     * Members with Manage Expressions get `+emoji.*` and `+sticker.*`. The
+     * guild owner and members with Administrator may do everything. `!perms`
+     * shows what a member may do and which rule decided it.
      */
-    adminRoleIds: Snowflakes,
+    permissions: PermissionsSchema,
     /** Emoji proposals are disabled when this section is missing. */
     emoji: Type.Optional(ProposalConfigSchema),
     /** Sticker proposals are disabled when this section is missing. */
@@ -114,6 +145,7 @@ export const ConfigSchema = Type.Object(
 export type Config = Type.Static<typeof ConfigSchema>;
 export type ProposalConfig = Type.Static<typeof ProposalConfigSchema>;
 export type PollsConfig = Type.Static<typeof PollsConfigSchema>;
+export type PermissionsConfig = Type.Static<typeof PermissionsSchema>;
 export type RoleMenusConfig = Type.Static<typeof RoleMenusSchema>;
 export type RoleMenuConfig = Type.Static<typeof RoleMenuSchema>;
 
@@ -124,6 +156,7 @@ export class ConfigError extends Error {
 export function parseConfig(raw: unknown): Config {
   const value = Value.Default(ConfigSchema, Value.Clone(raw));
   if (Value.Check(ConfigSchema, value)) {
+    checkPermissions(value);
     checkRoleMenus(value);
     return value;
   }
@@ -140,6 +173,45 @@ export function parseConfig(raw: unknown): Config {
     return [`  ${e.instancePath || "/"}: ${e.message}`];
   });
   throw new ConfigError(`invalid config:\n${problems.join("\n")}`);
+}
+
+/** What the schema can't express: rule syntax, one rule per permission, and role IDs. */
+function checkPermissions(config: Config) {
+  const { everyone, roles } = config.permissions;
+  const problems = checkRules(everyone, "/permissions/everyone");
+
+  for (const [roleId, rules] of Object.entries(roles)) {
+    const at = `/permissions/roles/${roleId}`;
+    if (!/^[0-9]+$/.test(roleId)) {
+      problems.push(`  ${at}: ${roleId} is not a role ID`);
+    } else if (roleId === config.guildId) {
+      problems.push(`  ${at}: that's the @everyone role; put its rules in /permissions/everyone`);
+    } else {
+      problems.push(...checkRules(rules, at));
+    }
+  }
+
+  if (problems.length > 0) throw new ConfigError(`invalid config:\n${problems.join("\n")}`);
+}
+
+/**
+ * Checks each rule, and that a list names each target once: with both
+ * `+emoji.add` and `-emoji.add`, their order would decide.
+ */
+function checkRules(rules: readonly string[], at: string): string[] {
+  const problems: string[] = [];
+  const targets = new Set<string>();
+  rules.forEach((rule, i) => {
+    const problem = ruleProblem(rule);
+    const target = rule.slice(1);
+    if (problem) {
+      problems.push(`  ${at}/${i}: ${problem}`);
+    } else if (targets.has(target)) {
+      problems.push(`  ${at}/${i}: another rule in this list already names ${target}`);
+    }
+    targets.add(target);
+  });
+  return problems;
 }
 
 /** What the schema can't express: unique names, emoji per menu, and roles. */

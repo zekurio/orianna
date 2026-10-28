@@ -9,7 +9,8 @@ import { proposalCommands } from "./expressions/commands.ts";
 import { FluxerExpressionGuild } from "./expressions/fluxer.ts";
 import { checkImageMagick } from "./expressions/process.ts";
 import { EMOJI, ExpressionProposals, STICKER } from "./expressions/proposals.ts";
-import { FluxerGuildAccess } from "./permissions.ts";
+import { perms } from "./permissions/commands.ts";
+import { FluxerGuildAccess } from "./permissions/fluxer.ts";
 import { pollCommands } from "./polls/commands.ts";
 import { COMMUNITY_POLL, CommunityPolls } from "./polls/community.ts";
 import { attachPollMessageDeletes, FluxerPollTransport } from "./polls/fluxer.ts";
@@ -24,11 +25,11 @@ async function main() {
   const db = openDatabase(config.database);
 
   const client = await Client.fromDiscovery(config.instance);
-  const access = new FluxerGuildAccess(client, config.guildId, config.adminRoleIds);
+  const access = new FluxerGuildAccess(client, config.guildId, config.permissions);
   const pollTransport = new FluxerPollTransport(client, config.guildId);
   const polls = new PollService(db, pollTransport);
 
-  const commands: CommandEntry[] = [ping, help];
+  const commands: CommandEntry[] = [ping, help, perms];
   const guild = new FluxerExpressionGuild(client, config.guildId);
   for (const [kind, section] of [
     [EMOJI, config.emoji],
@@ -83,6 +84,14 @@ async function main() {
       .catch((err) => console.error("poll reconcile failed:", err))
       .finally(() => polls.start());
     void roleMenus.sync();
+    void access
+      .unknownRoles()
+      .then((ids) => {
+        for (const id of ids) {
+          console.warn(`permissions.roles: there is no role ${id}, so its rules do nothing`);
+        }
+      })
+      .catch((err) => console.error("checking permission roles failed:", err));
   });
   client.on(Events.MessageCreate, (message) => {
     void router.handleMessage(bot, message);

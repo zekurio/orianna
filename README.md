@@ -8,7 +8,9 @@ round) are cut into pieces. Members with Manage Expressions can skip the vote
 with `!emoji add` and `!sticker add`. Members can also start their own polls
 with `!poll`, with live results and an announcement when they end. Role menus
 let members pick roles, like announcement pings, by reacting to a message the
-bot keeps in sync with the config.
+bot keeps in sync with the config. Permission rules in the config decide which
+roles may do what, and `!perms` shows what a member may do and which rule
+decided it.
 
 Config keys are documented in [`src/config.ts`](src/config.ts) and NixOS module
 options in [`nix/module.nix`](nix/module.nix).

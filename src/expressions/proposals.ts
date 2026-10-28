@@ -3,7 +3,7 @@ import { UserError } from "../commands/command.ts";
 import type { ProposalConfig } from "../config.ts";
 import type { DB } from "../db/index.ts";
 import { polls, proposalImages, proposals } from "../db/schema.ts";
-import type { GuildAccess } from "../permissions.ts";
+import type { GuildAccess } from "../permissions/rules.ts";
 import type { Poll, PollHandler, PollService, Tally } from "../polls/service.ts";
 import { timestamp } from "../polls/service.ts";
 import { SOURCE_MAX_BYTES } from "./image.ts";
@@ -301,15 +301,9 @@ export class ExpressionProposals implements PollHandler {
 
   /** Puts the expression up for a vote. Returns the poll and the names it would add. */
   async propose(proposerId: string, input: ExpressionInput): Promise<{ poll: Poll; names: string[] }> {
-    const { config, access } = this.deps;
+    const { config } = this.deps;
     const { kind } = this;
 
-    if (
-      config.proposerRoleIds.length > 0 &&
-      !(await access.hasAnyRole(proposerId, config.proposerRoleIds))
-    ) {
-      throw new UserError(`You don't have a role that can propose ${kind.plural}.`);
-    }
     // Proposals still being prepared count too, so commands sent at the same
     // time can't get past the limit while their images are processed.
     const preparing = this.preparing.get(proposerId) ?? 0;
@@ -431,15 +425,15 @@ export class ExpressionProposals implements PollHandler {
     }
   }
 
-  /** An admin approves or rejects before the vote ends. */
+  /** Someone with the decide permission approves or rejects before the vote ends. */
   async decide(
     slug: string,
-    adminId: string,
+    deciderId: string,
     decision: "approve" | "reject",
     reason?: string,
   ) {
     const { poll } = this.requirePending(slug);
-    this.setStatus(poll.id, { decision, decidedBy: adminId, reason });
+    this.setStatus(poll.id, { decision, decidedBy: deciderId, reason });
 
     if (!(await this.deps.polls.close(poll.id))) {
       // The vote ended on its own in the meantime; let that outcome stand.
@@ -452,11 +446,12 @@ export class ExpressionProposals implements PollHandler {
     }
   }
 
-  /** The proposer or an admin withdraws a proposal. */
+  /** The proposer, or someone with the cancel-any permission, withdraws a proposal. */
   async cancel(slug: string, userId: string) {
     const { proposal, poll } = this.requirePending(slug);
-    if (proposal.proposerId !== userId && !(await this.deps.access.isAdmin(userId))) {
-      throw new UserError("Only the proposer or an admin can cancel a proposal.");
+    const anyone = `${this.kind.type}.cancel-any` as const;
+    if (proposal.proposerId !== userId && !(await this.deps.access.can(userId, anyone))) {
+      throw new UserError(`Only the proposer, or someone with \`${anyone}\`, can cancel a proposal.`);
     }
     if (!(await this.deps.polls.cancel(poll.id))) {
       throw new UserError(`Voting on poll \`${poll.slug}\` has already ended.`);

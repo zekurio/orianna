@@ -83,7 +83,7 @@ export const proposals = sqliteTable(
     status: text({ enum: ["pending", "added", "rejected", "failed", "cancelled"] })
       .notNull()
       .default("pending"),
-    /** Set when an admin decides before the vote ends. */
+    /** Set when someone decides before the vote ends. */
     decision: text({ enum: ["approve", "reject"] }),
     decidedBy: text(),
     reason: text(),

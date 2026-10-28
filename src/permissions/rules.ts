@@ -1,0 +1,142 @@
+import type { PermissionsConfig } from "../config.ts";
+
+// Who may do what. The config holds rules like `+emoji.add` or `-polls.*` for
+// everyone and per role; MemberPermissions works out which rule decides a
+// permission for a member. Nothing here knows about Fluxer.
+
+/** Everything a rule can allow or deny. src/config.ts says what each one does. */
+export const PERMISSIONS = [
+  "emoji.propose",
+  "emoji.add",
+  "emoji.decide",
+  "emoji.cancel-any",
+  "sticker.propose",
+  "sticker.add",
+  "sticker.decide",
+  "sticker.cancel-any",
+  "polls.create",
+  "polls.end-any",
+] as const;
+
+export type Permission = (typeof PERMISSIONS)[number];
+
+/** Named after the config section that turns the feature on. */
+export type PermissionGroup = "emoji" | "sticker" | "polls";
+
+export function groupOf(permission: Permission): PermissionGroup {
+  return permission.slice(0, permission.indexOf(".")) as PermissionGroup;
+}
+
+/** What a rule can name: a permission, a group like `emoji.*`, or `*` for all of them. */
+const TARGETS = new Set<string>([
+  ...PERMISSIONS,
+  ...PERMISSIONS.map((p) => `${groupOf(p)}.*`),
+  "*",
+]);
+
+/** Why a rule from the config can't be used, or undefined when it can. */
+export function ruleProblem(rule: string): string | undefined {
+  if (rule[0] !== "+" && rule[0] !== "-") {
+    return `${rule} must start with + to allow or - to deny`;
+  }
+  const target = rule.slice(1);
+  if (!TARGETS.has(target)) {
+    return `${target} is not a permission; use one of ${PERMISSIONS.join(", ")}, a group like polls.*, or *`;
+  }
+  return undefined;
+}
+
+/**
+ * Members with Manage Expressions can add and delete emojis and stickers in the
+ * client anyway. Role rules can still take these away.
+ */
+const MANAGE_EXPRESSIONS_RULES = ["+emoji.*", "+sticker.*"];
+
+/** Where a rule comes from, to explain a decision. */
+export type RuleSource =
+  | { kind: "everyone" }
+  | { kind: "manage-expressions" }
+  | { kind: "role"; roleId: string };
+
+export interface RuleSet {
+  source: RuleSource;
+  rules: readonly string[];
+}
+
+export interface Decision {
+  allowed: boolean;
+  /** The rule that decided, with where it came from; unset when no rule names the permission. */
+  rule?: string;
+  source?: RuleSource;
+}
+
+/** Why a member may do everything, whatever the rules say. */
+export type Bypass = "owner" | "administrator";
+
+/** What the guild knows about a member, as far as rules are concerned. */
+export interface MemberFacts {
+  /** The member's roles, lowest first. */
+  roleIds: readonly string[];
+  manageExpressions: boolean;
+}
+
+/** The rule sets that apply to a member, weakest first. */
+export function ruleSets(config: PermissionsConfig, member: MemberFacts): RuleSet[] {
+  const sets: RuleSet[] = [{ source: { kind: "everyone" }, rules: config.everyone }];
+  if (member.manageExpressions) {
+    sets.push({ source: { kind: "manage-expressions" }, rules: MANAGE_EXPRESSIONS_RULES });
+  }
+  for (const roleId of member.roleIds) {
+    const rules = config.roles[roleId];
+    if (rules) sets.push({ source: { kind: "role", roleId }, rules });
+  }
+  return sets;
+}
+
+/** What one member may do. */
+export class MemberPermissions {
+  /** `sets` from {@link ruleSets}, weakest first. */
+  constructor(
+    readonly bypass: Bypass | null,
+    private readonly sets: readonly RuleSet[],
+  ) {}
+
+  /**
+   * The most specific rule naming the permission decides: `-emoji.add` beats
+   * `+emoji.*`, which beats `+*`. Between rules just as specific, the later
+   * set wins, so a higher role beats a lower one. Without a rule it's denied.
+   */
+  decide(permission: Permission): Decision {
+    if (this.bypass) return { allowed: true };
+
+    let decision: Decision = { allowed: false };
+    let best = -1;
+    for (const { source, rules } of this.sets) {
+      for (const rule of rules) {
+        const level = specificity(rule.slice(1), permission);
+        if (level < 0 || level < best) continue;
+        best = level;
+        decision = { allowed: rule[0] === "+", rule, source };
+      }
+    }
+    return decision;
+  }
+
+  has(permission: Permission): boolean {
+    return this.decide(permission).allowed;
+  }
+}
+
+/** 2 when the target is the permission, 1 for its group, 0 for `*`, -1 when it doesn't match. */
+function specificity(target: string, permission: Permission): number {
+  if (target === permission) return 2;
+  if (target === `${groupOf(permission)}.*`) return 1;
+  if (target === "*") return 0;
+  return -1;
+}
+
+/** Answers what members of the bot's guild may do. */
+export interface GuildAccess {
+  permissionsOf(userId: string): Promise<MemberPermissions>;
+  can(userId: string, permission: Permission): Promise<boolean>;
+}

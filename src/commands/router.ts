@@ -7,10 +7,12 @@ import {
   type Command,
   type CommandContext,
   type CommandEntry,
+  type CommandGroup,
   type OptionValue,
   formatError,
   formatUsage,
   isGroup,
+  mayRun,
   UserError,
 } from "./command.ts";
 import { ArgumentError, nextWord, parseOptions } from "./options.ts";
@@ -57,8 +59,9 @@ export class CommandRouter {
         ? entry.subcommands.find((c) => c.name === second.word.toLowerCase())
         : undefined;
       if (!second || !sub) {
-        const lines = entry.subcommands.map((c) => usageLine(prefix, `${entry.name} ${c.name}`, c));
-        await base.reply(lines.join("\n"));
+        await listSubcommands(bot, base, entry).catch((err) =>
+          console.error(`listing ${entry.name} commands failed:`, err),
+        );
         return;
       }
       command = sub;
@@ -87,9 +90,9 @@ export class CommandRouter {
     ctx: CommandContext<Record<string, OptionValue>>,
   ) {
     try {
-      const refused = await command.guard?.(ctx);
-      if (refused) {
-        await ctx.error(refused);
+      const { permission } = command;
+      if (permission && !(await ctx.bot.access.can(ctx.userId, permission))) {
+        await ctx.error(`You need the \`${permission}\` permission for that.`);
         return;
       }
       await command.run(ctx);
@@ -102,6 +105,15 @@ export class CommandRouter {
       await ctx.error("Something went wrong running that command.").catch(() => {});
     }
   }
+}
+
+/** Answers a group name on its own with the subcommands the member may run. */
+async function listSubcommands(bot: Bot, ctx: BaseContext, group: CommandGroup) {
+  const permissions = await bot.access.permissionsOf(ctx.userId);
+  const lines = group.subcommands
+    .filter((c) => mayRun(c, permissions))
+    .map((c) => usageLine(bot.config.prefix, `${group.name} ${c.name}`, c));
+  await ctx.reply(lines.length > 0 ? lines.join("\n") : "There's nothing here you may run.");
 }
 
 export function usageLine(prefix: string, path: string, command: Command): string {

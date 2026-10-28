@@ -161,7 +161,7 @@ export function attachRoleMenuEvents(client: Client, menus: RoleMenus, guildId: 
 }
 
 /** fluxer.js reports a 404 as `*_NOT_FOUND`; raw REST calls carry the API's `UNKNOWN_*`. */
-function isNotFound(err: unknown): boolean {
+export function isNotFound(err: unknown): boolean {
   const { code, statusCode } = (err ?? {}) as { code?: unknown; statusCode?: unknown };
   if (statusCode === 404) return true;
   return typeof code === "string" && (code.endsWith("_NOT_FOUND") || code.startsWith("UNKNOWN_"));

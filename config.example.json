@@ -4,23 +4,27 @@
   "pollsChannelId": "000000000000000000",
   "prefix": "!",
   "database": "./data/orianna.db",
-  "adminRoleIds": [],
+  "permissions": {
+    "everyone": ["+emoji.propose", "+sticker.propose", "+polls.create"],
+    "roles": {
+      "100000000000000010": ["+*"],
+      "100000000000000011": ["+emoji.*", "+sticker.*", "+polls.end-any"],
+      "100000000000000012": ["-polls.create"]
+    }
+  },
   "emoji": {
     "votingHours": 48,
     "maxOpenPerUser": 3,
-    "maxImageBytes": 524288,
-    "proposerRoleIds": []
+    "maxImageBytes": 524288
   },
   "sticker": {
     "votingHours": 48,
     "maxOpenPerUser": 3,
-    "maxImageBytes": 524288,
-    "proposerRoleIds": []
+    "maxImageBytes": 524288
   },
   "polls": {
     "defaultHours": 24,
-    "maxOpenPerUser": 5,
-    "creatorRoleIds": []
+    "maxOpenPerUser": 5
   },
   "roleMenus": {
     "channelId": "000000000000000000",

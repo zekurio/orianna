@@ -40,7 +40,7 @@ in
         {
           instance = "https://chat.example.org";
           guildId = "1234567890";
-          adminRoleIds = [ "2345678901" ];
+          permissions.roles."2345678901" = [ "+*" ];
           pollsChannelId = "3456789012";
           emoji = { };
           sticker = { };
