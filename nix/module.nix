@@ -9,6 +9,12 @@ self:
 let
   cfg = config.services.orianna;
   format = pkgs.formats.json { };
+  configFile = format.generate "orianna.json" cfg.settings;
+  # The keys the bot applies on reload, as in reloadedConfig in src/config.ts.
+  reloaded = [
+    "prefix"
+    "permissions"
+  ];
 in
 {
   options.services.orianna = {
@@ -32,9 +38,10 @@ in
 
     settings = lib.mkOption {
       description = ''
-        Bot configuration, written to the JSON file the bot reads at startup.
-        See src/config.ts for every key. Unknown keys are
-        rejected when the bot starts.
+        Bot configuration, written to /etc/orianna/config.json. See
+        src/config.ts for every key. Unknown keys are rejected when the bot
+        starts. Changing only `prefix` or `permissions` reloads the bot;
+        changing anything else restarts it.
       '';
       example = lib.literalExpression ''
         {
@@ -74,16 +81,21 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    environment.etc."orianna/config.json".source = configFile;
+
     systemd.services.orianna = {
       description = "Orianna Fluxer bot";
       wantedBy = [ "multi-user.target" ];
       wants = [ "network-online.target" ];
       after = [ "network-online.target" ];
 
-      environment.ORIANNA_CONFIG = format.generate "orianna.json" cfg.settings;
+      environment.ORIANNA_CONFIG = "/etc/orianna/config.json";
+      reloadTriggers = [ configFile ];
+      restartTriggers = [ (builtins.toJSON (removeAttrs cfg.settings reloaded)) ];
 
       serviceConfig = {
         ExecStart = lib.getExe cfg.package;
+        ExecReload = "${pkgs.coreutils}/bin/kill -HUP $MAINPID";
         LoadCredential = "token:${cfg.tokenFile}";
         DynamicUser = true;
         StateDirectory = "orianna";

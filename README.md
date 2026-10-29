@@ -13,7 +13,10 @@ roles may do what, and `!perms` shows what a member may do and which rule
 decided it.
 
 Config keys are documented in [`src/config.ts`](src/config.ts) and NixOS module
-options in [`nix/module.nix`](nix/module.nix).
+options in [`nix/module.nix`](nix/module.nix). Send the bot SIGHUP
+(`systemctl reload orianna`) to apply changes to `prefix` and `permissions`
+without a restart; other keys take a restart. With the NixOS module, a switch
+reloads or restarts the bot on its own, depending on what changed.
 
 ## Development
 

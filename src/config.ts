@@ -83,6 +83,12 @@ const RoleMenusSchema = Type.Object(
   { additionalProperties: false },
 );
 
+/**
+ * On SIGHUP (`systemctl reload orianna`) the bot reads the file again and
+ * applies `prefix` and `permissions`. Every other key is read once at startup,
+ * and changing it takes a restart. A file that doesn't load is ignored, and the
+ * bot keeps the config it has.
+ */
 export const ConfigSchema = Type.Object(
   {
     /** Origin of the Fluxer instance. The client reads `/.well-known/fluxer` from here. */
@@ -91,6 +97,7 @@ export const ConfigSchema = Type.Object(
     guildId: Snowflake,
     /** Channel where emoji and sticker proposals are put to a vote. */
     pollsChannelId: Snowflake,
+    /** What commands start with, e.g. `!` for `!help`. */
     prefix: Type.String({ minLength: 1, default: "!" }),
     /** SQLite file. Relative paths resolve against the working directory. */
     database: Type.String({ minLength: 1, default: "./data/orianna.db" }),
@@ -266,6 +273,19 @@ export async function loadConfig(
     throw new ConfigError(`${path} is not valid JSON: ${(err as Error).message}`);
   }
   return parseConfig(raw);
+}
+
+/**
+ * What a reload applies: `prefix` and `permissions` from `next`, the rest kept
+ * from `current`. Also returns the keys that still differ from `next`, which
+ * only a restart applies. nix/module.nix restarts the bot when one of them
+ * changes, so keep its list of reloaded keys in step with this one.
+ */
+export function reloadedConfig(current: Config, next: Config) {
+  const config: Config = { ...current, prefix: next.prefix, permissions: next.permissions };
+  const keys = new Set([...Object.keys(current), ...Object.keys(next)]) as Set<keyof Config>;
+  const needRestart = [...keys].filter((key) => !Bun.deepEquals(config[key], next[key]));
+  return { config, needRestart };
 }
 
 /**

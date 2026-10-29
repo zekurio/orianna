@@ -8,7 +8,8 @@ export class FluxerGuildAccess implements GuildAccess {
   constructor(
     private readonly client: Client,
     private readonly guildId: string,
-    private readonly config: PermissionsConfig,
+    /** Read on every check, so reloaded rules apply at once. */
+    private readonly config: () => PermissionsConfig,
   ) {}
 
   async permissionsOf(userId: string) {
@@ -30,7 +31,7 @@ export class FluxerGuildAccess implements GuildAccess {
       .sort((a, b) => position(a) - position(b));
     return new MemberPermissions(
       null,
-      ruleSets(this.config, {
+      ruleSets(this.config(), {
         roleIds,
         manageExpressions: member.permissions.has("ManageExpressions"),
       }),
@@ -45,6 +46,6 @@ export class FluxerGuildAccess implements GuildAccess {
   async unknownRoles(): Promise<string[]> {
     const guild = await this.client.guilds.resolve(this.guildId);
     const roles = new Set((await guild.fetchRoles()).map((r) => r.id));
-    return Object.keys(this.config.roles).filter((id) => !roles.has(id));
+    return Object.keys(this.config().roles).filter((id) => !roles.has(id));
   }
 }

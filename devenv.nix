@@ -16,7 +16,9 @@
   };
 
   # The bot token comes from FLUXER_BOT_TOKEN in .env, which bun loads automatically.
+  # devenv's dotenv integration stays off so the token isn't exported to the shell.
   env.ORIANNA_CONFIG = "./config.json";
+  dotenv.disableHint = true;
 
   enterTest = ''
     bun run typecheck

@@ -3,7 +3,7 @@ import type { Bot } from "./bot.ts";
 import type { CommandEntry } from "./commands/command.ts";
 import { help, ping } from "./commands/general.ts";
 import { CommandRouter } from "./commands/router.ts";
-import { ConfigError, loadConfig, readToken } from "./config.ts";
+import { ConfigError, loadConfig, readToken, reloadedConfig } from "./config.ts";
 import { openDatabase } from "./db/index.ts";
 import { proposalCommands } from "./expressions/commands.ts";
 import { FluxerExpressionGuild } from "./expressions/fluxer.ts";
@@ -20,12 +20,23 @@ import { attachRoleMenuEvents, FluxerRoleGuild } from "./roles/fluxer.ts";
 import { RoleMenus } from "./roles/menus.ts";
 
 async function main() {
+  // Without a handler SIGHUP would end the process, and systemd doesn't restart
+  // a service that SIGHUP ended. Reloads wait for the first login, then run in turn.
+  const ready = Promise.withResolvers<void>();
+  let reloads = ready.promise;
+  process.on("SIGHUP", () => {
+    reloads = reloads.then(reload).catch((err) => {
+      const why = err instanceof ConfigError ? err.message : err;
+      console.error("config not reloaded, keeping the old one:", why);
+    });
+  });
+
   const config = await loadConfig();
   const token = await readToken();
   const db = openDatabase(config.database);
 
   const client = await Client.fromDiscovery(config.instance);
-  const access = new FluxerGuildAccess(client, config.guildId, config.permissions);
+  const access = new FluxerGuildAccess(client, config.guildId, () => bot.config.permissions);
   const pollTransport = new FluxerPollTransport(client, config.guildId);
   const polls = new PollService(db, pollTransport);
 
@@ -84,14 +95,8 @@ async function main() {
       .catch((err) => console.error("poll reconcile failed:", err))
       .finally(() => polls.start());
     void roleMenus.sync();
-    void access
-      .unknownRoles()
-      .then((ids) => {
-        for (const id of ids) {
-          console.warn(`permissions.roles: there is no role ${id}, so its rules do nothing`);
-        }
-      })
-      .catch((err) => console.error("checking permission roles failed:", err));
+    warnUnknownRoles(access);
+    ready.resolve();
   });
   client.on(Events.MessageCreate, (message) => {
     void router.handleMessage(bot, message);
@@ -99,6 +104,16 @@ async function main() {
   attachReactions(client, polls, "poll");
   if (community) attachPollMessageDeletes(client, community);
   attachRoleMenuEvents(client, roleMenus, config.guildId);
+
+  async function reload() {
+    const next = reloadedConfig(bot.config, await loadConfig());
+    bot.config = next.config;
+    console.info("config reloaded");
+    if (next.needRestart.length > 0) {
+      console.warn(`restart to apply the changes to ${next.needRestart.join(", ")}`);
+    }
+    warnUnknownRoles(access);
+  }
 
   const shutdown = async (signal: string) => {
     console.info(`received ${signal}, shutting down`);
@@ -111,6 +126,17 @@ async function main() {
   process.once("SIGTERM", () => void shutdown("SIGTERM"));
 
   await client.login(token);
+}
+
+function warnUnknownRoles(access: FluxerGuildAccess) {
+  void access
+    .unknownRoles()
+    .then((ids) => {
+      for (const id of ids) {
+        console.warn(`permissions.roles: there is no role ${id}, so its rules do nothing`);
+      }
+    })
+    .catch((err) => console.error("checking permission roles failed:", err));
 }
 
 main().catch((err) => {

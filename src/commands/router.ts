@@ -176,6 +176,9 @@ async function sendPaginated(message: Message, pages: readonly MessageBody[]) {
   const report = (err: unknown) => console.warn("pagination failed:", err);
 
   collector.on("collect", (reaction, user) => {
+    // The collector reports each user and emoji only once; forget them so the
+    // same arrow turns the page again the next time it's pressed.
+    collector.collected.clear();
     const name = reaction.emoji.name;
     const step = name ? PAGE_STEPS[name.replaceAll("\uFE0F", "")] : undefined;
     if (!step) return;

@@ -51,6 +51,9 @@ const RGI_EMOJI = /^\p{RGI_Emoji}$/v;
 /** Colour of polls that are over. */
 const ENDED = 0x80848e;
 const BAR_WIDTH = 10;
+/** Close to the gold of `ACCENT`. */
+const BAR_FILLED = "🟨";
+const BAR_EMPTY = "⬛";
 
 /** What community polls need from the chat platform besides the poll service. */
 export interface CommunityPollChat
@@ -354,7 +357,7 @@ export function renderCommunityPoll(poll: Poll, tally: Tally): MessageBody {
     const votes = tally.counts[option.key] ?? 0;
     const share = tally.voters === 0 ? 0 : votes / tally.voters;
     const won = !open && top > 0 && votes === top ? " 🏆" : "";
-    return `${name}${won}\n\`${bar(share)}\` ${percent(share)} · ${plural(votes, "vote")}`;
+    return `${name}${won}\n${bar(share)} **${percent(share)}** · ${plural(votes, "vote")}`;
   });
   const about = open
     ? `Asked by <@${poll.createdBy}> · ends ${timestamp(poll.closesAt)}`
@@ -405,9 +408,16 @@ function answerText(option: PollOption): string {
   return option.label ? `${emojiText(option)} **${option.label}**` : emojiText(option);
 }
 
+/**
+ * Emoji squares rather than block characters, which code fonts draw with
+ * seams and dithering. Any vote shows at least one square, and only a share
+ * of everyone fills the bar.
+ */
 function bar(share: number): string {
-  const filled = Math.round(share * BAR_WIDTH);
-  return "█".repeat(filled) + "░".repeat(BAR_WIDTH - filled);
+  let filled = Math.round(share * BAR_WIDTH);
+  if (share > 0) filled = Math.max(filled, 1);
+  if (share < 1) filled = Math.min(filled, BAR_WIDTH - 1);
+  return BAR_FILLED.repeat(filled) + BAR_EMPTY.repeat(BAR_WIDTH - filled);
 }
 
 function percent(share: number): string {
