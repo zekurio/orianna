@@ -9,8 +9,11 @@ import type { Embed, MessageBody } from "./body.ts";
 /** Nobody is notified. */
 export const NO_MENTIONS: AllowedMentionsOptions = { parse: [] };
 
-/** Every mention in the text notifies, `@everyone` and `@here` included. */
-export const ALL_MENTIONS: AllowedMentionsOptions = { parse: ["users", "roles", "everyone"] };
+/**
+ * Only `@everyone` and `@here` notify. Fluxer can't allow one without the
+ * other, so text from users has to go through `defuseEveryone` first.
+ */
+export const EVERYONE_MENTIONS: AllowedMentionsOptions = { parse: ["everyone"] };
 
 /**
  * Only the author of the message being replied to is notified. Replies can

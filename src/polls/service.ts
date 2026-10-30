@@ -51,10 +51,11 @@ export interface CreatePollInput {
   createdBy: string;
   files?: PollFile[];
   /**
-   * Let mentions in the poll message notify people, e.g. an `@here` in the
-   * description. Off by default, since questions often come from users.
+   * Let `@everyone` and `@here` in the poll message notify people, e.g. an
+   * `@here` in the description. Mentions of users and roles never do. Off by
+   * default, since questions often come from users.
    */
-  mentions?: boolean;
+  everyone?: boolean;
 }
 
 export interface PollServiceOptions {
@@ -141,7 +142,7 @@ export class PollService implements ReactionListener {
     try {
       messageId = await this.transport.post(inserted.channelId, this.body(inserted), {
         files: input.files,
-        mentions: input.mentions,
+        everyone: input.everyone,
       });
     } catch (err) {
       this.db.delete(polls).where(eq(polls.id, inserted.id)).run();

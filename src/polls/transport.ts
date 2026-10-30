@@ -19,8 +19,11 @@ export interface PollTransport {
 
 export interface PostOptions {
   files?: PollFile[];
-  /** Let mentions in the message notify people. Off unless asked for. */
-  mentions?: boolean;
+  /**
+   * Let `@everyone` and `@here` in the message notify people. Mentions of
+   * users and roles never do. Off unless asked for.
+   */
+  everyone?: boolean;
 }
 
 export interface PollFile {
