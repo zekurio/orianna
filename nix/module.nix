@@ -39,7 +39,7 @@ in
     settings = lib.mkOption {
       description = ''
         Bot configuration, written to /etc/orianna/config.json. See
-        src/config.ts for every key. Unknown keys are rejected when the bot
+        docs/configuration.md for every key. Unknown keys are rejected when the bot
         starts. Changing only `prefix` or `permissions` reloads the bot;
         changing anything else restarts it.
       '';
