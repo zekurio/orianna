@@ -18,7 +18,7 @@ turns it on with the defaults below.
 |---|---|---|
 | `instance` | Required | Origin of the Fluxer instance, like `https://chat.example.org`. The bot reads `/.well-known/fluxer` from it. |
 | `guildId` | Required | The guild the bot serves. It ignores messages from anywhere else. |
-| `pollsChannelId` | Required | The channel where emoji and sticker proposals go up for a vote. The bot needs it even when both are off. |
+| `pollsChannelId` | None | The channel where emoji and sticker proposals go up for a vote. Required when `emoji` or `sticker` is on. |
 | `prefix` | `"!"` | What commands start with |
 | `database` | `"./data/orianna.db"` | The SQLite file. A relative path starts from the working directory. The NixOS module sets `/var/lib/orianna/orianna.db`. |
 | `permissions` | See below | Who may do what. [Permissions](permissions.md) covers it. |

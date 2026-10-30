@@ -46,7 +46,8 @@ async function main() {
     [EMOJI, config.emoji],
     [STICKER, config.sticker],
   ] as const) {
-    if (!section) continue;
+    // parseConfig refuses a proposal section without pollsChannelId.
+    if (!section || config.pollsChannelId === undefined) continue;
     const proposals = new ExpressionProposals(kind, {
       db,
       polls,
