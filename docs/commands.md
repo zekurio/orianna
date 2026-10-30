@@ -42,6 +42,12 @@ Attach the image, paste a link to it, or paste a link to a 7TV emote:
 !emoji propose dance https://cdn.7tv.app/emote/01GCMQJGB0000D8ZK13J8KVCDX/4x.webp
 ```
 
+Links have to point at the public internet. The bot refuses a link to
+`localhost`, a private network or another reserved address, and checks every
+redirect the same way. The reply only says it couldn't download the image.
+Attached files always work, wherever the instance keeps them. Links to the
+instance's media host work too, even when it's on a private network.
+
 The bot takes PNG, JPEG, GIF, WebP and AVIF. It stops downloading at 8 MiB,
 or at `maxImageBytes` if you set that higher. An image larger than
 `maxImageBytes` is scaled down until it fits, and the bot tells you when it

@@ -62,14 +62,21 @@ export function proposalCommands(
   const linkHelp = "attach the image, or paste a link to it or to a 7TV emote";
 
   /** Checks what's cheap first, then downloads the image. */
-  async function readInput(options: InputOptions): Promise<ExpressionInput> {
+  async function readInput({ options, bot }: CommandContext<InputOptions>): Promise<ExpressionInput> {
     if (options.name !== undefined) kind.checkName(options.name);
     const tags = parseTags(options.tags);
 
-    const emote = sevenTvEmoteId(options.image.url);
+    // On a self-hosted instance, the media host and wherever Fluxer keeps
+    // attachments may be on a private network, which downloadImage otherwise
+    // refuses. Fluxer picks an attachment's URL, so its host is trusted; a
+    // pasted link is trusted only when it points at the media host.
+    const { image } = options;
+    const media = bot.client.instance.endpoints.media;
+    const trusted = image.linked ? [media] : [media, image.url];
+    const emote = sevenTvEmoteId(image.url);
     const source = emote
       ? await fetchSevenTvEmote(emote, proposals.downloadLimit)
-      : { name: undefined, image: await downloadImage(options.image.url, proposals.downloadLimit) };
+      : { name: undefined, image: await downloadImage(image.url, proposals.downloadLimit, trusted) };
 
     const name = options.name ?? (source.name !== undefined ? kind.fitName(source.name) : undefined);
     if (name === undefined) {
@@ -83,7 +90,7 @@ export function proposalCommands(
   }
 
   async function propose(ctx: CommandContext<InputOptions>) {
-    const input = await readInput(ctx.options);
+    const input = await readInput(ctx);
     const { poll, names } = await proposals.propose(ctx.userId, input);
     const cut =
       names.length > 1
@@ -95,7 +102,7 @@ export function proposalCommands(
   }
 
   async function add(ctx: CommandContext<InputOptions>) {
-    const input = await readInput(ctx.options);
+    const input = await readInput(ctx);
     const created = await proposals.add(ctx.userId, input);
     const mentions = created.map((c) => c.mention).filter(Boolean);
     const cut = created.length > 1 ? ` as ${created.length} ${kind.plural}` : "";

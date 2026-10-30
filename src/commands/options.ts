@@ -87,7 +87,7 @@ function splitLinks(input: string): { text: string; links: Attachment[] } {
     if (!URL.canParse(url)) return word;
     const { pathname, hostname } = new URL(url);
     const filename = pathname.split("/").at(-1) || hostname;
-    links.push({ url, filename, contentType: null, size: null });
+    links.push({ url, filename, contentType: null, size: null, linked: true });
     return space;
   });
   return { text, links };
