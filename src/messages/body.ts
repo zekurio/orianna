@@ -44,6 +44,15 @@ export function appendFooter(body: MessageBody, text: string): MessageBody {
   return { ...body, embeds: [...embeds.slice(0, -1), { ...last, footer }] };
 }
 
+/**
+ * Puts a zero-width space after the `@` of `@everyone` and `@here`. The text
+ * looks the same but can't notify anyone, even in a message that lets the
+ * bot's own `@here` through.
+ */
+export function defuseEveryone(text: string): string {
+  return text.replace(/@(everyone|here)/gi, "@\u200B$1");
+}
+
 /** One embed per page, each listing up to `perPage` of the lines. */
 export function embedPages(
   title: string,

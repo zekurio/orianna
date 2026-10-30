@@ -106,6 +106,11 @@ When a proposal passes, the bot adds the emoji and replies to the poll with
 the result. If Fluxer refuses the image, or someone added an emoji with the
 same name in the meantime, the reply says so.
 
+The reply with the result pings the proposer. That and the `@here` on the
+proposal are the only pings. An `@everyone`, `@here`, member or role mention
+in a name, description, tag or reason shows as written but doesn't notify
+anyone.
+
 Each member can have 3 open proposals of each kind at a time. `maxOpenPerUser`
 changes that.
 

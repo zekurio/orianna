@@ -75,10 +75,11 @@ export class FluxerExpressionGuild implements ExpressionGuild {
     }
   }
 
-  async send(channelId: string, content: string, replyTo?: string) {
+  async send(channelId: string, content: string, notify: readonly string[], replyTo?: string) {
     await this.client.channels.send(channelId, {
       content,
       replyTo: replyTo ? { channelId, messageId: replyTo, guildId: this.guildId } : undefined,
+      allowedMentions: { parse: [], users: [...notify] },
     });
   }
 }

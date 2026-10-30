@@ -3,6 +3,7 @@ import { UserError } from "../commands/command.ts";
 import type { ProposalConfig } from "../config.ts";
 import type { DB } from "../db/index.ts";
 import { polls, proposalImages, proposals } from "../db/schema.ts";
+import { defuseEveryone } from "../messages/body.ts";
 import type { GuildAccess } from "../permissions/rules.ts";
 import type { Poll, PollHandler, PollService, Tally } from "../polls/service.ts";
 import { timestamp } from "../polls/service.ts";
@@ -46,7 +47,8 @@ export interface ExpressionGuild {
    * Throws ExpressionRejected when Fluxer refuses for good.
    */
   remove(type: ExpressionType, id: string, reason: string): Promise<void>;
-  send(channelId: string, content: string, replyTo?: string): Promise<void>;
+  /** Mentions in `content` notify only the users in `notify`. */
+  send(channelId: string, content: string, notify: readonly string[], replyTo?: string): Promise<void>;
   /** IDs of the non-bot members who can see the channel. */
   voters(channelId: string): Promise<string[]>;
 }
@@ -339,16 +341,19 @@ export class ExpressionProposals implements PollHandler {
     const voters = await guild.voters(this.deps.channelId);
     const requiredYes = Math.max(1, voters.length);
 
+    // The poll lets @everyone and @here notify, for the @here at the end, so
+    // they're defused in the name, description and tags the proposer typed.
     const details = [
-      description && `> ${description}`,
-      tags.length > 0 && `Tags: ${tags.map((t) => `\`${t}\``).join(", ")}`,
-      names.length > 1 && `Cut into ${names.length} ${kind.plural}: ${names.map(kind.code).join(" ")}`,
+      description && `> ${defuseEveryone(description)}`,
+      tags.length > 0 && `Tags: ${tags.map((t) => `\`${defuseEveryone(t)}\``).join(", ")}`,
+      names.length > 1 &&
+        `Cut into ${names.length} ${kind.plural}: ${names.map((n) => kind.code(defuseEveryone(n))).join(" ")}`,
     ].filter(Boolean);
     const poll = await this.deps.polls.create({
       kind: kind.pollKind,
       guildId: this.deps.guildId,
       channelId: this.deps.channelId,
-      question: `Add the ${kind.display(name)}?`,
+      question: `Add the ${kind.display(defuseEveryone(name))}?`,
       description: [
         ...details,
         `Proposed by <@${proposerId}>. Needs ${requiredYes} yes ${requiredYes === 1 ? "vote" : "votes"}, one from everyone here.`,
@@ -363,7 +368,7 @@ export class ExpressionProposals implements PollHandler {
       createdBy: proposerId,
       files: pieces.map((p) => ({ name: `${p.name}.${p.type.ext}`, data: p.image })),
       // Proposals ping @here, as they always have.
-      mentions: true,
+      everyone: true,
     });
 
     db.transaction((tx) => {
@@ -488,7 +493,7 @@ export class ExpressionProposals implements PollHandler {
 
     if (!approved) {
       this.setStatus(poll.id, { status: "rejected" });
-      await this.announce(poll, `${mention} ${subject} was not added (${why}).`);
+      await this.announce(poll, proposal, `${mention} ${subject} was not added (${why}).`);
       return;
     }
 
@@ -514,6 +519,7 @@ export class ExpressionProposals implements PollHandler {
       this.setStatus(poll.id, { status: "failed", error: outcome.problem });
       await this.announce(
         poll,
+        proposal,
         images.length === 1
           ? `${mention} ${subject} was approved (${why}) but couldn't be added: ${outcome.problem}.`
           : `${mention} ${subject} was approved (${why}) but ${this.kind.code(outcome.piece)} ` +
@@ -524,7 +530,7 @@ export class ExpressionProposals implements PollHandler {
 
     this.setStatus(poll.id, { status: "added" });
     const as = images.length > 1 ? ` as ${images.map((i) => this.kind.code(i.name)).join(" ")}` : "";
-    await this.announce(poll, `${mention} ${subject} has been added${as} (${why}).`);
+    await this.announce(poll, proposal, `${mention} ${subject} has been added${as} (${why}).`);
   }
 
   describe(proposal: Proposal, poll: Poll): string {
@@ -718,9 +724,10 @@ export class ExpressionProposals implements PollHandler {
     this.deps.db.update(proposals).set(values).where(eq(proposals.pollId, pollId)).run();
   }
 
-  private async announce(poll: Poll, content: string) {
+  /** Pings only the proposer; the name and the decider's reason may hold mentions too. */
+  private async announce(poll: Poll, proposal: Proposal, content: string) {
     await this.deps.guild
-      .send(poll.channelId, content, poll.messageId ?? undefined)
+      .send(poll.channelId, content, [proposal.proposerId], poll.messageId ?? undefined)
       .catch((err) => console.warn(`poll ${poll.id}: could not announce result:`, err));
   }
 }

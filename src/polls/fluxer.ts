@@ -1,6 +1,6 @@
 import { type Client, Events } from "@fluxerjs/core";
 import type { MessageBody } from "../messages/body.ts";
-import { ALL_MENTIONS, editOptions, NO_MENTIONS, sendOptions } from "../messages/fluxer.ts";
+import { editOptions, EVERYONE_MENTIONS, NO_MENTIONS, sendOptions } from "../messages/fluxer.ts";
 import type { CommunityPollChat, CommunityPolls } from "./community.ts";
 import type { PollTransport, PostOptions } from "./transport.ts";
 
@@ -12,7 +12,7 @@ export class FluxerPollTransport implements PollTransport, CommunityPollChat {
 
   async post(channelId: string, body: MessageBody, options: PostOptions = {}) {
     const message = await this.client.channels.send(channelId, {
-      ...sendOptions(body, options.mentions ? ALL_MENTIONS : NO_MENTIONS),
+      ...sendOptions(body, options.everyone ? EVERYONE_MENTIONS : NO_MENTIONS),
       files: options.files?.map((f) => ({ name: f.name, data: f.data })),
     });
     return message.id;
