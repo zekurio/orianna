@@ -17,7 +17,9 @@ export function nextWord(input: string): { word: string; rest: string } | null {
  * out first (`--name value`, see {@link OptionSpec.named}); the remaining words
  * fill string and integer options in order. Attachment options take the
  * message's attachments in order, then links from the input once those run
- * out, so a file can be linked instead of attached.
+ * out, so a file can be linked instead of attached. A link in a named value
+ * counts too when nothing earlier filled the attachment; otherwise it stays in
+ * the value as text.
  */
 export function parseOptions(
   specs: readonly OptionSpec[],
@@ -26,9 +28,20 @@ export function parseOptions(
 ): Record<string, OptionValue> {
   const options: Record<string, OptionValue> = {};
   const { positional, named } = splitNamed(specs, input);
-  const { text, links } = specs.some((s) => s.type === "attachment")
-    ? splitLinks(positional)
-    : { text: positional, links: [] };
+  const slots = specs.filter((s) => s.type === "attachment").length;
+  const { text, links } = slots > 0 ? splitLinks(positional) : { text: positional, links: [] };
+  let wanted = slots - attachments.length - links.length;
+  for (const [name, value] of named) {
+    if (wanted <= 0) break;
+    const found = splitLinks(value, wanted);
+    if (found.links.length === 0) continue;
+    links.push(...found.links);
+    wanted -= found.links.length;
+    // A value that was only the link counts as not given.
+    const rest = found.text.trim();
+    if (rest) named.set(name, rest);
+    else named.delete(name);
+  }
   let remaining = text;
   let nextAttachment = 0;
   let nextLink = 0;
@@ -78,13 +91,13 @@ export function parseOptions(
 const LINK = /(^|\s)<?(https?:\/\/[^\s<>]+)>?(?=\s|$)/gi;
 
 /**
- * Takes links out of the input, leaving the other words in place. Only http(s)
- * is recognised, so nothing like `file://` ever reaches `fetch`.
+ * Takes up to `limit` links out of the input, leaving the other words in place.
+ * Only http(s) is recognised, so nothing like `file://` ever reaches `fetch`.
  */
-function splitLinks(input: string): { text: string; links: Attachment[] } {
+function splitLinks(input: string, limit = Infinity): { text: string; links: Attachment[] } {
   const links: Attachment[] = [];
   const text = input.replace(LINK, (word, space: string, url: string) => {
-    if (!URL.canParse(url)) return word;
+    if (links.length >= limit || !URL.canParse(url)) return word;
     const { pathname, hostname } = new URL(url);
     const filename = pathname.split("/").at(-1) || hostname;
     links.push({ url, filename, contentType: null, size: null });
@@ -106,12 +119,14 @@ const FLAG = /(^|\s)--([A-Za-z][\w-]*)(?=\s|$)/g;
 /**
  * Splits `positional --a one --b two words` into the positional part and the
  * named values. Only `--word` at the start of a word counts, so a lone `--` or
- * `a--b` in free text is left alone.
+ * `a--b` in free text is left alone. A command without named options takes
+ * every `--word` as text, as in `!poll Should we --force push?`.
  */
 function splitNamed(specs: readonly OptionSpec[], input: string) {
   const known = new Set(specs.filter((s) => s.named).map((s) => s.name));
-  const flags = [...input.matchAll(FLAG)];
   const named = new Map<string, string>();
+  if (known.size === 0) return { positional: input, named };
+  const flags = [...input.matchAll(FLAG)];
   if (flags.length === 0) return { positional: input, named };
 
   flags.forEach((match, i) => {

@@ -71,8 +71,18 @@ Stickers also take `--desc` and `--tags`:
 ```
 
 The description can be up to 500 characters. Tags are separated by commas, up
-to 10 of them, each up to 30 characters. Put the link before `--desc` and
-`--tags`, because everything after a flag belongs to that flag.
+to 10 of them, each up to 30 characters. A flag takes everything after it, up
+to the next flag. The image link is the exception. If you haven't attached the
+image or linked it before the flags, the bot takes the first link after a flag
+as the image, so this works too:
+
+```
+!sticker propose Happy Cat --desc A very happy cat https://example.org/cat.png
+```
+
+Otherwise the bot leaves links after a flag where they are, so a description
+can link to the artist. The bot refuses any flag other than `--desc` and
+`--tags`, which catches typos like `--tag`.
 
 ### Wide images
 
