@@ -23,8 +23,9 @@ Fluxer has no slash commands or buttons yet, so commands start with a prefix,
 
 ## Running it
 
-You need a bot token from your Fluxer instance and the IDs of your guild and
-of the channel where proposals should go up for a vote.
+You need a bot token from your Fluxer instance and the ID of your guild. For
+emoji and sticker proposals, you also need the ID of the channel where they go
+up for a vote.
 
 ### On NixOS
 

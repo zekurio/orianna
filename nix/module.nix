@@ -66,10 +66,6 @@ in
             type = lib.types.str;
             description = "ID of the guild the bot serves.";
           };
-          pollsChannelId = lib.mkOption {
-            type = lib.types.str;
-            description = "ID of the channel where emoji and sticker proposals are put to a vote.";
-          };
           database = lib.mkOption {
             type = lib.types.str;
             default = "/var/lib/orianna/orianna.db";

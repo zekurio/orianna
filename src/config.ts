@@ -95,8 +95,8 @@ export const ConfigSchema = Type.Object(
     instance: Type.String({ minLength: 1 }),
     /** The guild this bot serves. Messages from anywhere else are ignored. */
     guildId: Snowflake,
-    /** Channel where emoji and sticker proposals are put to a vote. */
-    pollsChannelId: Snowflake,
+    /** Channel where emoji and sticker proposals are put to a vote. Required when either is on. */
+    pollsChannelId: Type.Optional(Snowflake),
     /** What commands start with, e.g. `!` for `!help`. */
     prefix: Type.String({ minLength: 1, default: "!" }),
     /** SQLite file. Relative paths resolve against the working directory. */
@@ -163,6 +163,7 @@ export class ConfigError extends Error {
 export function parseConfig(raw: unknown): Config {
   const value = Value.Default(ConfigSchema, Value.Clone(raw));
   if (Value.Check(ConfigSchema, value)) {
+    checkPollsChannel(value);
     checkPermissions(value);
     checkRoleMenus(value);
     return value;
@@ -180,6 +181,18 @@ export function parseConfig(raw: unknown): Config {
     return [`  ${e.instancePath || "/"}: ${e.message}`];
   });
   throw new ConfigError(`invalid config:\n${problems.join("\n")}`);
+}
+
+/** What the schema can't express: proposals need a channel to vote in. */
+function checkPollsChannel(config: Config) {
+  const sections = (["emoji", "sticker"] as const).filter((key) => config[key]);
+  if (config.pollsChannelId !== undefined || sections.length === 0) return;
+
+  const names = sections.join(" and ");
+  const paths = sections.map((key) => `/${key}`).join(" and ");
+  throw new ConfigError(
+    `invalid config:\n  /pollsChannelId: ${names} proposals need a channel to vote in; set it, or remove ${paths}`,
+  );
 }
 
 /** What the schema can't express: rule syntax, one rule per permission, and role IDs. */
