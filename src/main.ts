@@ -99,7 +99,10 @@ async function main() {
     ready.resolve();
   });
   client.on(Events.MessageCreate, (message) => {
-    void router.handleMessage(bot, message);
+    // Bun exits on an unhandled rejection, so a reply that fails mustn't escape.
+    void router.handleMessage(bot, message).catch((err) => {
+      console.error("handling a message failed:", err);
+    });
   });
   attachReactions(client, polls, "poll");
   if (community) attachPollMessageDeletes(client, community);
