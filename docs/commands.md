@@ -92,15 +92,24 @@ The bot posts the proposal in the polls channel with the image and pings
 `@here`. Members vote with ✅ or ❌. Each member has one vote, and reacting
 with the other emoji moves it.
 
-A proposal passes once it has as many ✅ votes as there were members who could
-see the polls channel when it went up, and more ✅ than ❌. In practice that
-means everyone has to vote yes. Bots don't count. The proposer does, so they
-have to vote too. People who join later can vote, but they don't raise the
-bar.
+A proposal passes once enough members vote ✅ and there are more ✅ than ❌.
+`threshold` in the `emoji` or `sticker` section sets what enough means: a
+share of the members who could see the polls channel when the proposal went
+up. The bot rounds up, so with 10 members `0.5` asks for 5 and `0.75` for 8.
+The default, `1`, asks for every one of them.
+
+Bots don't count. The proposer does, and their own ✅ counts like anyone
+else's.
+
+The bot sets the bar when the proposal goes up. People who join later can
+vote, but they don't raise it, and changing `threshold` doesn't move it for
+votes already running.
 
 The vote ends the moment it passes. Otherwise it closes after `votingHours`,
-48 by default, and the emoji isn't added. Members with `emoji.decide` can end
-it sooner with `approve` or `reject`.
+48 by default, and the emoji isn't added. Below `1`, a vote can pass before
+everyone has voted. Above `0.5` that changes nothing, because the rest can't
+outvote it, but at `0.5` or lower they could have. Members with
+`emoji.decide` can end a vote sooner with `approve` or `reject`.
 
 When a proposal passes, the bot adds the emoji and replies to the poll with
 the result. If Fluxer refuses the image, or someone added an emoji with the

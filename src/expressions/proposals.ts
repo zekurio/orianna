@@ -334,10 +334,18 @@ export class ExpressionProposals implements PollHandler {
     const { kind } = this;
     const names = pieces.map((p) => p.name);
 
-    // Everyone who can see the polls channel right now has to vote yes; people
-    // who join later don't raise the bar for votes already running.
+    // The bar is set now, so people who join later and config changes don't
+    // move it for votes already running. It rounds up from just below the
+    // exact share, since 0.7 × 10 comes out as 7.000000000000001.
     const voters = await guild.voters(this.deps.channelId);
-    const requiredYes = Math.max(1, voters.length);
+    const members = Math.max(1, voters.length);
+    const requiredYes = Math.max(1, Math.ceil(members * config.threshold - 1e-9));
+    const needs =
+      requiredYes < members
+        ? `${requiredYes} of the ${members} people here to vote yes`
+        : members === 1
+          ? "a yes vote"
+          : `all ${members} people here to vote yes`;
 
     const details = [
       description && `> ${description}`,
@@ -351,7 +359,7 @@ export class ExpressionProposals implements PollHandler {
       question: `Add the ${kind.display(name)}?`,
       description: [
         ...details,
-        `Proposed by <@${proposerId}>. Needs ${requiredYes} yes ${requiredYes === 1 ? "vote" : "votes"}, one from everyone here.`,
+        `Proposed by <@${proposerId}>. Needs ${needs}.`,
         "@here",
       ].join("\n"),
       options: [

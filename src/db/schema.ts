@@ -78,7 +78,10 @@ export const proposals = sqliteTable(
     /** Stickers only. */
     tags: text({ mode: "json" }).$type<string[]>().notNull().default([]),
     proposerId: text().notNull(),
-    /** Non-bot members who could see the vote channel when the proposal was made. */
+    /**
+     * Yes votes needed, worked out from the config's `threshold` and the
+     * non-bot members who could see the polls channel when the proposal was made.
+     */
     requiredYes: integer().notNull().default(1),
     status: text({ enum: ["pending", "added", "rejected", "failed", "cancelled"] })
       .notNull()
