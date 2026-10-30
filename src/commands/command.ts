@@ -35,6 +35,8 @@ export interface Attachment {
   filename: string;
   contentType: string | null;
   size: number | null;
+  /** True when a member pasted a link; false for a file Fluxer handed over. */
+  linked: boolean;
 }
 
 interface OptionValues {

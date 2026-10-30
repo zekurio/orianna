@@ -213,7 +213,7 @@ async function sendPaginated(message: Message, pages: readonly MessageBody[]) {
 function messageAttachments(message: Message): Attachment[] {
   return [...message.attachments.values()].flatMap((a) =>
     a.url
-      ? [{ url: a.url, filename: a.filename, contentType: a.contentType, size: a.size }]
+      ? [{ url: a.url, filename: a.filename, contentType: a.contentType, size: a.size, linked: false }]
       : [],
   );
 }
