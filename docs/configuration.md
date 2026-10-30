@@ -43,6 +43,7 @@ Both sections take the same keys.
 | `votingHours` | `48` | How long a vote runs |
 | `maxOpenPerUser` | `3` | How many open proposals of this kind one member can have |
 | `maxImageBytes` | `524288` | Largest file the bot uploads. Set it to the instance's `emoji_max_size` or `sticker_max_size`, which are 512 KiB unless you changed them. The bot scales larger images down to fit. |
+| `threshold` | `1` | Share of the members who can see the polls channel that have to vote ✅, more than 0 and at most 1. The bot rounds up, so `0.5` with 9 members asks for 5. `1` asks for all of them. A proposal also needs more ✅ than ❌. |
 
 ## `polls`
 

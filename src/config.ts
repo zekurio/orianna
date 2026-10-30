@@ -15,6 +15,12 @@ const ProposalConfigSchema = Type.Object(
      * (512 KiB for both by default). Larger images are scaled down to fit.
      */
     maxImageBytes: Type.Integer({ minimum: 1, default: 524288 }),
+    /**
+     * Share of the members who can see the polls channel when a proposal goes
+     * up that have to vote ✅, rounded up: 0.5 is half of them, 1 all of them.
+     * A proposal also needs more ✅ than ❌.
+     */
+    threshold: Type.Number({ exclusiveMinimum: 0, maximum: 1, default: 1 }),
   },
   { additionalProperties: false },
 );

@@ -15,12 +15,14 @@
   "emoji": {
     "votingHours": 48,
     "maxOpenPerUser": 3,
-    "maxImageBytes": 524288
+    "maxImageBytes": 524288,
+    "threshold": 1
   },
   "sticker": {
     "votingHours": 48,
     "maxOpenPerUser": 3,
-    "maxImageBytes": 524288
+    "maxImageBytes": 524288,
+    "threshold": 1
   },
   "polls": {
     "defaultHours": 24,
