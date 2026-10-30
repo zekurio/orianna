@@ -2,10 +2,10 @@
 
 ## Dev shell
 
-The dev shell comes from devenv (`devenv.nix`), and direnv loads it through
-`.envrc`. It provides bun and sqlite, runs `bun install` on entry, and sets
-`ORIANNA_CONFIG=./config.json`. Bun reads `FLUXER_BOT_TOKEN` from `.env` on its
-own.
+The dev shell comes from devenv, defined in `devenv.nix`, and direnv loads it
+through `.envrc`. It provides bun, sqlite and ImageMagick, runs `bun install`
+on entry, and sets `ORIANNA_CONFIG=./config.json`. Bun reads
+`FLUXER_BOT_TOKEN` from `.env` on its own.
 
 Outside direnv, prefix commands with `devenv shell`, for example
 `devenv shell bun run typecheck`. The flake has no `devShells` output, so
@@ -16,8 +16,8 @@ every commit.
 
 ## Nix
 
-`flake.nix` exports the package (`nix/package.nix`) and the NixOS module
-(`nix/module.nix`) for x86_64-linux and aarch64-linux.
+`flake.nix` exports the package from `nix/package.nix` and the NixOS module
+from `nix/module.nix`, for x86_64-linux and aarch64-linux.
 
 - `nix build` builds the package. Run it after touching anything under `nix/`,
   `package.json` or `bun.lock`.
@@ -51,8 +51,10 @@ Body explaining what changed and why, wrapped at 72 columns.
   `BREAKING CHANGE:` footer that says what to change in the config.
 - Commit a schema change and its generated migration together. Never edit a
   migration that has already been committed.
-- When `src/config.ts` changes, update `config.example.json` in the same
-  commit.
+- When `src/config.ts` changes, update `config.example.json` and
+  `docs/configuration.md` in the same commit.
+- When a command, its options or a permission changes, update
+  `docs/commands.md` or `docs/permissions.md` in the same commit.
 
 ## Branches
 
