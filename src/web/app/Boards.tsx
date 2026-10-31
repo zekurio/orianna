@@ -258,11 +258,13 @@ function BoardPage({
           </Link>
         ))}
       </nav>
-      {view === "leaderboard" ? (
-        <Leaderboard board={board} />
-      ) : (
-        <Posts key={`${board.name}/${view}`} board={board} sort={view} canRemove={canRemove} />
-      )}
+      <div className="board-view">
+        {view === "leaderboard" ? (
+          <Leaderboard board={board} />
+        ) : (
+          <Posts key={`${board.name}/${view}`} board={board} sort={view} canRemove={canRemove} />
+        )}
+      </div>
     </>
   );
 }
