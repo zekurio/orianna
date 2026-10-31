@@ -1,12 +1,13 @@
+import { BookOpenText, CaretDown, GearSix, type Icon, SignOut, Star } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { useSession } from "./App.tsx";
 import portrait from "./orianna.png";
 import { Link } from "./router.tsx";
 
-const TABS = [
-  { to: "/boards", label: "Boards" },
-  { to: "/commands", label: "Commands" },
-  { to: "/settings", label: "Settings" },
+const TABS: { to: string; label: string; icon: Icon }[] = [
+  { to: "/boards", label: "Boards", icon: Star },
+  { to: "/commands", label: "Commands", icon: BookOpenText },
+  { to: "/settings", label: "Settings", icon: GearSix },
 ];
 
 export function Header({ path }: { path: string }) {
@@ -17,11 +18,12 @@ export function Header({ path }: { path: string }) {
         Orianna
       </Link>
       <nav className="tabs" aria-label="Pages">
-        {TABS.map((tab) => {
-          const current = path === tab.to || path.startsWith(`${tab.to}/`);
+        {TABS.map(({ to, label, icon: TabIcon }) => {
+          const current = path === to || path.startsWith(`${to}/`);
           return (
-            <Link key={tab.to} to={tab.to} className="tab" aria-current={current ? "page" : undefined}>
-              {tab.label}
+            <Link key={to} to={to} className="tab" aria-current={current ? "page" : undefined}>
+              <TabIcon weight={current ? "fill" : undefined} />
+              {label}
             </Link>
           );
         })}
@@ -68,6 +70,7 @@ function UserMenu() {
       >
         <img className="avatar" src={user.avatarUrl} alt="" width={32} height={32} />
         <span className="user-name">{user.name}</span>
+        <CaretDown className="caret" size="1em" />
       </button>
       {open && (
         <div id="user-menu-panel" className="user-panel">
@@ -75,7 +78,8 @@ function UserMenu() {
             <strong>{user.name}</strong>
             {user.tag !== user.name && <span>{user.tag}</span>}
           </div>
-          <button type="button" className="menu-item" onClick={signOut}>
+          <button type="button" className="menu-item danger" onClick={signOut}>
+            <SignOut />
             Sign out
           </button>
         </div>

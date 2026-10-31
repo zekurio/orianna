@@ -1,3 +1,4 @@
+import { SignIn as SignInIcon } from "@phosphor-icons/react";
 import portrait from "./orianna.png";
 
 export function SignIn({ message }: { message?: string }) {
@@ -11,6 +12,7 @@ export function SignIn({ message }: { message?: string }) {
         </p>
       )}
       <a className="button" href="/auth/login">
+        <SignInIcon />
         Sign in with Fluxer
       </a>
     </main>

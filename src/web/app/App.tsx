@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import { ArrowClockwise } from "@phosphor-icons/react";
 import { Schema } from "effect";
 import { AsyncResult } from "effect/reactivity";
 import { createContext, useContext, useEffect, useState } from "react";
@@ -61,6 +62,7 @@ function Unavailable({ message }: { message: string }) {
       <h1>Orianna isn't answering</h1>
       <p>{message}</p>
       <button type="button" className="button" onClick={() => window.location.reload()}>
+        <ArrowClockwise />
         Reload
       </button>
     </main>

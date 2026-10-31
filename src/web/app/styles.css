@@ -3,7 +3,8 @@
 /* The colours come from Orianna's portrait: its background, her porcelain
    face, her hair, the brass of her hair band and key, and her eyes. The
    header and page share the portrait's background, so it sits on them
-   without an edge. Brass marks where you are. */
+   without an edge. Brass marks where you are, and the warm red what ends
+   something, like signing out. */
 :root {
   --charcoal: #232325;
   --raised: #2d2a2b;
@@ -13,6 +14,7 @@
   --brass: #f7c052;
   --brass-light: #ffd47a;
   --eye: #91d1dc;
+  --danger: #f47c71;
 
   --display: "Fredoka Variable", ui-rounded, system-ui, sans-serif;
   --body: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
@@ -74,6 +76,7 @@ code {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 0.5rem;
   min-height: 2.75rem;
   padding: 0 1.5rem;
   border: 0;
@@ -123,6 +126,7 @@ code {
   position: relative;
   display: flex;
   align-items: center;
+  gap: 0.5rem;
   padding-inline: 0.875rem;
   color: var(--rose);
   font: 500 1.0625rem/1 var(--display);
@@ -173,6 +177,15 @@ code {
   border-radius: 50%;
 }
 
+.caret {
+  color: var(--rose);
+  transition: transform 120ms ease-out;
+}
+
+.user-button[aria-expanded="true"] .caret {
+  transform: rotate(180deg);
+}
+
 .user-panel {
   position: absolute;
   top: calc(100% + 0.5rem);
@@ -200,7 +213,9 @@ code {
 }
 
 .menu-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
   width: 100%;
   padding: 0.5rem 0.75rem;
   border: 0;
@@ -215,6 +230,14 @@ code {
 
 .menu-item:hover {
   background: var(--charcoal);
+}
+
+.menu-item.danger {
+  color: var(--danger);
+}
+
+.menu-item.danger:hover {
+  background: rgb(244 124 113 / 0.12);
 }
 
 @keyframes menu-open {
@@ -253,6 +276,9 @@ code {
 }
 
 .section {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
   padding: 0.375rem 1.125rem;
   border-radius: 999px;
   color: var(--rose);
@@ -335,5 +361,9 @@ code {
 @media (prefers-reduced-motion: reduce) {
   .user-panel {
     animation: none;
+  }
+
+  .caret {
+    transition: none;
   }
 }

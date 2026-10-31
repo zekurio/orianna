@@ -1,3 +1,4 @@
+import { User, UsersThree } from "@phosphor-icons/react";
 import { type ReactNode, useEffect } from "react";
 import { useSession } from "./App.tsx";
 import { Link } from "./router.tsx";
@@ -40,8 +41,8 @@ export function CommandsPage() {
 }
 
 const SECTIONS = {
-  personal: { label: "Personal", path: "/settings/personal" },
-  server: { label: "Server", path: "/settings/server" },
+  personal: { label: "Personal", path: "/settings/personal", icon: User },
+  server: { label: "Server", path: "/settings/server", icon: UsersThree },
 } as const;
 
 export function SettingsPage({ section }: { section: keyof typeof SECTIONS }) {
@@ -55,14 +56,15 @@ export function SettingsPage({ section }: { section: keyof typeof SECTIONS }) {
       <h1>Settings</h1>
       {sections.length > 0 && (
         <nav className="sections" aria-label="Settings">
-          {sections.map((s) => (
+          {sections.map(({ path, label, icon: SectionIcon }) => (
             <Link
-              key={s.path}
-              to={s.path}
+              key={path}
+              to={path}
               className="section"
-              aria-current={s.path === SECTIONS[section].path ? "page" : undefined}
+              aria-current={path === SECTIONS[section].path ? "page" : undefined}
             >
-              {s.label}
+              <SectionIcon />
+              {label}
             </Link>
           ))}
         </nav>
