@@ -3,7 +3,7 @@ import type { UserError } from "../commands/command.ts";
 import type { PermissionsConfig } from "../config.ts";
 import type { FluxerError } from "../fluxer.ts";
 
-// Who may do what. The config holds rules like `+emoji.add` or `-polls.*` for
+// Who may do what. The settings hold rules like `+emoji.add` or `-polls.*` for
 // everyone and per role; MemberPermissions works out which rule decides a
 // permission for a member. permissions/fluxer.ts looks up the member.
 
@@ -24,7 +24,7 @@ export const PERMISSIONS = [
 
 export type Permission = (typeof PERMISSIONS)[number];
 
-/** Named after the config section that turns the feature on. */
+/** Named after the settings section that turns the feature on. */
 export type PermissionGroup = "emoji" | "sticker" | "polls" | "boards";
 
 export function groupOf(permission: Permission): PermissionGroup {
@@ -38,7 +38,7 @@ const TARGETS = new Set<string>([
   "*",
 ]);
 
-/** Why a rule from the config can't be used, or undefined when it can. */
+/** Why a rule from the settings can't be used, or undefined when it can. */
 export function ruleProblem(rule: string): string | undefined {
   if (rule[0] !== "+" && rule[0] !== "-") {
     return `${rule} must start with + to allow or - to deny`;
@@ -149,7 +149,7 @@ export class GuildAccess extends Context.Service<
       userId: string,
       permission: Permission,
     ) => Effect.Effect<boolean, UserError | FluxerError>;
-    /** Role IDs with rules in the config that the guild doesn't have. */
+    /** Role IDs with rules in the settings that the guild doesn't have. */
     readonly unknownRoles: Effect.Effect<string[], FluxerError>;
   }
 >()("orianna/GuildAccess") {}

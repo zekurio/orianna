@@ -7,7 +7,6 @@ import {
   Layer,
   Option,
   Redacted,
-  Ref,
   Schema,
   SchemaIssue,
 } from "effect";
@@ -106,22 +105,13 @@ const BoardSchema = Schema.Struct({
 });
 
 /**
- * On SIGHUP (`systemctl reload orianna`) the bot reads the file again and
- * applies `prefix` and `permissions`. Every other key is read once at startup,
- * and changing it takes a restart. A file that doesn't load is ignored, and the
- * bot keeps the config it has.
+ * Bot settings: what the bot does in the guild. They live in the database,
+ * where `!settings` edits them while the bot runs; src/settings/settings.ts
+ * keeps them. Nothing here is a secret or needs a restart.
  */
-export const ConfigSchema = Schema.Struct({
-  /** Origin of the Fluxer instance. The client reads `/.well-known/fluxer` from here. */
-  instance: Schema.String.check(Schema.isMinLength(1)),
-  /** The guild this bot serves. Messages from anywhere else are ignored. */
-  guildId: Snowflake,
-  /** Channel where emoji and sticker proposals are put to a vote. Required when either is on. */
-  pollsChannelId: Schema.optionalKey(Snowflake),
+export const BotSettingsSchema = Schema.Struct({
   /** What commands start with, e.g. `!` for `!help`. */
   prefix: Schema.String.check(Schema.isMinLength(1)).pipe(orDefault("!")),
-  /** SQLite file. Relative paths resolve against the working directory. */
-  database: Schema.String.check(Schema.isMinLength(1)).pipe(orDefault("./data/orianna.db")),
   /**
    * Who may do what, as rules like `+emoji.add` to allow and `-polls.*` to
    * deny. A rule names one permission, a group like `emoji.*`, or `*` for
@@ -143,10 +133,13 @@ export const ConfigSchema = Schema.Struct({
    * names is denied.
    *
    * Members with Manage Expressions get `+emoji.*` and `+sticker.*`. The
-   * guild owner and members with Administrator may do everything. `!perms`
-   * shows what a member may do and which rule decided it.
+   * guild owner and members with Administrator may do everything, and only
+   * they may change the settings. `!perms` shows what a member may do and
+   * which rule decided it.
    */
   permissions: PermissionsSchema.pipe(orDefault({})),
+  /** Channel where emoji and sticker proposals are put to a vote. Required when either is on. */
+  pollsChannelId: Schema.optionalKey(Snowflake),
   /** Emoji proposals are disabled when this section is missing. */
   emoji: Schema.optionalKey(ProposalConfigSchema),
   /** Sticker proposals are disabled when this section is missing. */
@@ -161,10 +154,11 @@ export const ConfigSchema = Schema.Struct({
   polls: Schema.optionalKey(PollsConfigSchema),
   /**
    * Messages where members react to give themselves roles. The bot posts and
-   * updates them on startup. It needs Manage Roles, with its own role above
-   * every menu role, and Send Messages, Embed Links, Add Reactions and Manage
-   * Messages in the menu channels. Removing a menu or an option takes down
-   * its message or reactions; members keep the roles they have.
+   * updates them on startup and whenever this section changes. It needs
+   * Manage Roles, with its own role above every menu role, and Send Messages,
+   * Embed Links, Add Reactions and Manage Messages in the menu channels.
+   * Removing a menu or an option takes down its message or reactions;
+   * members keep the roles they have.
    */
   roleMenus: Schema.optionalKey(RoleMenusSchema),
   /**
@@ -176,7 +170,47 @@ export const ConfigSchema = Schema.Struct({
   boards: Schema.optionalKey(Schema.Array(BoardSchema)),
 });
 
-export type Config = typeof ConfigSchema.Type;
+export type BotSettings = typeof BotSettingsSchema.Type;
+export type SettingsSection = keyof BotSettings;
+
+/** The top-level keys of the bot settings, in the order the schema lists them. */
+export const SETTINGS_SECTIONS = Object.keys(BotSettingsSchema.fields) as SettingsSection[];
+
+/** A bot settings section in the config file, kept as it is for the import. */
+const Legacy = Schema.optionalKey(Schema.Unknown);
+
+/**
+ * The config file: how to reach Fluxer and where to keep data. It's read
+ * once at startup, so changing it takes a restart.
+ *
+ * The file may still hold the bot settings sections from before they moved
+ * into the database. On the first start the bot imports them from here, and
+ * ignores them after that.
+ */
+export const ConfigSchema = Schema.Struct({
+  /** Origin of the Fluxer instance. The client reads `/.well-known/fluxer` from here. */
+  instance: Schema.String.check(Schema.isMinLength(1)),
+  /** The guild this bot serves. Messages from anywhere else are ignored. */
+  guildId: Snowflake,
+  /** SQLite file. Relative paths resolve against the working directory. */
+  database: Schema.String.check(Schema.isMinLength(1)).pipe(orDefault("./data/orianna.db")),
+  prefix: Legacy,
+  permissions: Legacy,
+  pollsChannelId: Legacy,
+  emoji: Legacy,
+  sticker: Legacy,
+  polls: Legacy,
+  roleMenus: Legacy,
+  boards: Legacy,
+});
+
+/** The deployment keys of the config file. */
+export interface Config {
+  readonly instance: string;
+  readonly guildId: string;
+  readonly database: string;
+}
+
 export type ProposalConfig = typeof ProposalConfigSchema.Type;
 export type PollsConfig = typeof PollsConfigSchema.Type;
 export type PermissionsConfig = typeof PermissionsSchema.Type;
@@ -186,63 +220,92 @@ export type BoardConfig = typeof BoardSchema.Type;
 
 export class ConfigError extends Data.TaggedError("ConfigError")<{ readonly message: string }> {}
 
-const invalid = (problems: readonly string[]) =>
-  new ConfigError({ message: `invalid config:\n${problems.join("\n")}` });
+/** Bot settings that don't validate, one line per problem, each starting with its path. */
+export class InvalidSettings extends Data.TaggedError("InvalidSettings")<{
+  readonly problems: readonly string[];
+}> {
+  override get message(): string {
+    return indent(this.problems);
+  }
+}
 
-export function parseConfig(raw: unknown): Effect.Effect<Config, ConfigError> {
-  return Schema.decodeUnknownEffect(ConfigSchema)(raw, {
-    errors: "all",
-    onExcessProperty: "error",
-  }).pipe(
-    Effect.mapError((err) => invalid(schemaProblems(err.issue))),
-    Effect.flatMap((config) => {
+const indent = (problems: readonly string[]) => problems.map((p) => `  ${p}`).join("\n");
+
+const decodeOptions = { errors: "all", onExcessProperty: "error" } as const;
+
+/** The config file, and the bot settings sections it still holds, if any. */
+export interface ConfigFile {
+  config: Config;
+  legacySettings: Record<string, unknown> | undefined;
+}
+
+export function parseConfig(raw: unknown): Effect.Effect<ConfigFile, ConfigError> {
+  return Schema.decodeUnknownEffect(ConfigSchema)(raw, decodeOptions).pipe(
+    Effect.mapError((err) => new ConfigError({ message: `invalid config:\n${indent(schemaProblems(err.issue))}` })),
+    Effect.map(({ instance, guildId, database, ...rest }) => {
+      const legacy = Object.entries(rest).filter(([, value]) => value !== undefined);
+      return {
+        config: { instance, guildId, database },
+        legacySettings: legacy.length > 0 ? Object.fromEntries(legacy) : undefined,
+      };
+    }),
+  );
+}
+
+/**
+ * Validates bot settings and fills in defaults. Problems have the same paths
+ * as the keys in the document, like `/boards/1/threshold`. `guildId` is the
+ * guild's, whose @everyone role can't have rules of its own.
+ */
+export function parseSettings(raw: unknown, guildId: string): Effect.Effect<BotSettings, InvalidSettings> {
+  return Schema.decodeUnknownEffect(BotSettingsSchema)(raw, decodeOptions).pipe(
+    Effect.mapError((err) => new InvalidSettings({ problems: schemaProblems(err.issue) })),
+    Effect.flatMap((settings) => {
       const problems = [
-        ...checkPollsChannel(config),
-        ...checkPermissions(config),
-        ...checkRoleMenus(config),
-        ...checkBoards(config),
+        ...checkPollsChannel(settings),
+        ...checkPermissions(settings, guildId),
+        ...checkRoleMenus(settings),
+        ...checkBoards(settings),
       ];
-      return problems.length > 0 ? Effect.fail(invalid(problems)) : Effect.succeed(config);
+      return problems.length > 0 ? Effect.fail(new InvalidSettings({ problems })) : Effect.succeed(settings);
     }),
   );
 }
 
 const formatIssue = SchemaIssue.makeFormatterStandardSchemaV1();
 
-/** One line per problem, each starting with where in the file it is. */
+/** One line per problem, each starting with where in the document it is. */
 function schemaProblems(issue: SchemaIssue.Issue): string[] {
   return formatIssue(issue).issues.map(({ path = [], message }) => {
     const keys = path.map((p) => String(typeof p === "object" ? p.key : p));
     if (message === "Expected no excess property") {
-      return `  /${keys.slice(0, -1).join("/")}: unknown key ${keys.at(-1)}`;
+      return `/${keys.slice(0, -1).join("/")}: unknown key ${keys.at(-1)}`;
     }
-    return `  /${keys.join("/")}: ${message}`;
+    return `/${keys.join("/")}: ${message}`;
   });
 }
 
 /** What the schema can't express: proposals need a channel to vote in. */
-function checkPollsChannel(config: Config): string[] {
-  const sections = (["emoji", "sticker"] as const).filter((key) => config[key]);
-  if (config.pollsChannelId !== undefined || sections.length === 0) return [];
+function checkPollsChannel(settings: BotSettings): string[] {
+  const sections = (["emoji", "sticker"] as const).filter((key) => settings[key]);
+  if (settings.pollsChannelId !== undefined || sections.length === 0) return [];
 
   const names = sections.join(" and ");
   const paths = sections.map((key) => `/${key}`).join(" and ");
-  return [
-    `  /pollsChannelId: ${names} proposals need a channel to vote in; set it, or remove ${paths}`,
-  ];
+  return [`/pollsChannelId: ${names} proposals need a channel to vote in; set it, or remove ${paths}`];
 }
 
 /** What the schema can't express: rule syntax, one rule per permission, and role IDs. */
-function checkPermissions(config: Config): string[] {
-  const { everyone, roles } = config.permissions;
+function checkPermissions(settings: BotSettings, guildId: string): string[] {
+  const { everyone, roles } = settings.permissions;
   const problems = checkRules(everyone, "/permissions/everyone");
 
   for (const [roleId, rules] of Object.entries(roles)) {
     const at = `/permissions/roles/${roleId}`;
     if (!/^[0-9]+$/.test(roleId)) {
-      problems.push(`  ${at}: ${roleId} is not a role ID`);
-    } else if (roleId === config.guildId) {
-      problems.push(`  ${at}: that's the @everyone role; put its rules in /permissions/everyone`);
+      problems.push(`${at}: ${roleId} is not a role ID`);
+    } else if (roleId === guildId) {
+      problems.push(`${at}: that's the @everyone role; put its rules in /permissions/everyone`);
     } else {
       problems.push(...checkRules(rules, at));
     }
@@ -261,9 +324,9 @@ function checkRules(rules: readonly string[], at: string): string[] {
     const problem = ruleProblem(rule);
     const target = rule.slice(1);
     if (problem) {
-      problems.push(`  ${at}/${i}: ${problem}`);
+      problems.push(`${at}/${i}: ${problem}`);
     } else if (targets.has(target)) {
-      problems.push(`  ${at}/${i}: another rule in this list already names ${target}`);
+      problems.push(`${at}/${i}: another rule in this list already names ${target}`);
     }
     targets.add(target);
   });
@@ -271,14 +334,14 @@ function checkRules(rules: readonly string[], at: string): string[] {
 }
 
 /** What the schema can't express: unique names, emoji per menu, and roles. */
-function checkRoleMenus(config: Config): string[] {
+function checkRoleMenus(settings: BotSettings): string[] {
   const problems: string[] = [];
   const names = new Set<string>();
   const menuOfRole = new Map<string, string>();
 
-  config.roleMenus?.menus.forEach((menu, i) => {
+  settings.roleMenus?.menus.forEach((menu, i) => {
     const at = `/roleMenus/menus/${i}`;
-    if (names.has(menu.name)) problems.push(`  ${at}/name: another menu is also called ${menu.name}`);
+    if (names.has(menu.name)) problems.push(`${at}/name: another menu is also called ${menu.name}`);
     names.add(menu.name);
 
     const emoji = new Set<string>();
@@ -286,18 +349,16 @@ function checkRoleMenus(config: Config): string[] {
       const here = `${at}/options/${j}`;
       const parsed = parseEmoji(option.emoji);
       if (!parsed) {
-        problems.push(
-          `  ${here}/emoji: ${option.emoji} is not an emoji; use a Unicode emoji, name:id or <:name:id>`,
-        );
+        problems.push(`${here}/emoji: ${option.emoji} is not an emoji; use a Unicode emoji, name:id or <:name:id>`);
       } else if (emoji.has(parsed.key)) {
-        problems.push(`  ${here}/emoji: ${option.emoji} is already used in this menu`);
+        problems.push(`${here}/emoji: ${option.emoji} is already used in this menu`);
       } else {
         emoji.add(parsed.key);
       }
 
       const other = menuOfRole.get(option.roleId);
       if (other !== undefined) {
-        problems.push(`  ${here}/roleId: the role is already in menu ${other}`);
+        problems.push(`${here}/roleId: the role is already in menu ${other}`);
       } else {
         menuOfRole.set(option.roleId, menu.name);
       }
@@ -307,15 +368,15 @@ function checkRoleMenus(config: Config): string[] {
 }
 
 /** What the schema can't express: unique names, and emoji the bot can read. */
-function checkBoards(config: Config): string[] {
+function checkBoards(settings: BotSettings): string[] {
   const problems: string[] = [];
   const names = new Set<string>();
-  config.boards?.forEach((board, i) => {
+  settings.boards?.forEach((board, i) => {
     const at = `/boards/${i}`;
-    if (names.has(board.name)) problems.push(`  ${at}/name: another board is also called ${board.name}`);
+    if (names.has(board.name)) problems.push(`${at}/name: another board is also called ${board.name}`);
     names.add(board.name);
     if (!parseEmoji(board.emoji)) {
-      problems.push(`  ${at}/emoji: ${board.emoji} is not an emoji; use a Unicode emoji, name:id or <:name:id>`);
+      problems.push(`${at}/emoji: ${board.emoji} is not an emoji; use a Unicode emoji, name:id or <:name:id>`);
     }
   });
   return problems;
@@ -337,50 +398,20 @@ export const loadConfig = Effect.fn("loadConfig")(function* (path: string) {
   return yield* parseConfig(raw);
 });
 
-/**
- * What a reload applies: `prefix` and `permissions` from `next`, the rest kept
- * from `current`. Also returns the keys that still differ from `next`, which
- * only a restart applies. nix/module.nix restarts the bot when one of them
- * changes, so keep its list of reloaded keys in step with this one.
- */
-export function reloadedConfig(current: Config, next: Config) {
-  const config: Config = { ...current, prefix: next.prefix, permissions: next.permissions };
-  const keys = new Set([...Object.keys(current), ...Object.keys(next)]) as Set<keyof Config>;
-  const needRestart = [...keys].filter((key) => !Bun.deepEquals(config[key], next[key]));
-  return { config, needRestart };
-}
-
-/** The config file, read at startup and again on every reload. */
-export class AppConfig extends Context.Service<
-  AppConfig,
-  {
-    /** The config as it is now. A reload replaces it, so read it when you need it. */
-    readonly get: Effect.Effect<Config>;
-    /** Reads the file again. Returns the changed keys that only a restart applies. */
-    readonly reload: Effect.Effect<string[], ConfigError>;
-  }
->()("orianna/AppConfig") {
+/** The config file, read once at startup. */
+export class AppConfig extends Context.Service<AppConfig, ConfigFile>()("orianna/AppConfig") {
   /** Reads ORIANNA_CONFIG, or `config.json` in the working directory. */
   static readonly layer = Layer.effect(
     AppConfig,
     Effect.gen(function* () {
       const path = yield* Env.String("ORIANNA_CONFIG").pipe(Env.withDefault("config.json"));
-      const fs = yield* FileSystem.FileSystem;
-      const load = loadConfig(path).pipe(Effect.provideService(FileSystem.FileSystem, fs));
-      const ref = yield* Ref.make(yield* load);
-      return {
-        get: Ref.get(ref),
-        reload: Effect.gen(function* () {
-          const next = reloadedConfig(yield* Ref.get(ref), yield* load);
-          yield* Ref.set(ref, next.config);
-          return next.needRestart;
-        }),
-      };
+      return yield* loadConfig(path);
     }),
   );
 
+  /** The deployment keys. Bot settings come from the Settings service. */
   static readonly current: Effect.Effect<Config, never, AppConfig> = Effect.gen(function* () {
-    return yield* (yield* AppConfig).get;
+    return (yield* AppConfig).config;
   });
 }
 

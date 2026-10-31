@@ -2,7 +2,8 @@ import { join } from "node:path";
 import { Context, Data, Duration, Effect, FileSystem, Layer, Semaphore, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { refuse, type UserError } from "../commands/command.ts";
-import { formatKiB, type ImageType, isAvifSequence, sniffImage, UNSUPPORTED_IMAGE } from "./image.ts";
+import { formatKiB } from "../download.ts";
+import { type ImageType, isAvifSequence, sniffImage, UNSUPPORTED_IMAGE } from "./image.ts";
 
 // Images are decoded and encoded by ImageMagick's `magick`, which the Nix
 // package puts on the bot's PATH.

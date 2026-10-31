@@ -1,15 +1,15 @@
 import { Effect, Layer } from "effect";
 import { UserError } from "../commands/command.ts";
-import { AppConfig } from "../config.ts";
 import { Fluxer, request } from "../fluxer.ts";
+import { Settings } from "../settings/settings.ts";
 import { GuildAccess, MemberPermissions, ruleSets } from "./rules.ts";
 
-/** Looks members up in the guild. Rules are read on every check, so reloaded ones apply at once. */
+/** Looks members up in the guild. Rules are read on every check, so changed ones apply at once. */
 export const FluxerGuildAccess = Layer.effect(
   GuildAccess,
   Effect.gen(function* () {
     const { client, guildId } = yield* Fluxer;
-    const config = yield* AppConfig;
+    const settings = yield* Settings;
     const guild = request("fetching the guild", () => client.guilds.resolve(guildId));
 
     const permissionsOf = Effect.fn("GuildAccess.permissionsOf")(function* (userId: string) {
@@ -28,7 +28,7 @@ export const FluxerGuildAccess = Layer.effect(
       const roleIds = member.roles.roleIds
         .filter((id) => id !== g.id)
         .sort((a, b) => position(a) - position(b));
-      const { permissions } = yield* config.get;
+      const { permissions } = yield* settings.get;
       return new MemberPermissions(
         null,
         ruleSets(permissions, {
@@ -45,7 +45,7 @@ export const FluxerGuildAccess = Layer.effect(
       unknownRoles: Effect.gen(function* () {
         const g = yield* guild;
         const roles = new Set((yield* request("fetching roles", () => g.fetchRoles())).map((r) => r.id));
-        const { permissions } = yield* config.get;
+        const { permissions } = yield* settings.get;
         return Object.keys(permissions.roles).filter((id) => !roles.has(id));
       }),
     };

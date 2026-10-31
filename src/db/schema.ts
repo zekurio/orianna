@@ -184,3 +184,36 @@ export const boardOptOuts = sqliteTable("board_opt_outs", {
   userId: text().primaryKey(),
   optedOutAt: integer({ mode: "timestamp_ms" }).notNull(),
 });
+
+/**
+ * The bot settings, as one JSON document in a single row. The bot validates
+ * it on every start; src/settings/settings.ts reads and writes it.
+ */
+export const settings = sqliteTable("settings", {
+  /** Always 1. */
+  id: integer().primaryKey(),
+  /** With defaults filled in, as of the last change. */
+  document: text({ mode: "json" }).$type<unknown>().notNull(),
+  updatedAt: integer({ mode: "timestamp_ms" }).notNull(),
+});
+
+/** Every change to the bot settings. */
+export const settingsChanges = sqliteTable("settings_changes", {
+  id: integer().primaryKey({ autoIncrement: true }),
+  changedAt: integer({ mode: "timestamp_ms" }).notNull(),
+  /** The member who made the change; null when the bot stored the first settings itself. */
+  changedBy: text(),
+  /**
+   * Where the settings came from: the config file or the defaults on the
+   * first start, or `!settings import`.
+   */
+  source: text({ enum: ["config-file", "defaults", "command"] }).notNull(),
+  /** The top-level keys that changed. */
+  sections: text({ mode: "json" }).$type<string[]>().notNull(),
+  /**
+   * Those keys before and after the change, with null for a section that was
+   * missing. `before` is null for the first settings.
+   */
+  before: text({ mode: "json" }).$type<Record<string, unknown>>(),
+  after: text({ mode: "json" }).$type<Record<string, unknown>>().notNull(),
+});

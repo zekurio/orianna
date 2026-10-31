@@ -10,7 +10,9 @@ instance.
 - Role menus let members give themselves roles by reacting to a message.
 - Boards repost messages that got enough reactions, like a starboard, or a
   hall of shame.
-- Permission rules in the config decide who may do what.
+- Permission rules decide who may do what.
+- Settings live in the bot's database. The server's admins change them in chat
+  while the bot runs, and every change is recorded.
 
 Fluxer has no slash commands or buttons yet, so commands start with a prefix,
 `!` by default, and every vote is a reaction.
@@ -20,14 +22,17 @@ Fluxer has no slash commands or buttons yet, so commands start with a prefix,
 - [Commands](docs/commands.md) covers every command and how votes work.
 - [Permissions](docs/permissions.md) explains the rules that decide who may
   do what.
-- [Configuration](docs/configuration.md) lists every config key, and the ones
-  that apply without a restart.
+- [Configuration](docs/configuration.md) covers the config file and every bot
+  setting.
 
 ## Running it
 
-You need a bot token from your Fluxer instance and the ID of your guild. For
-emoji and sticker proposals, you also need the ID of the channel where they go
-up for a vote.
+You need a bot token from your Fluxer instance and the ID of your guild. The
+config file only says how to reach Fluxer and where to keep the database.
+Everything else is a bot setting, which starts at the defaults. Once the bot
+is running, the guild owner or a member with Administrator turns features on
+with `!settings export` and `!settings import`, as
+[Configuration](docs/configuration.md#bot-settings) describes.
 
 ### On NixOS
 
@@ -48,11 +53,6 @@ The flake exports a NixOS module:
             settings = {
               instance = "https://chat.example.org";
               guildId = "1234567890";
-              pollsChannelId = "3456789012";
-              permissions.roles."2345678901" = [ "+*" ];
-              emoji = { };
-              sticker = { };
-              polls = { };
             };
           };
         }
@@ -62,13 +62,15 @@ The flake exports a NixOS module:
 }
 ```
 
-An empty section like `emoji = { }` turns the feature on with its defaults.
 The module writes `settings` to `/etc/orianna/config.json`, keeps the database
 in `/var/lib/orianna`, and hands the token to the service as a systemd
-credential, so the file can stay readable by root only.
+credential, so the file can stay readable by root only. After a
+`nixos-rebuild switch`, the bot restarts when the config file changed.
 
-After a `nixos-rebuild switch`, the bot reloads when only `prefix` or
-`permissions` changed, and restarts for anything else.
+An older `settings` may still have bot settings like `permissions` or
+`emoji = { }`. The bot imports them into its database on the first start
+after the upgrade. Remove them from `settings` once that's happened; the bot
+warns on each start until you do.
 
 ### Anywhere else
 
@@ -81,13 +83,11 @@ echo 'FLUXER_BOT_TOKEN=...' > .env
 bun run start
 ```
 
-Fill in the IDs in `config.json` first. The bot reads the config from
-`ORIANNA_CONFIG`, or from `./config.json` when that's unset. Bun loads `.env`
-on its own. The bot creates the database and applies migrations when it
-starts.
-
-Send the bot SIGHUP to apply changes to `prefix` and `permissions` without a
-restart.
+Fill in the instance and guild ID in `config.json` first. The bot reads the
+config from `ORIANNA_CONFIG`, or from `./config.json` when that's unset. Bun
+loads `.env` on its own. The bot creates the database and applies migrations
+when it starts. [`settings.example.json`](settings.example.json) shows every
+bot setting, ready to edit and send to `!settings import`.
 
 ### What the bot needs in Fluxer
 
@@ -97,6 +97,7 @@ off.
 | Feature | Where | Permissions |
 |---|---|---|
 | Commands | Where members run them | View Channel, Send Messages, Embed Links, Add Reactions, Manage Messages |
+| `!settings` | Where admins run it | Attach Files, for `!settings export` |
 | Proposals | The guild | Manage Expressions |
 | Proposals | The `pollsChannelId` channel | Send Messages, Attach Files, Add Reactions, Manage Messages, Read Message History, Mention Everyone |
 | `!poll` | Where members run it | Send Messages, Embed Links, Add Reactions, Manage Messages, Read Message History |

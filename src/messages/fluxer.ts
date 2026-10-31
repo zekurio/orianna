@@ -26,9 +26,11 @@ export function sendOptions(
   allowedMentions: AllowedMentionsOptions,
 ): MessageSendOptions {
   const { content, embeds } = split(body);
+  const files = typeof body === "string" ? [] : (body.files ?? []);
   return {
     content,
     embeds: embeds.length > 0 ? embeds.map(toBuilder) : undefined,
+    files: files.length > 0 ? files.map((f) => ({ name: f.name, data: f.data })) : undefined,
     allowedMentions,
   };
 }

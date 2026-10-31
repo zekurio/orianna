@@ -10,11 +10,6 @@ let
   cfg = config.services.orianna;
   format = pkgs.formats.json { };
   configFile = format.generate "orianna.json" cfg.settings;
-  # The keys the bot applies on reload, as in reloadedConfig in src/config.ts.
-  reloaded = [
-    "prefix"
-    "permissions"
-  ];
 in
 {
   options.services.orianna = {
@@ -38,20 +33,19 @@ in
 
     settings = lib.mkOption {
       description = ''
-        Bot configuration, written to /etc/orianna/config.json. See
+        Deployment configuration, written to /etc/orianna/config.json. See
         docs/configuration.md for every key. Unknown keys are rejected when the bot
-        starts. Changing only `prefix` or `permissions` reloads the bot;
-        changing anything else restarts it.
+        starts, and any change restarts it.
+
+        Bot settings like `permissions`, `emoji` or `boards` live in the bot's
+        database and are edited with `!settings`. On its first start the bot
+        imports them from here, so the sections from before they moved still
+        work for that; remove them afterwards.
       '';
       example = lib.literalExpression ''
         {
           instance = "https://chat.example.org";
           guildId = "1234567890";
-          permissions.roles."2345678901" = [ "+*" ];
-          pollsChannelId = "3456789012";
-          emoji = { };
-          sticker = { };
-          polls = { };
         }
       '';
       type = lib.types.submodule {
@@ -86,12 +80,10 @@ in
       after = [ "network-online.target" ];
 
       environment.ORIANNA_CONFIG = "/etc/orianna/config.json";
-      reloadTriggers = [ configFile ];
-      restartTriggers = [ (builtins.toJSON (removeAttrs cfg.settings reloaded)) ];
+      restartTriggers = [ configFile ];
 
       serviceConfig = {
         ExecStart = lib.getExe cfg.package;
-        ExecReload = "${pkgs.coreutils}/bin/kill -HUP $MAINPID";
         LoadCredential = "token:${cfg.tokenFile}";
         DynamicUser = true;
         StateDirectory = "orianna";

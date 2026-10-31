@@ -1,0 +1,63 @@
+{
+  "prefix": "!",
+  "permissions": {
+    "everyone": ["+emoji.propose", "+sticker.propose", "+polls.create"],
+    "roles": {
+      "100000000000000010": ["+*"],
+      "100000000000000011": ["+emoji.*", "+sticker.*", "+polls.end-any"],
+      "100000000000000012": ["-polls.create"]
+    }
+  },
+  "pollsChannelId": "000000000000000000",
+  "emoji": {
+    "votingHours": 48,
+    "maxOpenPerUser": 3,
+    "maxImageBytes": 524288,
+    "threshold": 1
+  },
+  "sticker": {
+    "votingHours": 48,
+    "maxOpenPerUser": 3,
+    "maxImageBytes": 524288,
+    "threshold": 1
+  },
+  "polls": {
+    "defaultHours": 24,
+    "maxOpenPerUser": 5
+  },
+  "roleMenus": {
+    "channelId": "000000000000000000",
+    "menus": [
+      {
+        "name": "notifications",
+        "title": "Notifications",
+        "description": "Pick what you'd like to be pinged for.",
+        "options": [
+          { "emoji": "📣", "roleId": "100000000000000001", "description": "server news and downtime" },
+          { "emoji": "🎉", "roleId": "100000000000000002", "description": "game nights and watch parties" }
+        ]
+      },
+      {
+        "name": "colour",
+        "title": "Name colour",
+        "description": "One colour at a time.",
+        "mode": "single",
+        "options": [
+          { "emoji": "🟦", "roleId": "100000000000000003" },
+          { "emoji": "🟥", "roleId": "100000000000000004" }
+        ]
+      }
+    ]
+  },
+  "boards": [
+    { "name": "gems", "emoji": "💎", "channelId": "000000000000000000", "threshold": 5 },
+    {
+      "name": "coal",
+      "emoji": "🪨",
+      "channelId": "000000000000000000",
+      "threshold": 8,
+      "keep": true,
+      "ignoredChannelIds": ["100000000000000020"]
+    }
+  ]
+}

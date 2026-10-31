@@ -29,6 +29,9 @@ points at its docs and examples.
 - Use `listen` from `src/fluxer.ts` for gateway events, so handlers run in
   fibers that stop on shutdown.
 - bun:sqlite is synchronous, so drizzle queries run inline in effects.
+- Read bot settings through the `Settings` service in
+  `src/settings/settings.ts`, not `AppConfig`; they change while the bot
+  runs. `AppConfig` holds only the deployment keys from the config file.
 
 ## Nix
 
@@ -65,10 +68,13 @@ Body explaining what changed and why, wrapped at 72 columns.
 - Unknown config keys stop the bot at startup, so renaming or removing a key
   breaks existing deployments. Mark those commits with `!` and a
   `BREAKING CHANGE:` footer that says what to change in the config.
+- The bot settings in the database are validated on every start too, so
+  renaming or removing a settings key also needs code that rewrites the
+  stored document, or the bot won't start.
 - Commit a schema change and its generated migration together. Never edit a
   migration that has already been committed.
-- When `src/config.ts` changes, update `config.example.json` and
-  `docs/configuration.md` in the same commit.
+- When `src/config.ts` changes, update `config.example.json` or
+  `settings.example.json`, and `docs/configuration.md`, in the same commit.
 - When a command, its options or a permission changes, update
   `docs/commands.md` or `docs/permissions.md` in the same commit.
 

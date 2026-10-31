@@ -1,7 +1,7 @@
 import { Effect } from "effect";
-import { AppConfig } from "../config.ts";
 import { embedPages } from "../messages/body.ts";
 import { GuildAccess } from "../permissions/rules.ts";
+import { Settings } from "../settings/settings.ts";
 import { defineCommand, isGroup, mayRun } from "./command.ts";
 import { CommandRouter, usageLine } from "./router.ts";
 
@@ -24,9 +24,9 @@ export const help = defineCommand({
   description: "List the commands you may run.",
   run: (ctx) =>
     Effect.gen(function* () {
-      const { prefix } = yield* AppConfig.current;
+      const { prefix } = yield* Settings.current;
       const permissions = yield* (yield* GuildAccess).permissionsOf(ctx.userId);
-      const { entries } = yield* CommandRouter;
+      const entries = yield* (yield* CommandRouter).entries;
       const lines = [...entries.values()].flatMap((entry) =>
         isGroup(entry)
           ? entry.subcommands
