@@ -1,5 +1,6 @@
-import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
+import { Data, Effect, Result } from "effect";
+import { Dns, Host, NetAddress } from "effect/net";
 
 interface Address {
   family: 4 | 6;
@@ -54,21 +55,32 @@ export function isPublicAddress(address: string): boolean {
   );
 }
 
+/** The bot won't connect to a link's host. */
+export class RefusedHost extends Data.TaggedError("RefusedHost")<{ readonly message: string }> {}
+
 /**
- * Throws unless every address `hostname` resolves to is public, so a link
+ * Fails unless every address `hostname` resolves to is public, so a link
  * can't reach the bot's own machine or the network it's on. Takes a URL's
  * `hostname`, where an IPv6 address is in brackets.
  */
-export async function checkPublicHost(hostname: string): Promise<void> {
+export const checkPublicHost = Effect.fnUntraced(function* (hostname: string) {
   const host = hostname.replace(/^\[(.*)\]$/, "$1");
-  const addresses = isIP(host)
-    ? [host]
-    : (await lookup(host, { all: true })).map((a) => a.address);
+  let addresses = [host];
+  if (!isIP(host)) {
+    const name = Host.domainNameFromString(host);
+    if (Result.isFailure(name)) {
+      return yield* new RefusedHost({ message: `${hostname} is not a host name` });
+    }
+    const found = yield* (yield* Dns.Dns).lookup(name.success, undefined);
+    addresses = found.map(NetAddress.formatIp);
+  }
   const refused = addresses.find((a) => !isPublicAddress(a));
   if (refused !== undefined || addresses.length === 0) {
-    throw new Error(`${hostname} resolves to ${refused ?? "nothing"}, which isn't public`);
+    return yield* new RefusedHost({
+      message: `${hostname} resolves to ${refused ?? "nothing"}, which isn't public`,
+    });
   }
-}
+});
 
 /**
  * Reads an address into a number. IPv4 inside IPv6, mapped or behind NAT64,

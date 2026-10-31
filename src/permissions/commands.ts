@@ -1,6 +1,8 @@
-import { defineCommand, UserError } from "../commands/command.ts";
+import { Effect } from "effect";
+import { defineCommand, refuse } from "../commands/command.ts";
+import { AppConfig } from "../config.ts";
 import { ACCENT } from "../messages/body.ts";
-import { type Decision, groupOf, PERMISSIONS, type Permission } from "./rules.ts";
+import { type Decision, GuildAccess, groupOf, PERMISSIONS, type Permission } from "./rules.ts";
 
 /** `<@id>`, `<@!id>` or a bare ID. */
 const MEMBER = /^(?:<@!?(\d+)>|(\d+))$/;
@@ -16,29 +18,31 @@ export const perms = defineCommand({
       required: false,
     },
   ],
-  async run(ctx) {
-    const userId = ctx.options.member === undefined ? ctx.userId : memberId(ctx.options.member);
-    const permissions = await ctx.bot.access.permissionsOf(userId);
+  run: (ctx) =>
+    Effect.gen(function* () {
+      const userId = ctx.options.member === undefined ? ctx.userId : yield* memberId(ctx.options.member);
+      const permissions = yield* (yield* GuildAccess).permissionsOf(userId);
+      const config = yield* AppConfig.current;
 
-    let description: string;
-    if (permissions.bypass) {
-      const why = permissions.bypass === "owner" ? "owns the server" : "has Administrator";
-      description = `<@${userId}> ${why}, so the rules don't apply and they may do everything.`;
-    } else {
-      // Permissions of features that are turned off would only add noise.
-      const lines = PERMISSIONS.filter((p) => ctx.bot.config[groupOf(p)] !== undefined).map(
-        (p) => describe(p, permissions.decide(p)),
-      );
-      description = [`What <@${userId}> may do:`, ...lines].join("\n");
-    }
-    await ctx.reply({ embeds: [{ title: "Permissions", description, color: ACCENT }] });
-  },
+      let description: string;
+      if (permissions.bypass) {
+        const why = permissions.bypass === "owner" ? "owns the server" : "has Administrator";
+        description = `<@${userId}> ${why}, so the rules don't apply and they may do everything.`;
+      } else {
+        // Permissions of features that are turned off would only add noise.
+        const lines = PERMISSIONS.filter((p) => config[groupOf(p)] !== undefined).map((p) =>
+          describe(p, permissions.decide(p)),
+        );
+        description = [`What <@${userId}> may do:`, ...lines].join("\n");
+      }
+      yield* ctx.reply({ embeds: [{ title: "Permissions", description, color: ACCENT }] });
+    }),
 });
 
-function memberId(input: string): string {
+function memberId(input: string) {
   const match = MEMBER.exec(input);
-  if (!match) throw new UserError(`${input} isn't a mention or a user ID.`);
-  return (match[1] ?? match[2])!;
+  if (!match) return refuse(`${input} isn't a mention or a user ID.`);
+  return Effect.succeed((match[1] ?? match[2])!);
 }
 
 /** e.g. "✅ `emoji.add`: `+emoji.*` on @Curators" */

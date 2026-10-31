@@ -14,6 +14,23 @@ Outside direnv, prefix commands with `devenv shell`, for example
 `devenv test` runs the typechecker. There is no test suite, so run it before
 every commit.
 
+## Code
+
+The bot is written with [Effect](https://effect.website) v4; `node_modules/effect/CLAUDE.md`
+points at its docs and examples.
+
+- Talk to Fluxer through `request` in `src/fluxer.ts`, which turns a rejection
+  into a `FluxerError`. fluxer.js already retries and waits out rate limits,
+  so don't retry Fluxer calls on top.
+- Fail with `UserError` (`refuse(...)`) for anything a member should read;
+  the router replies with it. Other failures are logged.
+- Platform-facing pieces are `Context.Service`s with a Fluxer layer next to
+  them (`GuildAccess`, `PollTransport`, `RoleGuild`, `ExpressionGuild`);
+  `src/main.ts` wires the layers together.
+- Use `listen` from `src/fluxer.ts` for gateway events, so handlers run in
+  fibers that stop on shutdown.
+- bun:sqlite is synchronous, so drizzle queries run inline in effects.
+
 ## Nix
 
 `flake.nix` exports the package from `nix/package.nix` and the NixOS module

@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import { type CommandEntry, defineCommand } from "../commands/command.ts";
 import { embedPages } from "../messages/body.ts";
 import type { CommunityPolls } from "./community.ts";
@@ -22,25 +23,24 @@ export function pollCommands(community: CommunityPolls): CommandEntry[] {
       },
     ],
     permission: "polls.create",
-    async run(ctx) {
-      await community.start(ctx.userId, ctx.channelId, ctx.options.question);
-      // The poll stands in for the command, the way a slash command's reply would.
-      await ctx.deleteInvocation();
-    },
+    run: (ctx) =>
+      Effect.gen(function* () {
+        yield* community.start(ctx.userId, ctx.channelId, ctx.options.question);
+        // The poll stands in for the command, the way a slash command's reply would.
+        yield* ctx.deleteInvocation();
+      }),
   });
 
   const list = defineCommand({
     name: "polls",
     description: "Show open polls.",
-    async run(ctx) {
-      const open = community.open();
-      if (open.length === 0) {
-        await ctx.reply("There are no open polls.");
-        return;
-      }
-      const lines = open.map((p) => community.describe(p));
-      await ctx.replyPages(embedPages("Open polls", lines, LIST_PAGE_SIZE));
-    },
+    run: (ctx) =>
+      Effect.gen(function* () {
+        const open = community.open();
+        if (open.length === 0) return yield* Effect.asVoid(ctx.reply("There are no open polls."));
+        const lines = open.map((p) => community.describe(p));
+        yield* ctx.replyPages(embedPages("Open polls", lines, LIST_PAGE_SIZE));
+      }),
   });
 
   return [poll, list];

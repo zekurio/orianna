@@ -1,8 +1,9 @@
-import { type Client, Events, type Message, PermissionFlags, Routes } from "@fluxerjs/core";
-import type { MessageBody } from "../messages/body.ts";
+import { Events, type Message, PermissionFlags, Routes } from "@fluxerjs/core";
+import { Effect, Layer } from "effect";
+import { Fluxer, listen, orNotFound, reactionUsers, request } from "../fluxer.ts";
 import { editOptions, NO_MENTIONS, sendOptions } from "../messages/fluxer.ts";
 import { attachReactions } from "../reactions.ts";
-import type { MenuReaction, RoleGuild, RoleMenus } from "./menus.ts";
+import { type MenuReaction, RoleGuild, type RoleMenus } from "./menus.ts";
 
 /**
  * A role with any of these isn't handed out by reaction, so a mistyped role ID
@@ -26,143 +27,130 @@ const ELEVATED =
   PermissionFlags.MentionEveryone |
   PermissionFlags.ViewAuditLog;
 
-export class FluxerRoleGuild implements RoleGuild {
-  /** Menu messages, kept so reacting doesn't fetch the message every time. */
-  private readonly messages = new Map<string, Message>();
+/** Role menus through fluxer.js. */
+export const FluxerRoleGuild = Layer.effect(
+  RoleGuild,
+  Effect.gen(function* () {
+    const { client, guildId } = yield* Fluxer;
+    /** Menu messages, kept so reacting doesn't fetch the message every time. */
+    const messages = new Map<string, Message>();
+    const guild = request("fetching the guild", () => client.guilds.resolve(guildId));
 
-  constructor(
-    private readonly client: Client,
-    private readonly guildId: string,
-  ) {}
+    const fetchMessage = (channelId: string, messageId: string) =>
+      request("fetching a menu message", () => client.channels.fetchMessage(channelId, messageId)).pipe(
+        Effect.tap((message) => Effect.sync(() => messages.set(messageId, message))),
+      );
+    const message = (channelId: string, messageId: string) =>
+      Effect.suspend(() => {
+        const cached = messages.get(messageId);
+        return cached ? Effect.succeed(cached) : fetchMessage(channelId, messageId);
+      });
+    const auditLog = (reason: string) => ({ headers: { "X-Audit-Log-Reason": reason } });
 
-  async vetRoles(roleIds: readonly string[]) {
-    const guild = await this.client.guilds.resolve(this.guildId);
-    const roles = new Map((await guild.fetchRoles()).map((r) => [r.id, r]));
-    const me = await guild.members.fetchMe();
-    const owner = guild.ownerId === me.id;
-    const top = Math.max(0, ...me.roles.roleIds.map((id) => roles.get(id)?.position ?? 0));
+    return {
+      vetRoles: (roleIds) =>
+        Effect.gen(function* () {
+          const g = yield* guild;
+          const roles = new Map((yield* request("fetching roles", () => g.fetchRoles())).map((r) => [r.id, r]));
+          const me = yield* request("fetching the bot member", () => g.members.fetchMe());
+          const owner = g.ownerId === me.id;
+          const top = Math.max(0, ...me.roles.roleIds.map((id) => roles.get(id)?.position ?? 0));
 
-    const problems = new Map<string, string>();
-    for (const id of roleIds) {
-      const role = roles.get(id);
-      const problem = !role
-        ? "there is no such role"
-        : id === guild.id
-          ? "that's the @everyone role"
-          : !owner && !me.permissions.has("ManageRoles")
-            ? "the bot doesn't have Manage Roles"
-            : !owner && role.position >= top
-              ? "the bot's highest role isn't above it"
-              : (role.permissions.bitfield & ELEVATED) !== 0n
-                ? "it has moderator permissions"
-                : undefined;
-      if (problem) problems.set(id, problem);
-    }
-    return problems;
-  }
+          const problems = new Map<string, string>();
+          for (const id of roleIds) {
+            const role = roles.get(id);
+            const problem = !role
+              ? "there is no such role"
+              : id === g.id
+                ? "that's the @everyone role"
+                : !owner && !me.permissions.has("ManageRoles")
+                  ? "the bot doesn't have Manage Roles"
+                  : !owner && role.position >= top
+                    ? "the bot's highest role isn't above it"
+                    : (role.permissions.bitfield & ELEVATED) !== 0n
+                      ? "it has moderator permissions"
+                      : undefined;
+            if (problem) problems.set(id, problem);
+          }
+          return problems;
+        }),
 
-  async memberRoles(userId: string) {
-    const guild = await this.client.guilds.resolve(this.guildId);
-    try {
-      return (await guild.members.fetch(userId)).roles.roleIds;
-    } catch (err) {
-      if (isNotFound(err)) return null;
-      throw err;
-    }
-  }
+      memberRoles: (userId) =>
+        guild.pipe(
+          Effect.flatMap((g) => request("fetching a member", () => g.members.fetch(userId))),
+          Effect.map((member): readonly string[] | null => member.roles.roleIds),
+          orNotFound(() => null),
+        ),
 
-  async addRole(userId: string, roleId: string, reason: string) {
-    await this.client.rest.put(Routes.guildMemberRole(this.guildId, userId, roleId), {
-      headers: { "X-Audit-Log-Reason": reason },
-    });
-  }
+      addRole: (userId, roleId, reason) =>
+        request("giving a role", () =>
+          client.rest.put(Routes.guildMemberRole(guildId, userId, roleId), auditLog(reason)),
+        ).pipe(Effect.asVoid),
 
-  async removeRole(userId: string, roleId: string, reason: string) {
-    await this.client.rest.delete(Routes.guildMemberRole(this.guildId, userId, roleId), {
-      headers: { "X-Audit-Log-Reason": reason },
-    });
-  }
+      removeRole: (userId, roleId, reason) =>
+        request("taking a role", () =>
+          client.rest.delete(Routes.guildMemberRole(guildId, userId, roleId), auditLog(reason)),
+        ).pipe(Effect.asVoid),
 
-  async post(channelId: string, body: MessageBody) {
-    const message = await this.client.channels.send(channelId, sendOptions(body, NO_MENTIONS));
-    this.messages.set(message.id, message);
-    return message.id;
-  }
+      post: (channelId, body) =>
+        request("posting a menu", () => client.channels.send(channelId, sendOptions(body, NO_MENTIONS))).pipe(
+          Effect.map((message) => {
+            messages.set(message.id, message);
+            return message.id;
+          }),
+        ),
 
-  async edit(channelId: string, messageId: string, body: MessageBody) {
-    const message = await this.message(channelId, messageId);
-    await message.edit(editOptions(body, NO_MENTIONS));
-  }
+      edit: (channelId, messageId, body) =>
+        message(channelId, messageId).pipe(
+          Effect.flatMap((m) => request("editing a menu", () => m.edit(editOptions(body, NO_MENTIONS)))),
+          Effect.asVoid,
+        ),
 
-  async delete(channelId: string, messageId: string) {
-    this.messages.delete(messageId);
-    try {
-      await this.client.rest.delete(Routes.channelMessage(channelId, messageId));
-    } catch (err) {
-      if (!isNotFound(err)) throw err;
-    }
-  }
+      delete: (channelId, messageId) =>
+        Effect.sync(() => messages.delete(messageId)).pipe(
+          Effect.andThen(
+            request("deleting a menu", () => client.rest.delete(Routes.channelMessage(channelId, messageId))),
+          ),
+          Effect.asVoid,
+          orNotFound(() => undefined),
+        ),
 
-  async reactions(channelId: string, messageId: string): Promise<MenuReaction[] | null> {
-    let message: Message;
-    try {
-      message = await this.client.channels.fetchMessage(channelId, messageId);
-    } catch (err) {
-      if (isNotFound(err)) return null;
-      throw err;
-    }
-    this.messages.set(messageId, message);
-    return [...message.reactions].map((r) => ({ emoji: r.emoji, me: r.me }));
-  }
+      reactions: (channelId, messageId) =>
+        fetchMessage(channelId, messageId).pipe(
+          Effect.map((m): MenuReaction[] | null => [...m.reactions].map((r) => ({ emoji: r.emoji, me: r.me }))),
+          orNotFound(() => null),
+        ),
 
-  async react(channelId: string, messageId: string, emoji: string) {
-    await (await this.message(channelId, messageId)).react(emoji);
-  }
+      react: (channelId, messageId, emoji) =>
+        message(channelId, messageId).pipe(
+          Effect.flatMap((m) => request("adding a reaction", () => m.react(emoji))),
+        ),
 
-  async removeReaction(channelId: string, messageId: string, emoji: string, userId: string) {
-    await (await this.message(channelId, messageId)).removeReaction(emoji, userId);
-  }
+      removeReaction: (channelId, messageId, emoji, userId) =>
+        message(channelId, messageId).pipe(
+          Effect.flatMap((m) => request("removing a reaction", () => m.removeReaction(emoji, userId))),
+        ),
 
-  async clearReaction(channelId: string, messageId: string, emoji: string) {
-    await (await this.message(channelId, messageId)).removeReactionEmoji(emoji);
-  }
+      clearReaction: (channelId, messageId, emoji) =>
+        message(channelId, messageId).pipe(
+          Effect.flatMap((m) => request("clearing a reaction", () => m.removeReactionEmoji(emoji))),
+        ),
 
-  async reactionUsers(channelId: string, messageId: string, emoji: string) {
-    const message = await this.message(channelId, messageId);
-    const userIds: string[] = [];
-    let after: string | undefined;
-    for (;;) {
-      const page = await message.fetchReactionUsersPage(emoji, { limit: 100, after });
-      userIds.push(...page.users.filter((u) => !u.bot).map((u) => u.id));
-      if (!page.hasMore || !page.nextAfter) return userIds;
-      after = page.nextAfter;
-    }
-  }
+      reactionUsers: (channelId, messageId, emoji) =>
+        message(channelId, messageId).pipe(Effect.flatMap((m) => reactionUsers(m, emoji))),
+    };
+  }),
+);
 
-  private async message(channelId: string, messageId: string) {
-    const cached = this.messages.get(messageId);
-    if (cached) return cached;
-    const message = await this.client.channels.fetchMessage(channelId, messageId);
-    this.messages.set(messageId, message);
-    return message;
-  }
-}
-
-/** Feeds reactions, deleted messages and departing members into the role menus. */
-export function attachRoleMenuEvents(client: Client, menus: RoleMenus, guildId: string) {
-  attachReactions(client, menus, "role menu");
-  client.on(Events.MessageDelete, (message) => void menus.messageDeleted(message.id));
-  client.on(Events.MessageDeleteBulk, (p) => {
-    for (const id of p.ids) void menus.messageDeleted(id);
-  });
-  client.on(Events.GuildMemberRemove, (member) => {
-    if (member.guild.id === guildId) void menus.memberLeft(member.id);
-  });
-}
-
-/** fluxer.js reports a 404 as `*_NOT_FOUND`; raw REST calls carry the API's `UNKNOWN_*`. */
-export function isNotFound(err: unknown): boolean {
-  const { code, statusCode } = (err ?? {}) as { code?: unknown; statusCode?: unknown };
-  if (statusCode === 404) return true;
-  return typeof code === "string" && (code.endsWith("_NOT_FOUND") || code.startsWith("UNKNOWN_"));
-}
+/** Feeds reactions, deleted messages and departing members into the role menus, until the scope closes. */
+export const attachRoleMenuEvents = Effect.fnUntraced(function* (menus: RoleMenus) {
+  const { guildId } = yield* Fluxer;
+  yield* attachReactions(menus, "role menu");
+  yield* listen(Events.MessageDelete, "role menu message delete", (message) => menus.messageDeleted(message.id));
+  yield* listen(Events.MessageDeleteBulk, "role menu message delete", (p) =>
+    Effect.forEach(p.ids, (id) => menus.messageDeleted(id), { discard: true }),
+  );
+  yield* listen(Events.GuildMemberRemove, "role menu member leave", (member) =>
+    member.guild.id === guildId ? menus.memberLeft(member.id) : Effect.void,
+  );
+});
