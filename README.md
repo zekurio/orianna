@@ -72,11 +72,6 @@ application's client secret, which the service gets the same way.
 [Configuration](docs/configuration.md#the-web-interface) has the steps. After a
 `nixos-rebuild switch`, the bot restarts when the config file changed.
 
-An older `settings` may still have bot settings like `permissions` or
-`emoji = { }`. The bot imports them into its database on the first start
-after the upgrade. Remove them from `settings` once that's happened; the bot
-warns on each start until you do.
-
 ### Anywhere else
 
 Build the bot with [Bun](https://bun.sh):

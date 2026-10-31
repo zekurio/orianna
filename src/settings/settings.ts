@@ -13,8 +13,8 @@ import { Database, type DB } from "../db/index.ts";
 import { settings, settingsChanges } from "../db/schema.ts";
 
 // The bot settings live in the database so they can change while the bot
-// runs. On the first start they come from the config file, or from the
-// defaults when it has none. Every change is recorded with who made it.
+// runs. On the first start they are the defaults. Every change is recorded
+// with who made it.
 
 export type SettingsChange = typeof settingsChanges.$inferSelect;
 type Source = SettingsChange["source"];
@@ -38,15 +38,14 @@ export class Settings extends Context.Service<
   }
 >()("orianna/Settings") {
   /**
-   * Loads the settings from the database. When it has none yet, imports the
-   * bot sections of the config file, or stores the defaults.
+   * Loads the settings from the database. When it has none yet, stores the
+   * defaults.
    */
   static readonly layer = Layer.effect(
     Settings,
     Effect.gen(function* () {
       const db = yield* Database;
-      const { config, legacySettings } = yield* AppConfig;
-      const legacyKeys = Object.keys(legacySettings ?? {}).join(", ");
+      const config = yield* AppConfig.current;
       const now = Clock.currentTimeMillis.pipe(Effect.map((ms) => new Date(ms)));
 
       const row = db.select().from(settings).where(eq(settings.id, 1)).get();
@@ -57,29 +56,10 @@ export class Settings extends Context.Service<
             (err) => new ConfigError({ message: `the bot settings in the database are invalid:\n${err.message}` }),
           ),
         );
-        if (legacySettings) {
-          yield* Effect.logWarning(
-            `the config file still has ${legacyKeys}. The bot settings are in the database now, so these ` +
-              `are ignored; edit them with ${current.prefix}settings and remove them from the config.`,
-          );
-        }
       } else {
-        const source: Source = legacySettings ? "config-file" : "defaults";
-        current = yield* parseSettings(legacySettings ?? {}, config.guildId).pipe(
-          Effect.mapError(
-            (err) =>
-              new ConfigError({
-                message: `couldn't import the bot settings from the config file:\n${err.message}`,
-              }),
-          ),
-        );
-        store(db, current, { at: yield* now, by: null, source, before: null, sections: SETTINGS_SECTIONS });
-        yield* Effect.logInfo(
-          legacySettings
-            ? `imported ${legacyKeys} from the config file into the database. Edit them with ` +
-                `${current.prefix}settings from now on, and remove them from the config.`
-            : `stored the default bot settings; edit them with ${current.prefix}settings`,
-        );
+        current = yield* parseSettings({}, config.guildId).pipe(Effect.orDie);
+        store(db, current, { at: yield* now, by: null, source: "defaults", before: null, sections: SETTINGS_SECTIONS });
+        yield* Effect.logInfo(`stored the default bot settings; edit them with ${current.prefix}settings`);
       }
 
       const ref = yield* SubscriptionRef.make(current);
