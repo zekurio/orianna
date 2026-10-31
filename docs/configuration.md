@@ -2,8 +2,9 @@
 
 Orianna keeps two kinds of configuration apart:
 
-- The [config file](#the-config-file) says how to reach Fluxer and where to
-  keep the database. The bot reads it once, when it starts.
+- The [config file](#the-config-file) says how to reach Fluxer, where to
+  keep the database, and whether to serve the web interface. The bot reads it
+  once, when it starts.
 - The [bot settings](#bot-settings) say what the bot does in the guild: the
   prefix, permissions and every feature. They live in the database, and
   changes apply while the bot runs.
@@ -20,12 +21,50 @@ the same keys go under `services.orianna.settings`.
 | `instance` | Required | Origin of the Fluxer instance, like `https://chat.example.org`. The bot reads `/.well-known/fluxer` from it. |
 | `guildId` | Required | The guild the bot serves. It ignores messages from anywhere else. |
 | `database` | `"./data/orianna.db"` | The SQLite file, which holds the bot settings too. A relative path starts from the working directory. The NixOS module sets `/var/lib/orianna/orianna.db`. |
+| `web` | Off | The [web interface](#the-web-interface) |
 
 The bot refuses to start when the file has a key it doesn't know or a value
 of the wrong type. The error names each problem with its path, like
 `/guildId`.
 
 The bot token doesn't go in the file; see [Environment](#environment).
+
+### The web interface
+
+The bot can serve a web interface, where members of the guild sign in with
+their Fluxer account. It has pages for the boards, the commands and settings,
+which are still empty. For now it handles signing in and out.
+
+To turn it on:
+
+1. Open the bot's application on your Fluxer instance and add
+   `<publicUrl>/auth/callback` as a redirect URI, like
+   `https://orianna.example.org/auth/callback`.
+2. Hand the bot the application's client secret, in `FLUXER_CLIENT_SECRET` or
+   as the `client-secret` systemd credential; see [Environment](#environment).
+   On NixOS, set `services.orianna.clientSecretFile`.
+3. Add the `web` section, and put a reverse proxy with TLS in front of `host`
+   and `port`.
+
+```json
+"web": {
+  "publicUrl": "https://orianna.example.org",
+  "clientId": "000000000000000000"
+}
+```
+
+| Key | Default | What it does |
+|---|---|---|
+| `publicUrl` | Required | Where people open the web interface, without a path |
+| `clientId` | Required | The ID of the bot's application |
+| `host` | `"127.0.0.1"` | The address the bot listens on |
+| `port` | `8080` | The port the bot listens on |
+
+Signing in asks Fluxer for the `identify` scope only, and the bot keeps just
+the member's ID. Only members of the guild get in. A member stays signed in
+for 30 days, and the guild owner and members with Administrator see the
+server's settings too. When `publicUrl` starts with `https://`, the session
+cookie is only sent over HTTPS.
 
 ### Bot settings in the config file
 
@@ -214,7 +253,8 @@ someone reacts to the message.
 |---|---|
 | `ORIANNA_CONFIG` | Path to the config file. `config.json` if unset. |
 | `FLUXER_BOT_TOKEN` | The bot token. Bun reads it from `.env` on its own. |
-| `CREDENTIALS_DIRECTORY` | Set by systemd. When it holds a file called `token`, the bot uses that instead of `FLUXER_BOT_TOKEN`. |
+| `FLUXER_CLIENT_SECRET` | The client secret of the bot's application, which the [web interface](#the-web-interface) needs. Bun reads it from `.env` too. |
+| `CREDENTIALS_DIRECTORY` | Set by systemd. When it holds a file called `token`, the bot uses that instead of `FLUXER_BOT_TOKEN`, and a file called `client-secret` instead of `FLUXER_CLIENT_SECRET`. |
 
 ## Changes while the bot runs
 

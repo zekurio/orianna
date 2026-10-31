@@ -21,6 +21,7 @@ import { attachReactions } from "./reactions.ts";
 import { FluxerRoleGuild } from "./roles/fluxer.ts";
 import { settingsCommands } from "./settings/commands.ts";
 import { Settings } from "./settings/settings.ts";
+import { WebServer } from "./web/server.ts";
 
 const Platform = Layer.mergeAll(BunServices.layer, BunDns.layer, FetchHttpClient.layer);
 
@@ -41,7 +42,7 @@ const Adapters = Layer.mergeAll(
   ImageMagick.layer,
 ).pipe(Layer.provideMerge(Core));
 
-const App = PollService.layer.pipe(Layer.provideMerge(Adapters));
+const App = Layer.mergeAll(PollService.layer, WebServer).pipe(Layer.provideMerge(Adapters));
 
 /**
  * Without a handler SIGHUP would end the process, and systemd doesn't restart

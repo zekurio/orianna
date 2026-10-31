@@ -1,5 +1,11 @@
 {
   "instance": "https://chat.example.org",
   "guildId": "000000000000000000",
-  "database": "./data/orianna.db"
+  "database": "./data/orianna.db",
+  "web": {
+    "publicUrl": "https://orianna.example.org",
+    "clientId": "000000000000000000",
+    "host": "127.0.0.1",
+    "port": 8080
+  }
 }
