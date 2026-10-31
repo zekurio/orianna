@@ -131,3 +131,11 @@ export const logFailure =
   (what: string) =>
   <E>(cause: Cause.Cause<E>): Effect.Effect<void> =>
     Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.logError(`${what} failed`, cause);
+
+/**
+ * `name#0001`, or the bare username. An instance can make usernames unique
+ * instead, and then every discriminator is zeros.
+ */
+export function tagOf({ username, discriminator }: { username: string; discriminator: string }): string {
+  return /^0*$/.test(discriminator) ? username : `${username}#${discriminator}`;
+}

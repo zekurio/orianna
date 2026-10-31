@@ -192,10 +192,12 @@ The starboard is copied from shinpuru: honor and highlight memorable, funny,
 deep or simply dumb messages. Members vote a message into it by reacting with
 the starboard's emoji, ⭐ by default. Once a message has as many votes as the
 threshold, the author's own included, the bot posts it in the starboard
-channel with the author, the text, the first image, a link to jump to the
-message, and its vote count. A link to an image in the text counts as an
-image. On a starboard that isn't NSFW, NSFW images come blurred, as
-[Configuration](configuration.md#starboard) describes.
+channel in shinpuru's embed: the author, the text, a link to jump to the
+message, the first image, when it was sent, and the votes with a ⭐,
+whatever the starboard's emoji. A link to an image in the text counts as one
+of its files and leaves the text. Other files only show on the web
+interface's starboard page. On a starboard that isn't NSFW, an NSFW image
+comes blurred, as [Configuration](configuration.md#starboard) describes.
 
 The post's vote count changes with the votes. When the message is edited, so
 is the post. When it's deleted, the post goes too. When votes drop below the

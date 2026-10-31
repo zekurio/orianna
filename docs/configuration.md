@@ -222,10 +222,10 @@ The bot posts from every channel it can read, private ones included.
 Messages in the starboard channel never go up.
 
 On a starboard whose channel isn't NSFW, the bot blurs what would be NSFW
-there, like shinpuru does: every image of a message from an NSFW channel, and
-images their uploader marked NSFW. It posts the blurred copies with the post,
-up to four, and leaves out other files from them. An NSFW starboard shows
-everything.
+there, like shinpuru does: the images of a message from an NSFW channel, and
+images their uploader marked NSFW. When the post's image is one of them, the
+post shows a blurred copy instead, and the web interface leaves out the rest.
+An NSFW starboard shows everything.
 
 The bot needs View Channel and Read Message History where members react, and
 Send Messages, Embed Links and Attach Files in the starboard channel. Fluxer

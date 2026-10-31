@@ -3,7 +3,7 @@ import { Effect, Layer, Option, Result } from "effect";
 import { Headers } from "effect/http";
 import type { UserError } from "../commands/command.ts";
 import { type ParsedEmoji, parseEmoji } from "../emoji.ts";
-import { Fluxer, type FluxerError, logFailure, request } from "../fluxer.ts";
+import { Fluxer, type FluxerError, logFailure, request, tagOf } from "../fluxer.ts";
 import { GuildAccess } from "../permissions/rules.ts";
 import { Settings } from "../settings/settings.ts";
 import { currentStarboard, disableStarboard, setStarboard } from "../starboard/manage.ts";
@@ -271,11 +271,3 @@ export const HandlersLive = WebRpcs.toLayer(
     };
   }),
 );
-
-/**
- * `name#0001`, or the bare username. An instance can make usernames unique
- * instead, and then every discriminator is zeros.
- */
-function tagOf({ username, discriminator }: { username: string; discriminator: string }): string {
-  return /^0*$/.test(discriminator) ? username : `${username}#${discriminator}`;
-}

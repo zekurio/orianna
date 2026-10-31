@@ -7,7 +7,7 @@ import { type StarboardMedia, starboardEntries, starboardOptOuts } from "../db/s
 import { type ParsedEmoji, parseEmoji, type ReactionEmoji, reactionKey } from "../emoji.ts";
 import { ImageMagick } from "../expressions/process.ts";
 import { type FluxerError, logFailure } from "../fluxer.ts";
-import { ACCENT, type MessageBody, type MessageFile } from "../messages/body.ts";
+import type { MessageBody } from "../messages/body.ts";
 import { Settings } from "../settings/settings.ts";
 
 /** A file on a message. */
@@ -26,13 +26,12 @@ export interface StarboardMessage {
   /** Null in a DM. */
   guildId: string | null;
   authorId: string;
+  /** The username, with the discriminator on instances that use them, like shinpuru shows authors. */
   authorName: string;
   authorAvatar: string;
   content: string;
   createdAt: Date;
   attachments: StarboardAttachment[];
-  /** Images from link previews. */
-  embedImages: string[];
   /** How many reacted with each emoji, by {@link reactionKey}, the author and bots included. */
   reactionCounts: Map<string, number>;
 }
@@ -67,11 +66,11 @@ export class StarboardGuild extends Context.Service<
     readonly emojis: Effect.Effect<GuildEmoji[], FluxerError>;
     /** Downloads an image from a message, to blur it. */
     readonly downloadImage: (url: string) => Effect.Effect<Uint8Array, UserError>;
-    /** Posts a message. Returns its ID, and the URLs of its files by name. */
+    /** Posts a message. Returns its ID, and where its embed's image ended up, for one sent with it. */
     readonly post: (
       channelId: string,
       body: MessageBody,
-    ) => Effect.Effect<{ id: string; files: ReadonlyMap<string, string> }, FluxerError>;
+    ) => Effect.Effect<{ id: string; image: string | null }, FluxerError>;
     /** False when the message is gone. */
     readonly edit: (channelId: string, messageId: string, body: MessageBody) => Effect.Effect<boolean, FluxerError>;
     /** Also succeeds when the message is already gone. */
@@ -89,14 +88,17 @@ interface Board {
 
 type Entry = typeof starboardEntries.$inferSelect;
 
-/** Leaves room in the embed for the files and the link. */
+/** Leaves room in the embed for the link. */
 const MAX_TEXT = 3500;
 
-/** A link to an image in the text, shown when a message has no other image. */
+/** A link to an image in the text, which counts as a file of the message, as on shinpuru. */
 const IMAGE_LINK = /https?:\/\/\S+?\.(?:jpe?g|png|webp|gif)(?:[?#]\S*)?(?=\s|$)/i;
 
-/** How many images of one message the bot blurs, at most. */
-const MAX_BLURRED = 4;
+/** shinpuru's embed colour. */
+const COLOR = 0xffc107;
+
+/** The blurred copy of the post's image, sent with the post. */
+const BLURRED = "blurred.webp";
 
 /** What a starboard that isn't NSFW hides. Both are false on an NSFW one. */
 interface Censor {
@@ -159,13 +161,16 @@ export const makeStarboard = Effect.fnUntraced(function* (config: StarboardConfi
     }
 
     const link = guild.messageLink(channelId, messageId);
-    const censor = yield* censorFor(board, channelId);
+    const { text, media } = contentsOf(message, yield* censorFor(board, channelId));
+    const image = media.find((m) => m.kind === "image");
     if (row?.postChannelId && row.postId) {
-      // Edits leave the post's files alone, so its blurred images stay.
-      const media = [...visibleMedia(message, censor), ...(row.media ?? []).filter((m) => m.blurred)];
-      if (yield* guild.edit(row.postChannelId, row.postId, renderPost(board, message, votes, link, media))) {
+      // The blurred copy went with the post, and edits keep it.
+      const blurred = image?.hidden ? row.media?.find((m) => m.blurred) : undefined;
+      const shown = image?.hidden ? blurred?.url : image?.url;
+      const kept = [...media.filter((m) => !m.hidden).map(entryMedia), ...(blurred ? [blurred] : [])];
+      if (yield* guild.edit(row.postChannelId, row.postId, renderPost(message, votes, link, text, shown))) {
         db.update(starboardEntries)
-          .set({ count: votes, ...snapshot(message, media) })
+          .set({ count: votes, ...snapshot(message, text, kept) })
           .where(eq(starboardEntries.messageId, messageId))
           .run();
       } else {
@@ -175,18 +180,20 @@ export const makeStarboard = Effect.fnUntraced(function* (config: StarboardConfi
       return;
     }
 
-    const media = visibleMedia(message, censor);
-    const files = yield* blurImages(message, censor);
-    const body = { ...renderPost(board, message, votes, link, media), files };
+    // Like shinpuru, an image the starboard hides goes up blurred instead.
+    const blurred = image?.hidden ? yield* blur(image.url) : undefined;
+    const shown = image?.hidden ? (blurred && `attachment://${BLURRED}`) : image?.url;
+    const body = {
+      ...renderPost(message, votes, link, text, shown),
+      files: blurred ? [{ name: BLURRED, data: blurred }] : [],
+    };
     // A change to the settings interrupts updates; one that came between
     // posting and recording would leave the post behind, and post it again.
     yield* Effect.uninterruptible(
       guild.post(board.channelId, body).pipe(
         Effect.map((post) => {
-          const blurred = files.flatMap((f): StarboardMedia[] => {
-            const url = post.files.get(f.name);
-            return url ? [{ url, name: f.name, kind: "image", blurred: true }] : [];
-          });
+          const copy: StarboardMedia[] =
+            blurred && post.image ? [{ url: post.image, name: BLURRED, kind: "image", blurred: true }] : [];
           db.insert(starboardEntries)
             .values({
               messageId,
@@ -196,7 +203,7 @@ export const makeStarboard = Effect.fnUntraced(function* (config: StarboardConfi
               postId: post.id,
               count: votes,
               postedAt: new Date(),
-              ...snapshot(message, [...media, ...blurred]),
+              ...snapshot(message, text, [...media.filter((m) => !m.hidden).map(entryMedia), ...copy]),
             })
             .run();
         }),
@@ -209,25 +216,12 @@ export const makeStarboard = Effect.fnUntraced(function* (config: StarboardConfi
     return { channel: yield* guild.nsfw(channelId), marked: true } satisfies Censor;
   });
 
-  /**
-   * Blurred copies of the images the starboard hides, to post with the
-   * message, as shinpuru does. An image that can't be blurred is left out.
-   */
-  const blurImages = Effect.fnUntraced(function* (message: StarboardMessage, censor: Censor) {
-    const sources = [
-      ...message.attachments.filter((a) => a.kind === "image" && hidden(a, censor)).map((a) => a.url),
-      ...(censor.channel ? linkedImages(message) : []),
-    ].slice(0, MAX_BLURRED);
-    const files: MessageFile[] = [];
-    for (const url of sources) {
-      const result = yield* Effect.result(guild.downloadImage(url).pipe(Effect.flatMap(magick.blur)));
-      if (Result.isFailure(result)) {
-        yield* Effect.logWarning(`starboard: couldn't blur ${url}: ${result.failure.message}`);
-        continue;
-      }
-      files.push({ name: `blurred-${files.length + 1}.webp`, data: result.success.image });
-    }
-    return files;
+  /** A blurred copy of an image, or nothing when it can't be blurred. */
+  const blur = Effect.fnUntraced(function* (url: string) {
+    const result = yield* Effect.result(guild.downloadImage(url).pipe(Effect.flatMap(magick.blur)));
+    if (Result.isSuccess(result)) return result.success.image;
+    yield* Effect.logWarning(`starboard: couldn't blur ${url}: ${result.failure.message}`);
+    return undefined;
   });
 
   /** Deletes the post and forgets the entry, so the message can go up again. */
@@ -263,8 +257,12 @@ export const makeStarboard = Effect.fnUntraced(function* (config: StarboardConfi
           if (!row?.postId || row.content !== null) return;
           const message = yield* guild.message(row.channelId, messageId);
           if (!message) return yield* takeDown(row);
-          const media = visibleMedia(message, yield* censorFor(board, row.channelId));
-          db.update(starboardEntries).set(snapshot(message, media)).where(eq(starboardEntries.messageId, messageId)).run();
+          const { text, media } = contentsOf(message, yield* censorFor(board, row.channelId));
+          const shown = media.filter((m) => !m.hidden).map(entryMedia);
+          db.update(starboardEntries)
+            .set(snapshot(message, text, shown))
+            .where(eq(starboardEntries.messageId, messageId))
+            .run();
         }),
       );
     }
@@ -393,27 +391,29 @@ export class LiveStarboard extends Context.Service<
   });
 }
 
-function hidden(attachment: StarboardAttachment, censor: Censor): boolean {
-  return censor.channel || (censor.marked && attachment.nsfw);
-}
+/** A file of the message, and whether the starboard hides it. */
+type Media = StarboardMedia & { hidden: boolean };
 
-/** Images from link previews, or else an image link in the text. */
-function linkedImages(message: StarboardMessage): string[] {
-  if (message.embedImages.length > 0) return message.embedImages;
+/**
+ * The text and files a post shows, the way shinpuru reads a message: its
+ * files, then the first image link in the text, which leaves the text.
+ */
+function contentsOf(message: StarboardMessage, censor: Censor): { text: string; media: Media[] } {
   const link = IMAGE_LINK.exec(message.content)?.[0];
-  return link ? [link] : [];
+  const text = link ? message.content.replace(link, "").trim() : message.content;
+  const media: Media[] = message.attachments.map(({ url, name, kind, nsfw }) => ({
+    url,
+    name,
+    kind,
+    hidden: censor.channel || (censor.marked && nsfw),
+  }));
+  if (link) media.push({ url: link, name: fileName(link), kind: "image", linked: true, hidden: censor.channel });
+  return { text, media };
 }
 
-/** The files and linked images the starboard shows, besides the ones it blurs. */
-function visibleMedia(message: StarboardMessage, censor: Censor): StarboardMedia[] {
-  const media: StarboardMedia[] = message.attachments
-    .filter((a) => !hidden(a, censor))
-    .map(({ url, name, kind }) => ({ url, name, kind }));
-  if (censor.channel) return media;
-  const linked = linkedImages(message).map(
-    (url): StarboardMedia => ({ url, name: fileName(url), kind: "image", linked: true }),
-  );
-  return [...media, ...linked];
+/** A file as the entry keeps it, for the web interface. */
+function entryMedia({ hidden: _hidden, ...media }: Media): StarboardMedia {
+  return media;
 }
 
 function fileName(url: string): string {
@@ -421,9 +421,9 @@ function fileName(url: string): string {
 }
 
 /** What the entry keeps of the message. */
-function snapshot(message: StarboardMessage, media: StarboardMedia[]) {
+function snapshot(message: StarboardMessage, text: string, media: StarboardMedia[]) {
   return {
-    content: message.content,
+    content: text,
     authorName: message.authorName,
     authorAvatar: message.authorAvatar,
     media,
@@ -432,33 +432,27 @@ function snapshot(message: StarboardMessage, media: StarboardMedia[]) {
 }
 
 /**
- * The post, like shinpuru's: the author, the text, a link to the message,
- * the first image that isn't blurred, and the votes in the footer. Other
- * files are linked; blurred images go with the post as files of their own.
+ * shinpuru's post: the author, the text with a link to jump to the message,
+ * the first image, the time it was sent, and the votes with a ⭐, whatever
+ * the emoji.
  */
 function renderPost(
-  board: Board,
   message: StarboardMessage,
   votes: number,
   link: string,
-  media: readonly StarboardMedia[],
+  text: string,
+  image: string | undefined,
 ): Exclude<MessageBody, string> {
-  const shown = media.find((m) => m.kind === "image" && !m.blurred);
-  const files = media
-    .filter((m) => m !== shown && !m.blurred && !m.linked)
-    .map((m) => `📎 [${m.name.replace(/[[\]]/g, "")}](${m.url})`);
-  const text = message.content.length > MAX_TEXT ? `${message.content.slice(0, MAX_TEXT)}…` : message.content;
-  // A footer can't show a custom emoji.
-  const emoji = /^\d+$/.test(board.emoji.key) ? "⭐" : board.emoji.text;
+  const shortened = text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT)}…` : text;
   return {
     embeds: [
       {
         author: { name: message.authorName, iconUrl: message.authorAvatar },
-        description: [text, files.join("\n"), `[jump to message](${link})`].filter(Boolean).join("\n\n"),
-        color: ACCENT,
-        image: shown?.url,
+        description: `${shortened}\n\n[jump to message](${link})`,
+        color: COLOR,
+        image,
         timestamp: message.createdAt,
-        footer: `${votes} ${emoji}`,
+        footer: `${votes} ⭐`,
       },
     ],
   };

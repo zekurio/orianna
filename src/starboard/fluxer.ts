@@ -4,7 +4,7 @@ import type { HttpClient } from "effect/http";
 import type { Dns } from "effect/net";
 import { reactionKey } from "../emoji.ts";
 import { downloadImage, SOURCE_MAX_BYTES } from "../expressions/image.ts";
-import { Fluxer, listen, orNotFound, request } from "../fluxer.ts";
+import { Fluxer, listen, orNotFound, request, tagOf } from "../fluxer.ts";
 import { editOptions, NO_MENTIONS, sendOptions } from "../messages/fluxer.ts";
 import {
   type Starboard,
@@ -66,15 +66,7 @@ export const FluxerStarboardGuild = Layer.effect(
 
       post: (channelId, body) =>
         request("posting to the starboard", () => client.channels.send(channelId, sendOptions(body, NO_MENTIONS))).pipe(
-          Effect.map((m) => ({
-            id: m.id,
-            files: new Map(
-              [...m.attachments.values()].flatMap((a) => {
-                const url = a.url ?? a.proxyUrl;
-                return url ? [[a.filename, url] as const] : [];
-              }),
-            ),
-          })),
+          Effect.map((m) => ({ id: m.id, image: m.embeds[0]?.image?.url ?? null })),
         ),
 
       edit: (channelId, messageId, body) =>
@@ -110,7 +102,7 @@ function starboardMessage(m: Message): StarboardMessage {
     channelId: m.channelId,
     guildId: m.guildId,
     authorId: m.author.id,
-    authorName: m.author.globalName ?? m.author.username,
+    authorName: tagOf(m.author),
     authorAvatar: m.author.displayAvatarURL({ size: 64 }),
     content: m.content,
     createdAt: m.createdAt,
@@ -119,7 +111,6 @@ function starboardMessage(m: Message): StarboardMessage {
       if (!url) return [];
       return [{ name: a.filename, url, kind: kindOf(a.contentType), nsfw: a.nsfw }];
     }),
-    embedImages: m.embeds.flatMap((e) => e.image?.url ?? e.thumbnail?.url ?? []),
     reactionCounts,
   };
 }
