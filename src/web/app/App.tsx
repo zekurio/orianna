@@ -101,6 +101,8 @@ function Page({ path }: { path: string }) {
       return <SettingsPage section="personal" />;
     case "/settings/server":
       return <SettingsPage section="server" />;
+    case "/settings/boards":
+      return <SettingsPage section="boards" />;
     default:
       return <NotFoundPage path={path} />;
   }

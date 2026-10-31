@@ -1,4 +1,4 @@
-import { Events, type Message, Routes } from "@fluxerjs/core";
+import { Events, type GuildChannel, type Message, Routes } from "@fluxerjs/core";
 import { Effect, Layer } from "effect";
 import type { HttpClient } from "effect/http";
 import type { Dns } from "effect/net";
@@ -56,6 +56,23 @@ export const FluxerBoardGuild = Layer.effect(
       // Attachments come from the media host, which may be on a private network.
       downloadImage: (url) =>
         downloadImage(url, SOURCE_MAX_BYTES, [client.instance.endpoints.media]).pipe(Effect.provideContext(http)),
+
+      textChannels: Effect.gen(function* () {
+        const g = yield* request("fetching the guild", () => client.guilds.resolve(guildId));
+        const channels = yield* request("listing channels", () => g.fetchChannels());
+        const position = (c: GuildChannel) => c.position ?? 0;
+        const categories = new Map(channels.map((c) => [c.id, position(c)]));
+        // Categories first, then channels within them, the way the client lists them.
+        const order = (c: GuildChannel) => [c.parentId ? (categories.get(c.parentId) ?? 0) : -1, position(c)] as const;
+        return channels
+          .filter((c) => c.isTextBased() && !c.isThread())
+          .sort((a, b) => order(a)[0] - order(b)[0] || order(a)[1] - order(b)[1])
+          .map((c): BoardChannel => ({ id: c.id, name: c.name ?? c.id, nsfw: "nsfw" in c && c.nsfw === true, text: true }));
+      }),
+
+      emojis: request("listing emojis", () =>
+        client.rest.get<{ id: string; name: string; animated?: boolean }[]>(Routes.guildEmojis(guildId)),
+      ).pipe(Effect.map((list) => list.map(({ id, name, animated }) => ({ id, name, animated: animated === true })))),
 
       post: (channelId, body) =>
         request("posting to a board", () => client.channels.send(channelId, sendOptions(body, NO_MENTIONS))).pipe(

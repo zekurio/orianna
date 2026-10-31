@@ -1,6 +1,7 @@
-import { User, UsersThree } from "@phosphor-icons/react";
+import { Star, User, UsersThree } from "@phosphor-icons/react";
 import { type ReactNode, useEffect } from "react";
 import { useSession } from "./App.tsx";
+import { BoardSettings } from "./BoardSettings.tsx";
 import { Link } from "./router.tsx";
 
 // The pages behind the tabs. They only say what they're for so far.
@@ -32,18 +33,23 @@ export function CommandsPage() {
 const SECTIONS = {
   personal: { label: "Personal", path: "/settings/personal", icon: User },
   server: { label: "Server", path: "/settings/server", icon: UsersThree },
+  boards: { label: "Boards", path: "/settings/boards", icon: Star },
 } as const;
 
 export function SettingsPage({ section }: { section: keyof typeof SECTIONS }) {
-  const { admin, prefix } = useSession();
+  const { admin, manageBoards, prefix } = useSession();
   useTitle(`${SECTIONS[section].label} settings`);
-  // Only admins see the server settings, so a lone tab isn't worth showing.
-  const sections = admin ? [SECTIONS.personal, SECTIONS.server] : [];
+  const sections = [
+    SECTIONS.personal,
+    ...(admin ? [SECTIONS.server] : []),
+    ...(manageBoards ? [SECTIONS.boards] : []),
+  ];
 
   return (
     <>
       <h1>Settings</h1>
-      {sections.length > 0 && (
+      {/* A lone tab isn't worth showing. */}
+      {sections.length > 1 && (
         <nav className="sections" aria-label="Settings">
           {sections.map(({ path, label, icon: SectionIcon }) => (
             <Link
@@ -58,7 +64,13 @@ export function SettingsPage({ section }: { section: keyof typeof SECTIONS }) {
           ))}
         </nav>
       )}
-      {section === "personal" ? (
+      {section === "boards" ? (
+        manageBoards ? (
+          <BoardSettings />
+        ) : (
+          <p className="lead">Setting up boards takes the boards.manage permission.</p>
+        )
+      ) : section === "personal" ? (
         <>
           <p className="lead">Settings that only change things for you.</p>
           <Unbuilt />

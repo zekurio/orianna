@@ -152,6 +152,11 @@ export class GuildAccess extends Context.Service<
     ) => Effect.Effect<boolean, UserError | FluxerError>;
     /** Whether the member can see the channel. False when either is gone. */
     readonly canView: (userId: string, channelId: string) => Effect.Effect<boolean, FluxerError>;
+    /** The channels of `channelIds` the member can see, in the same order. None when they've left. */
+    readonly visibleChannels: (
+      userId: string,
+      channelIds: readonly string[],
+    ) => Effect.Effect<string[], FluxerError>;
     /** Role IDs with rules in the settings that the guild doesn't have. */
     readonly unknownRoles: Effect.Effect<string[], FluxerError>;
   }

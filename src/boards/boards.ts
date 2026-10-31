@@ -8,6 +8,7 @@ import { type ParsedEmoji, parseEmoji, type ReactionEmoji, reactionKey } from ".
 import { ImageMagick } from "../expressions/process.ts";
 import { type FluxerError, logFailure } from "../fluxer.ts";
 import { ACCENT, type MessageBody, type MessageFile } from "../messages/body.ts";
+import { Settings } from "../settings/settings.ts";
 
 /** A file on a message. */
 export interface BoardAttachment {
@@ -45,6 +46,13 @@ export interface BoardChannel {
   text: boolean;
 }
 
+/** A custom emoji of the guild. */
+export interface GuildEmoji {
+  id: string;
+  name: string;
+  animated: boolean;
+}
+
 /** What boards need from the guild. */
 export class BoardGuild extends Context.Service<
   BoardGuild,
@@ -60,6 +68,9 @@ export class BoardGuild extends Context.Service<
     readonly nsfw: (channelId: string) => Effect.Effect<boolean, FluxerError>;
     /** Null when the guild has no such channel. */
     readonly channel: (channelId: string) => Effect.Effect<BoardChannel | null, FluxerError>;
+    /** The guild's channels that take messages, threads aside, in the order the client lists them. */
+    readonly textChannels: Effect.Effect<BoardChannel[], FluxerError>;
+    readonly emojis: Effect.Effect<GuildEmoji[], FluxerError>;
     /** Downloads an image from a message, to blur it. */
     readonly downloadImage: (url: string) => Effect.Effect<Uint8Array, UserError>;
     /** Posts a message. Returns its ID, and the URLs of its files by name. */
@@ -287,6 +298,8 @@ export const makeBoards = Effect.fnUntraced(function* (config: readonly BoardCon
   });
 
   return {
+    /** The settings these boards were made from. */
+    config,
     boards: boards as readonly Board[],
     catchUp,
 
@@ -453,11 +466,15 @@ export class LiveBoards extends Context.Service<LiveBoards, SubscriptionRef.Subs
       yield* Effect.acquireRelease(SubscriptionRef.set(ref, boards), () => SubscriptionRef.set(ref, undefined));
     });
 
-  /** The current boards, once they're up when they're starting over. */
+  /**
+   * The boards the settings have now. Right after a change, the old boards
+   * may still be up, so this waits for the new ones.
+   */
   static readonly current = Effect.gen(function* () {
     const ref = yield* LiveBoards;
+    const wanted = (yield* Settings.current).boards ?? [];
     const next = yield* SubscriptionRef.changes(ref).pipe(
-      Stream.filter((boards): boards is Boards => boards !== undefined),
+      Stream.filter((boards): boards is Boards => boards !== undefined && Bun.deepEquals(boards.config, wanted)),
       Stream.runHead,
       Effect.timeoutOrElse({
         duration: Duration.seconds(30),

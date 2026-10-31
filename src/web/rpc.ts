@@ -38,6 +38,8 @@ export const Session = Schema.Struct({
   }),
   /** The guild owner or a member with Administrator, who may change the bot settings. */
   admin: Schema.Boolean,
+  /** The member has `boards.manage`, so may set up boards. */
+  manageBoards: Schema.Boolean,
   /** What commands start with. */
   prefix: Schema.String,
 });
@@ -120,6 +122,30 @@ export const Leader = Schema.Struct({
 });
 export type Leader = typeof Leader.Type;
 
+/** A board as members with `boards.manage` set it up. */
+export const BoardInput = Schema.Struct({
+  name: Schema.String,
+  /** A Unicode emoji, or a custom one as `<:name:id>`. */
+  emoji: Schema.String,
+  channelId: Schema.String,
+  threshold: Schema.Int,
+  keep: Schema.Boolean,
+  ignoredChannelIds: Schema.Array(Schema.String),
+});
+export type BoardInput = typeof BoardInput.Type;
+
+/** What the form for setting up boards needs. */
+export const BoardSetup = Schema.Struct({
+  boards: Schema.Array(
+    Schema.Struct({ ...BoardInput.fields, emojiUrl: Schema.NullOr(Schema.String) }),
+  ),
+  /** Channels a board can post in or ignore, of those the member can see. */
+  channels: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String, nsfw: Schema.Boolean })),
+  /** The server's custom emoji. */
+  emojis: Schema.Array(Schema.Struct({ text: Schema.String, name: Schema.String, url: Schema.String })),
+});
+export type BoardSetup = typeof BoardSetup.Type;
+
 export const WebRpcs = RpcGroup.make(
   /** Who is signed in, and what the app needs to show them. */
   Rpc.make("session", { success: Session }),
@@ -141,6 +167,14 @@ export const WebRpcs = RpcGroup.make(
   Rpc.make("boardTop", { payload: { board: Schema.String }, success: Schema.Array(Leader), error: Refused }),
   /** Takes a message off a board for good, like `!board remove` with a link to its post. */
   Rpc.make("removeFromBoard", { payload: { board: Schema.String, postId: Schema.String }, error: Refused }),
+  /** Every board as it's set up, for members with `boards.manage`. */
+  Rpc.make("boardSetup", { success: BoardSetup, error: Refused }),
+  /** Adds a board, like `!board create`. */
+  Rpc.make("createBoard", { payload: { board: BoardInput }, error: Refused }),
+  /** Sets up the board called `name` as `board` says, like `!board edit`. Answers whether anything changed. */
+  Rpc.make("editBoard", { payload: { name: Schema.String, board: BoardInput }, success: Schema.Boolean, error: Refused }),
+  /** Deletes a board, like `!board delete`. */
+  Rpc.make("deleteBoard", { payload: { name: Schema.String }, error: Refused }),
 ).middleware(Authentication);
 
 /**

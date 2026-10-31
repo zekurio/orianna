@@ -2,6 +2,8 @@ import { cdnEmojiURL } from "@fluxerjs/core";
 import { Effect, Layer, Option, Result } from "effect";
 import { Headers } from "effect/http";
 import { BoardGuild, LiveBoards, noBoard } from "../boards/boards.ts";
+import { createBoard, deleteBoard, editBoard } from "../boards/manage.ts";
+import { parseEmoji } from "../emoji.ts";
 import type { UserError } from "../commands/command.ts";
 import { Fluxer, type FluxerError, logFailure, request } from "../fluxer.ts";
 import { GuildAccess } from "../permissions/rules.ts";
@@ -86,7 +88,10 @@ export const HandlersLive = WebRpcs.toLayer(
     const access = yield* GuildAccess;
     const guild = yield* BoardGuild;
     const live = yield* LiveBoards;
-    const boardsNow = Effect.provideService(LiveBoards.current, LiveBoards, live);
+    const boardsNow = LiveBoards.current.pipe(
+      Effect.provideService(LiveBoards, live),
+      Effect.provideService(Settings, settings),
+    );
     const emojiUrl = (id: string, animated: boolean) =>
       cdnEmojiURL(id, animated, { mediaBase: client.instance.endpoints.media });
 
@@ -94,8 +99,22 @@ export const HandlersLive = WebRpcs.toLayer(
     const visibleBoards = Effect.gen(function* () {
       const { userId } = yield* CurrentMember;
       const boards = yield* boardsNow;
-      return yield* Effect.filter(boards.boards, (b) => access.canView(userId, b.channelId), { concurrency: 4 });
+      const visible = new Set(yield* access.visibleChannels(userId, boards.boards.map((b) => b.channelId)));
+      return boards.boards.filter((b) => visible.has(b.channelId));
     });
+
+    /** Refuses members without `boards.manage`. */
+    const mayManage = Effect.gen(function* () {
+      const { userId } = yield* CurrentMember;
+      if (!(yield* access.can(userId, "boards.manage"))) {
+        return yield* new Refused({ message: "Setting up boards takes the boards.manage permission." });
+      }
+      return userId;
+    });
+
+    /** Runs a change from boards/manage.ts with the services it needs. */
+    const managing = <A, E>(effect: Effect.Effect<A, E, BoardGuild | Settings>) =>
+      effect.pipe(Effect.provideService(BoardGuild, guild), Effect.provideService(Settings, settings));
 
     /** A board the member can see; any other name is no board at all to them. */
     const visibleBoard = (name: string) =>
@@ -155,6 +174,7 @@ export const HandlersLive = WebRpcs.toLayer(
               avatarUrl: user.displayAvatarURL({ size: 64 }),
             },
             admin,
+            manageBoards: yield* access.can(userId, "boards.manage"),
             prefix,
           };
         }).pipe(hide("loading the session")),
@@ -183,7 +203,10 @@ export const HandlersLive = WebRpcs.toLayer(
               ),
             { concurrency: 4 },
           );
-          return { boards: listed, canRemove: yield* access.can(userId, "boards.remove") };
+          return {
+            boards: listed,
+            canRemove: yield* access.can(userId, "boards.remove"),
+          };
         }).pipe(hide("listing the boards")),
 
       boardPosts: ({ board, sort, offset }) =>
@@ -236,6 +259,51 @@ export const HandlersLive = WebRpcs.toLayer(
           yield* visibleBoard(board);
           yield* (yield* boardsNow).remove(postId);
         }).pipe(answer("taking a message off a board")),
+
+      boardSetup: () =>
+        Effect.gen(function* () {
+          const userId = yield* mayManage;
+          const { boards } = yield* settings.get;
+          const channels = yield* guild.textChannels;
+          const visible = new Set(yield* access.visibleChannels(userId, channels.map((c) => c.id)));
+          const emojis = yield* guild.emojis;
+          return {
+            boards: (boards ?? []).map((b) => {
+              const emoji = parseEmoji(b.emoji);
+              const custom = emoji && /^\d+$/.test(emoji.key);
+              return {
+                ...b,
+                emoji: emoji?.text ?? b.emoji,
+                emojiUrl: custom ? emojiUrl(emoji.key, emoji.text.startsWith("<a:")) : null,
+              };
+            }),
+            channels: channels.filter((c) => visible.has(c.id)).map(({ id, name, nsfw }) => ({ id, name, nsfw })),
+            emojis: emojis.map((e) => ({
+              text: `<${e.animated ? "a" : ""}:${e.name}:${e.id}>`,
+              name: e.name,
+              url: emojiUrl(e.id, e.animated),
+            })),
+          };
+        }).pipe(answer("loading the board setup")),
+
+      createBoard: ({ board }) =>
+        Effect.gen(function* () {
+          const userId = yield* mayManage;
+          yield* managing(createBoard(board, userId));
+        }).pipe(answer("creating a board")),
+
+      editBoard: ({ name, board }) =>
+        Effect.gen(function* () {
+          const userId = yield* mayManage;
+          const { changed } = yield* managing(editBoard(name, board, userId));
+          return changed;
+        }).pipe(answer("changing a board")),
+
+      deleteBoard: ({ name }) =>
+        Effect.gen(function* () {
+          const userId = yield* mayManage;
+          yield* managing(deleteBoard(name, userId));
+        }).pipe(answer("deleting a board")),
     };
   }),
 );

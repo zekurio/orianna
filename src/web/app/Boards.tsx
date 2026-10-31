@@ -5,16 +5,17 @@ import {
   ChatCircleText,
   EyeSlash,
   File,
+  GearSix,
   Ranking,
   Sparkle,
   Trash,
   TrendUp,
 } from "@phosphor-icons/react";
-import { Cause, Exit } from "effect";
+import { Exit } from "effect";
 import { AsyncResult } from "effect/reactivity";
 import { useEffect, useState } from "react";
 import { BOARD_PAGE_SIZE, type Board, type BoardPost, type Leader, type Names, type PostSort } from "../rpc.ts";
-import { Api } from "./api.ts";
+import { Api, BOARD_KEYS, failureMessage } from "./api.ts";
 import { useSession } from "./App.tsx";
 import { MessageText } from "./MessageText.tsx";
 import { Link, navigate } from "./router.tsx";
@@ -51,7 +52,7 @@ function useTitle(title: string) {
 }
 
 export function BoardsPage({ board, view }: { board?: string; view: BoardView }) {
-  const boards = useAtomValue(Api.query("boards", undefined));
+  const boards = useAtomValue(Api.query("boards", undefined, { reactivityKeys: BOARD_KEYS }));
   return AsyncResult.matchWithError(boards, {
     onInitial: () => <Heading />,
     onError: () => (
@@ -86,7 +87,7 @@ function BoardList({
   name?: string;
   view: BoardView;
 }) {
-  const { prefix } = useSession();
+  const { prefix, manageBoards } = useSession();
   const first = boards[0];
   useEffect(() => {
     if (name === undefined && first) navigate(boardPath(first.name, "latest"), { replace: true });
@@ -96,10 +97,14 @@ function BoardList({
     return (
       <>
         <Heading />
-        <p className="lead">
-          There are no boards yet. Members who may set them up add one in chat, like{" "}
-          <code>{prefix}board create gems 💎 #gems</code>.
-        </p>
+        {manageBoards ? (
+          <p className="lead">
+            There are no boards yet. <Link to="/settings/boards">Set up the first one</Link>, or use{" "}
+            <code>{prefix}board create</code> in chat.
+          </p>
+        ) : (
+          <p className="lead">There are no boards yet. Members who may set them up add them.</p>
+        )}
       </>
     );
   }
@@ -120,6 +125,12 @@ function BoardList({
             {b.name}
           </Link>
         ))}
+        {manageBoards && (
+          <Link to="/settings/boards" className="board-chip manage-chip">
+            <GearSix />
+            Manage
+          </Link>
+        )}
       </nav>
       {board ? (
         <BoardPage board={board} canRemove={canRemove} view={view} />
@@ -331,8 +342,7 @@ function RemoveButton({ board, post }: { board: Board; post: BoardPost }) {
     setState("busy");
     const exit = await remove({ payload: { board: board.name, postId: post.postId }, reactivityKeys: keysOf(board.name) });
     if (Exit.isFailure(exit)) {
-      const failure = Cause.squash(exit.cause) as { _tag?: string; message?: string };
-      setError(failure._tag === "Refused" ? failure.message : "That didn't work. Try again in a moment.");
+      setError(failureMessage(exit.cause));
       setState("idle");
     }
   };

@@ -39,16 +39,31 @@ export const FluxerGuildAccess = Layer.effect(
       );
     });
 
+    const visibleChannels = (userId: string, channelIds: readonly string[]) =>
+      Effect.gen(function* () {
+        const g = yield* guild;
+        // Once for all the channels; a member who left sees none.
+        const member = yield* request("fetching a member", () => g.members.fetch(userId)).pipe(
+          orNotFound(() => undefined),
+        );
+        if (!member) return [];
+        const visible: string[] = [];
+        for (const id of channelIds) {
+          const channel = yield* request("fetching a channel", () => client.channels.resolve(id)).pipe(
+            orNotFound(() => undefined),
+          );
+          if (channel instanceof GuildChannel && channel.guildId === g.id && canView(member, channel)) {
+            visible.push(id);
+          }
+        }
+        return visible;
+      });
+
     return {
       permissionsOf,
       canView: (userId, channelId) =>
-        Effect.gen(function* () {
-          const g = yield* guild;
-          const channel = yield* request("fetching a channel", () => client.channels.resolve(channelId));
-          if (!(channel instanceof GuildChannel) || channel.guildId !== g.id) return false;
-          const member = yield* request("fetching a member", () => g.members.fetch(userId));
-          return canView(member, channel);
-        }).pipe(orNotFound(() => false)),
+        visibleChannels(userId, [channelId]).pipe(Effect.map((ids) => ids.length > 0)),
+      visibleChannels,
       can: (userId, permission) =>
         permissionsOf(userId).pipe(Effect.map((permissions) => permissions.has(permission))),
       unknownRoles: Effect.gen(function* () {
