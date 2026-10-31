@@ -1,9 +1,10 @@
-import { type Attachment, type OptionSpec, type OptionValue, UserError } from "./command.ts";
+import { Data, Effect } from "effect";
+import type { Attachment, OptionSpec, OptionValue } from "./command.ts";
 
 /** A user-facing problem with the arguments; the router replies with usage. */
-export class ArgumentError extends UserError {
-  override name = "ArgumentError";
-}
+export class ArgumentError extends Data.TaggedError("ArgumentError")<{ readonly message: string }> {}
+
+const wrong = (message: string) => Effect.fail(new ArgumentError({ message }));
 
 /** Splits off the first word. Returns null when the input is blank. */
 export function nextWord(input: string): { word: string; rest: string } | null {
@@ -25,66 +26,67 @@ export function parseOptions(
   specs: readonly OptionSpec[],
   input: string,
   attachments: readonly Attachment[],
-): Record<string, OptionValue> {
-  const options: Record<string, OptionValue> = {};
-  const { positional, named } = splitNamed(specs, input);
-  const slots = specs.filter((s) => s.type === "attachment").length;
-  const { text, links } = slots > 0 ? splitLinks(positional) : { text: positional, links: [] };
-  let wanted = slots - attachments.length - links.length;
-  for (const [name, value] of named) {
-    if (wanted <= 0) break;
-    const found = splitLinks(value, wanted);
-    if (found.links.length === 0) continue;
-    links.push(...found.links);
-    wanted -= found.links.length;
-    // A value that was only the link counts as not given.
-    const rest = found.text.trim();
-    if (rest) named.set(name, rest);
-    else named.delete(name);
-  }
-  let remaining = text;
-  let nextAttachment = 0;
-  let nextLink = 0;
+): Effect.Effect<Record<string, OptionValue>, ArgumentError> {
+  return Effect.gen(function* () {
+    const options: Record<string, OptionValue> = {};
+    const { positional, named } = yield* splitNamed(specs, input);
+    const slots = specs.filter((s) => s.type === "attachment").length;
+    const { text, links } = slots > 0 ? splitLinks(positional) : { text: positional, links: [] };
+    let wanted = slots - attachments.length - links.length;
+    for (const [name, value] of named) {
+      if (wanted <= 0) break;
+      const found = splitLinks(value, wanted);
+      if (found.links.length === 0) continue;
+      links.push(...found.links);
+      wanted -= found.links.length;
+      // A value that was only the link counts as not given.
+      const rest = found.text.trim();
+      if (rest) named.set(name, rest);
+      else named.delete(name);
+    }
+    let remaining = text;
+    let nextAttachment = 0;
+    let nextLink = 0;
 
-  const missing = (spec: OptionSpec) => {
-    if (spec.required !== false) throw new ArgumentError(`missing ${spec.name}`);
-  };
+    const missing = (spec: OptionSpec) =>
+      spec.required !== false ? wrong(`missing ${spec.name}`) : Effect.void;
 
-  for (const spec of specs) {
-    if (spec.named) {
-      const text = named.get(spec.name);
-      if (text === undefined) missing(spec);
-      else options[spec.name] = convert(spec, text);
-      continue;
+    for (const spec of specs) {
+      if (spec.named) {
+        const text = named.get(spec.name);
+        if (text === undefined) yield* missing(spec);
+        else options[spec.name] = yield* convert(spec, text);
+        continue;
+      }
+
+      if (spec.type === "attachment") {
+        const file = attachments[nextAttachment++] ?? links[nextLink++];
+        if (file) options[spec.name] = file;
+        else yield* missing(spec);
+        continue;
+      }
+
+      if (spec.rest) {
+        const text = remaining.trim();
+        remaining = "";
+        if (text) options[spec.name] = text;
+        else yield* missing(spec);
+        continue;
+      }
+
+      const next = nextWord(remaining);
+      if (!next) {
+        yield* missing(spec);
+        continue;
+      }
+      remaining = next.rest;
+      options[spec.name] = yield* convert(spec, next.word);
     }
 
-    if (spec.type === "attachment") {
-      const file = attachments[nextAttachment++] ?? links[nextLink++];
-      if (file) options[spec.name] = file;
-      else missing(spec);
-      continue;
-    }
-
-    if (spec.rest) {
-      const text = remaining.trim();
-      remaining = "";
-      if (text) options[spec.name] = text;
-      else missing(spec);
-      continue;
-    }
-
-    const next = nextWord(remaining);
-    if (!next) {
-      missing(spec);
-      continue;
-    }
-    remaining = next.rest;
-    options[spec.name] = convert(spec, next.word);
-  }
-
-  const extra = nextWord(remaining)?.word ?? links[nextLink]?.url;
-  if (extra) throw new ArgumentError(`unexpected argument: ${extra}`);
-  return options;
+    const extra = nextWord(remaining)?.word ?? links[nextLink]?.url;
+    if (extra) return yield* wrong(`unexpected argument: ${extra}`);
+    return options;
+  });
 }
 
 /** A whole word that is an http(s) link, optionally in `<...>` to suppress the embed. */
@@ -106,12 +108,12 @@ function splitLinks(input: string, limit = Infinity): { text: string; links: Att
   return { text, links };
 }
 
-function convert(spec: OptionSpec, text: string): OptionValue {
+function convert(spec: OptionSpec, text: string): Effect.Effect<OptionValue, ArgumentError> {
   if (spec.type === "integer") {
-    if (!/^-?\d+$/.test(text)) throw new ArgumentError(`${spec.name} must be a whole number`);
-    return Number(text);
+    if (!/^-?\d+$/.test(text)) return wrong(`${spec.name} must be a whole number`);
+    return Effect.succeed(Number(text));
   }
-  return text;
+  return Effect.succeed(text);
 }
 
 const FLAG = /(^|\s)--([A-Za-z][\w-]*)(?=\s|$)/g;
@@ -123,22 +125,24 @@ const FLAG = /(^|\s)--([A-Za-z][\w-]*)(?=\s|$)/g;
  * every `--word` as text, as in `!poll Should we --force push?`.
  */
 function splitNamed(specs: readonly OptionSpec[], input: string) {
-  const known = new Set(specs.filter((s) => s.named).map((s) => s.name));
-  const named = new Map<string, string>();
-  if (known.size === 0) return { positional: input, named };
-  const flags = [...input.matchAll(FLAG)];
-  if (flags.length === 0) return { positional: input, named };
+  return Effect.gen(function* () {
+    const known = new Set(specs.filter((s) => s.named).map((s) => s.name));
+    const named = new Map<string, string>();
+    if (known.size === 0) return { positional: input, named };
+    const flags = [...input.matchAll(FLAG)];
+    if (flags.length === 0) return { positional: input, named };
 
-  flags.forEach((match, i) => {
-    const name = match[2]!.toLowerCase();
-    if (!known.has(name)) throw new ArgumentError(`unknown option --${name}`);
-    if (named.has(name)) throw new ArgumentError(`--${name} was given twice`);
+    for (const [i, match] of flags.entries()) {
+      const name = match[2]!.toLowerCase();
+      if (!known.has(name)) return yield* wrong(`unknown option --${name}`);
+      if (named.has(name)) return yield* wrong(`--${name} was given twice`);
 
-    const start = match.index + match[0].length;
-    const end = flags[i + 1]?.index ?? input.length;
-    const value = input.slice(start, end).trim();
-    if (!value) throw new ArgumentError(`--${name} needs a value`);
-    named.set(name, value);
+      const start = match.index + match[0].length;
+      const end = flags[i + 1]?.index ?? input.length;
+      const value = input.slice(start, end).trim();
+      if (!value) return yield* wrong(`--${name} needs a value`);
+      named.set(name, value);
+    }
+    return { positional: input.slice(0, flags[0]!.index), named };
   });
-  return { positional: input.slice(0, flags[0]!.index), named };
 }

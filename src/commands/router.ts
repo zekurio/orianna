@@ -1,7 +1,10 @@
 import type { Message } from "@fluxerjs/core";
-import type { Bot } from "../bot.ts";
+import { Cause, Context, Duration, Effect, Queue, Result, type Scope, Stream } from "effect";
+import { AppConfig } from "../config.ts";
+import { type Fluxer, type FluxerError, logFailure, request } from "../fluxer.ts";
 import { appendFooter, type MessageBody } from "../messages/body.ts";
 import { editOptions, REPLY_MENTION, sendOptions } from "../messages/fluxer.ts";
+import { GuildAccess } from "../permissions/rules.ts";
 import {
   type Attachment,
   type Command,
@@ -13,42 +16,51 @@ import {
   formatUsage,
   isGroup,
   mayRun,
-  UserError,
 } from "./command.ts";
-import { ArgumentError, nextWord, parseOptions } from "./options.ts";
+import { nextWord, parseOptions } from "./options.ts";
 
 type BaseContext = Omit<CommandContext, "options">;
 
 const PAGE_STEPS: Record<string, number> = { "⬅": -1, "➡": 1 };
 /** Navigation stops after this long without a page turn. */
-const PAGE_IDLE_MS = 2 * 60_000;
+const PAGE_IDLE = Duration.minutes(2);
 
-export class CommandRouter {
-  readonly entries = new Map<string, CommandEntry>();
-
-  constructor(entries: CommandEntry[]) {
-    for (const entry of entries) {
-      if (this.entries.has(entry.name)) {
-        throw new Error(`duplicate command: ${entry.name}`);
-      }
-      this.entries.set(entry.name, entry);
-    }
+export class CommandRouter extends Context.Service<
+  CommandRouter,
+  {
+    readonly entries: ReadonlyMap<string, CommandEntry>;
+    /** Prefix adapter: `!name [subcommand] args...` from a chat message. */
+    readonly handleMessage: (message: Message) => Effect.Effect<void, FluxerError>;
   }
+>()("orianna/CommandRouter") {}
 
-  /** Prefix adapter: `!name [subcommand] args...` from a chat message. */
-  async handleMessage(bot: Bot, message: Message): Promise<void> {
+/**
+ * Builds the router for `list`. Paginated replies keep listening for page
+ * turns until they go idle or the scope closes.
+ */
+export const makeCommandRouter = Effect.fnUntraced(function* (list: readonly CommandEntry[]) {
+  const entries = new Map<string, CommandEntry>();
+  for (const entry of list) {
+    if (entries.has(entry.name)) return yield* Effect.die(new Error(`duplicate command: ${entry.name}`));
+    entries.set(entry.name, entry);
+  }
+  const context = yield* Effect.context<AppConfig | GuildAccess | Fluxer>();
+  const scope = yield* Effect.scope;
+
+  const handleMessage = Effect.fnUntraced(function* (message: Message) {
+    const config = yield* AppConfig.current;
     if (message.author.bot) return;
-    if (message.guildId !== bot.config.guildId) return;
+    if (message.guildId !== config.guildId) return;
 
-    const { prefix } = bot.config;
+    const { prefix } = config;
     if (!message.content.startsWith(prefix)) return;
 
     const first = nextWord(message.content.slice(prefix.length));
     if (!first) return;
-    const entry = this.entries.get(first.word.toLowerCase());
+    const entry = entries.get(first.word.toLowerCase());
     if (!entry) return;
 
-    const base = messageContext(bot, message);
+    const base = messageContext(message, scope);
     let command: Command;
     let path = entry.name;
     let input = first.rest;
@@ -59,8 +71,8 @@ export class CommandRouter {
         ? entry.subcommands.find((c) => c.name === second.word.toLowerCase())
         : undefined;
       if (!second || !sub) {
-        await listSubcommands(bot, base, entry).catch((err) =>
-          console.error(`listing ${entry.name} commands failed:`, err),
+        yield* listSubcommands(prefix, base, entry).pipe(
+          Effect.catchCause(logFailure(`listing ${entry.name} commands`)),
         );
         return;
       }
@@ -71,49 +83,58 @@ export class CommandRouter {
       command = entry;
     }
 
-    let options;
-    try {
-      options = parseOptions(command.options ?? [], input, messageAttachments(message));
-    } catch (err) {
-      if (!(err instanceof ArgumentError)) throw err;
-      await base.error(`${err.message}\nUsage: ${usageLine(prefix, path, command)}`);
-      return;
+    const options = yield* Effect.result(
+      parseOptions(command.options ?? [], input, messageAttachments(message)),
+    );
+    if (Result.isFailure(options)) {
+      return yield* base.error(`${options.failure.message}\nUsage: ${usageLine(prefix, path, command)}`);
     }
 
-    await this.execute(path, command, { ...base, options });
-  }
+    yield* execute(path, command, { ...base, options: options.success });
+  });
 
   /** Shared by every adapter: runs the command and reports failures. */
-  private async execute(
+  const execute = (
     path: string,
     command: Command,
     ctx: CommandContext<Record<string, OptionValue>>,
-  ) {
-    try {
+  ) =>
+    Effect.gen(function* () {
       const { permission } = command;
-      if (permission && !(await ctx.bot.access.can(ctx.userId, permission))) {
-        await ctx.error(`You need the \`${permission}\` permission for that.`);
-        return;
+      if (permission && !(yield* (yield* GuildAccess).can(ctx.userId, permission))) {
+        return yield* ctx.error(`You need the \`${permission}\` permission for that.`);
       }
-      await command.run(ctx);
-    } catch (err) {
-      if (err instanceof UserError) {
-        await ctx.error(err.message).catch(() => {});
-        return;
-      }
-      console.error(`command ${path} failed:`, err);
-      await ctx.error("Something went wrong running that command.").catch(() => {});
-    }
-  }
-}
+      yield* command.run(ctx);
+    }).pipe(
+      Effect.provideService(CommandRouter, router),
+      Effect.catchTag("UserError", (err) => ctx.error(err.message).pipe(Effect.ignore)),
+      Effect.catchCause((cause) =>
+        // A shutdown interrupts commands; there's nobody to tell then.
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.failCause(cause)
+          : Effect.logError(`command ${path} failed`, cause).pipe(
+              Effect.andThen(ctx.error("Something went wrong running that command.")),
+              Effect.ignore,
+            ),
+      ),
+    );
+
+  const router: CommandRouter["Service"] = {
+    entries,
+    handleMessage: (message) => handleMessage(message).pipe(Effect.provideContext(context)),
+  };
+  return router;
+});
 
 /** Answers a group name on its own with the subcommands the member may run. */
-async function listSubcommands(bot: Bot, ctx: BaseContext, group: CommandGroup) {
-  const permissions = await bot.access.permissionsOf(ctx.userId);
-  const lines = group.subcommands
-    .filter((c) => mayRun(c, permissions))
-    .map((c) => usageLine(bot.config.prefix, `${group.name} ${c.name}`, c));
-  await ctx.reply(lines.length > 0 ? lines.join("\n") : "There's nothing here you may run.");
+function listSubcommands(prefix: string, ctx: BaseContext, group: CommandGroup) {
+  return Effect.gen(function* () {
+    const permissions = yield* (yield* GuildAccess).permissionsOf(ctx.userId);
+    const lines = group.subcommands
+      .filter((c) => mayRun(c, permissions))
+      .map((c) => usageLine(prefix, `${group.name} ${c.name}`, c));
+    yield* ctx.reply(lines.length > 0 ? lines.join("\n") : "There's nothing here you may run.");
+  });
 }
 
 export function usageLine(prefix: string, path: string, command: Command): string {
@@ -121,94 +142,91 @@ export function usageLine(prefix: string, path: string, command: Command): strin
   return `\`${prefix}${path}${usage ? ` ${usage}` : ""}\`: ${command.description}`;
 }
 
-function messageContext(bot: Bot, message: Message): BaseContext {
-  const reply = async (body: MessageBody) => {
-    const sent = await message.reply(sendOptions(body, REPLY_MENTION));
-    return {
-      async edit(body: MessageBody) {
-        await sent.edit(editOptions(body, REPLY_MENTION));
-      },
-    };
-  };
+function messageContext(message: Message, scope: Scope.Scope): BaseContext {
+  const reply = (body: MessageBody) =>
+    request("replying", () => message.reply(sendOptions(body, REPLY_MENTION))).pipe(
+      Effect.map((sent) => ({
+        edit: (body: MessageBody) =>
+          request("editing a reply", () => sent.edit(editOptions(body, REPLY_MENTION))).pipe(
+            Effect.asVoid,
+          ),
+      })),
+    );
   return {
-    bot,
     userId: message.author.id,
     guildId: message.guildId!,
     channelId: message.channelId,
     reply,
-    async replyPages(pages) {
-      if (pages.length <= 1) {
-        await reply(pages[0] ?? "");
-        return;
-      }
-      await sendPaginated(message, pages);
-    },
-    async error(text) {
-      await reply(formatError(text));
-    },
-    async deleteInvocation() {
-      await message.delete().catch(() => {});
-    },
+    replyPages: (pages) =>
+      pages.length <= 1 ? Effect.asVoid(reply(pages[0] ?? "")) : sendPaginated(message, pages, scope),
+    error: (text) => Effect.asVoid(reply(formatError(text))),
+    deleteInvocation: () => request("deleting a command", () => message.delete()).pipe(Effect.ignore),
   };
 }
 
 /**
  * Replies with the first page and lets the invoking user turn pages with ⬅️ / ➡️
  * reactions until they go idle. Their reactions are removed after each turn so
- * the same arrow can be pressed again.
+ * the same arrow can be pressed again. Turning pages goes on in `scope`.
  */
-async function sendPaginated(message: Message, pages: readonly MessageBody[]) {
+const sendPaginated = Effect.fnUntraced(function* (
+  message: Message,
+  pages: readonly MessageBody[],
+  scope: Scope.Scope,
+) {
   let page = 0;
   const render = () => appendFooter(pages[page]!, `Page ${page + 1}/${pages.length}`);
+  const sent = yield* request("replying", () => message.reply(sendOptions(render(), REPLY_MENTION)));
+  const warn = (err: FluxerError) => Effect.logWarning(`pagination: ${err.message}`);
 
-  const sent = await message.reply(sendOptions(render(), REPLY_MENTION));
-  const collector = sent.createReactionCollector({
-    filter: (_reaction, user) => user.id === message.author.id,
-  });
+  const presses = Stream.callback<{ name: string; userId: string; step: number }>((queue) =>
+    Effect.acquireRelease(
+      Effect.sync(() => {
+        const collector = sent.createReactionCollector({
+          filter: (_reaction, user) => user.id === message.author.id,
+        });
+        collector.on("collect", (reaction, user) => {
+          // The collector reports each user and emoji only once; forget them so the
+          // same arrow turns the page again the next time it's pressed.
+          collector.collected.clear();
+          const name = reaction.emoji.name;
+          const step = name ? PAGE_STEPS[name.replaceAll("️", "")] : undefined;
+          if (name && step) Queue.offerUnsafe(queue, { name, userId: user.id, step });
+        });
+        return collector;
+      }),
+      (collector) => Effect.sync(() => collector.stop()),
+    ),
+  );
 
-  let idle: ReturnType<typeof setTimeout> | undefined;
-  const resetIdle = () => {
-    clearTimeout(idle);
-    idle = setTimeout(() => collector.stop("time"), PAGE_IDLE_MS);
-  };
-  // Page turns run one at a time so rapid presses can't race their edits.
-  let turns = Promise.resolve();
-  const report = (err: unknown) => console.warn("pagination failed:", err);
-
-  collector.on("collect", (reaction, user) => {
-    // The collector reports each user and emoji only once; forget them so the
-    // same arrow turns the page again the next time it's pressed.
-    collector.collected.clear();
-    const name = reaction.emoji.name;
-    const step = name ? PAGE_STEPS[name.replaceAll("\uFE0F", "")] : undefined;
-    if (!step) return;
-    resetIdle();
-    turns = turns
-      .then(async () => {
-        await sent.removeReaction(name!, user.id).catch(() => {});
+  // One press at a time, so rapid presses can't race their edits.
+  yield* presses.pipe(
+    Stream.timeout(PAGE_IDLE),
+    Stream.runForEach(({ name, userId, step }) =>
+      Effect.gen(function* () {
+        yield* request("removing a page turn", () => sent.removeReaction(name, userId)).pipe(
+          Effect.ignore,
+        );
         page = (page + step + pages.length) % pages.length;
-        await sent.edit(editOptions(render(), REPLY_MENTION));
-      })
-      .catch(report);
-  });
+        yield* request("turning a page", () => sent.edit(editOptions(render(), REPLY_MENTION)));
+      }).pipe(Effect.catch(warn)),
+    ),
+    Effect.andThen(
+      Effect.forEach(
+        Object.keys(PAGE_STEPS),
+        (emoji) =>
+          request("removing page arrows", () => sent.removeReaction(`${emoji}️`)).pipe(Effect.ignore),
+        { discard: true },
+      ),
+    ),
+    Effect.forkIn(scope),
+  );
 
-  collector.on("end", () => {
-    clearTimeout(idle);
-    turns = turns
-      .then(async () => {
-        for (const emoji of Object.keys(PAGE_STEPS)) {
-          await sent.removeReaction(`${emoji}\uFE0F`).catch(() => {});
-        }
-      })
-      .catch(report);
-  });
-
-  resetIdle();
   // Best effort: the user can still add the arrows themselves.
   for (const emoji of Object.keys(PAGE_STEPS)) {
-    await sent.react(`${emoji}\uFE0F`).catch(report);
+    yield* request("adding page arrows", () => sent.react(`${emoji}️`)).pipe(Effect.catch(warn));
   }
-}
+});
 
 function messageAttachments(message: Message): Attachment[] {
   return [...message.attachments.values()].flatMap((a) =>

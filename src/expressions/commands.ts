@@ -1,10 +1,14 @@
+import { Effect } from "effect";
+import type { HttpClient } from "effect/http";
+import type { Dns } from "effect/net";
 import {
   type Attachment,
   type CommandContext,
   type CommandGroup,
   defineCommand,
-  UserError,
+  refuse,
 } from "../commands/command.ts";
+import { Fluxer } from "../fluxer.ts";
 import { embedPages } from "../messages/body.ts";
 import { normalizeSlug } from "../polls/slug.ts";
 import { downloadImage } from "./image.ts";
@@ -54,62 +58,71 @@ interface InputOptions {
 const LIST_PAGE_SIZE = 10;
 
 /** `!emoji ...` or `!sticker ...`, depending on the proposals' kind. */
-export function proposalCommands(
+export const proposalCommands = Effect.fnUntraced(function* (
   proposals: ExpressionProposals,
   pollsChannelId: string,
-): CommandGroup {
+) {
   const { kind } = proposals;
   const linkHelp = "attach the image, or paste a link to it or to a 7TV emote";
+  const http = yield* Effect.context<HttpClient.HttpClient | Dns.Dns>();
 
   /** Checks what's cheap first, then downloads the image. */
-  async function readInput({ options, bot }: CommandContext<InputOptions>): Promise<ExpressionInput> {
-    if (options.name !== undefined) kind.checkName(options.name);
-    const tags = parseTags(options.tags);
+  const readInput = ({ options }: CommandContext<InputOptions>) =>
+    Effect.gen(function* () {
+      if (options.name !== undefined) yield* kind.checkName(options.name);
+      const tags = yield* parseTags(options.tags);
 
-    // On a self-hosted instance, the media host and wherever Fluxer keeps
-    // attachments may be on a private network, which downloadImage otherwise
-    // refuses. Fluxer picks an attachment's URL, so its host is trusted; a
-    // pasted link is trusted only when it points at the media host.
-    const { image } = options;
-    const media = bot.client.instance.endpoints.media;
-    const trusted = image.linked ? [media] : [media, image.url];
-    const emote = sevenTvEmoteId(image.url);
-    const source = emote
-      ? await fetchSevenTvEmote(emote, proposals.downloadLimit)
-      : { name: undefined, image: await downloadImage(image.url, proposals.downloadLimit, trusted) };
+      // On a self-hosted instance, the media host and wherever Fluxer keeps
+      // attachments may be on a private network, which downloadImage otherwise
+      // refuses. Fluxer picks an attachment's URL, so its host is trusted; a
+      // pasted link is trusted only when it points at the media host.
+      const { image } = options;
+      const { client } = yield* Fluxer;
+      const media = client.instance.endpoints.media;
+      const trusted = image.linked ? [media] : [media, image.url];
+      const emote = sevenTvEmoteId(image.url);
+      const source = emote
+        ? yield* fetchSevenTvEmote(emote, proposals.downloadLimit)
+        : {
+            name: undefined,
+            image: yield* downloadImage(image.url, proposals.downloadLimit, trusted),
+          };
 
-    const name = options.name ?? (source.name !== undefined ? kind.fitName(source.name) : undefined);
-    if (name === undefined) {
-      throw new UserError(
-        source.name === undefined
-          ? `Give the ${kind.noun} a name.`
-          : `\`${source.name}\` doesn't work as a ${kind.noun} name; give it one.`,
+      const name = options.name ?? (source.name !== undefined ? kind.fitName(source.name) : undefined);
+      if (name === undefined) {
+        return yield* refuse(
+          source.name === undefined
+            ? `Give the ${kind.noun} a name.`
+            : `\`${source.name}\` doesn't work as a ${kind.noun} name; give it one.`,
+        );
+      }
+      const input: ExpressionInput = { name, image: source.image, description: options.desc, tags };
+      return input;
+    }).pipe(Effect.provideContext(http));
+
+  const propose = (ctx: CommandContext<InputOptions>) =>
+    Effect.gen(function* () {
+      const input = yield* readInput(ctx);
+      const { poll, names } = yield* proposals.propose(ctx.userId, input);
+      const cut =
+        names.length > 1
+          ? ` The image was cut into ${names.length} ${kind.plural}: ${names.map(kind.code).join(" ")}.`
+          : "";
+      yield* ctx.reply(
+        `Poll \`${poll.slug}\` for the ${kind.display(input.name)} is up for a vote in <#${poll.channelId}>.${cut}`,
       );
-    }
-    return { name, image: source.image, description: options.desc, tags };
-  }
+    });
 
-  async function propose(ctx: CommandContext<InputOptions>) {
-    const input = await readInput(ctx);
-    const { poll, names } = await proposals.propose(ctx.userId, input);
-    const cut =
-      names.length > 1
-        ? ` The image was cut into ${names.length} ${kind.plural}: ${names.map(kind.code).join(" ")}.`
-        : "";
-    await ctx.reply(
-      `Poll \`${poll.slug}\` for the ${kind.display(input.name)} is up for a vote in <#${poll.channelId}>.${cut}`,
-    );
-  }
-
-  async function add(ctx: CommandContext<InputOptions>) {
-    const input = await readInput(ctx);
-    const created = await proposals.add(ctx.userId, input);
-    const mentions = created.map((c) => c.mention).filter(Boolean);
-    const cut = created.length > 1 ? ` as ${created.length} ${kind.plural}` : "";
-    // Without spaces, the pieces of a wide emoji line up.
-    const shown = mentions.length > 0 ? `: ${mentions.join("")}` : ".";
-    await ctx.reply(`Added the ${kind.display(input.name)}${cut}${shown}`);
-  }
+  const add = (ctx: CommandContext<InputOptions>) =>
+    Effect.gen(function* () {
+      const input = yield* readInput(ctx);
+      const created = yield* proposals.add(ctx.userId, input);
+      const mentions = created.map((c) => c.mention).filter(Boolean);
+      const cut = created.length > 1 ? ` as ${created.length} ${kind.plural}` : "";
+      // Without spaces, the pieces of a wide emoji line up.
+      const shown = mentions.length > 0 ? `: ${mentions.join("")}` : ".";
+      yield* ctx.reply(`Added the ${kind.display(input.name)}${cut}${shown}`);
+    });
 
   // Emoji and sticker options differ, but both fit InputOptions.
   const options = kind.type === "sticker" ? stickerOptions : emojiOptions;
@@ -133,15 +146,15 @@ export function proposalCommands(
   const list = defineCommand({
     name: "list",
     description: `Show open ${kind.noun} proposals.`,
-    async run(ctx) {
-      const open = proposals.pending();
-      if (open.length === 0) {
-        await ctx.reply(`There are no open ${kind.noun} proposals.`);
-        return;
-      }
-      const lines = open.map((p) => proposals.describe(p.proposal, p.poll));
-      await ctx.replyPages(embedPages(`Open ${kind.noun} proposals`, lines, LIST_PAGE_SIZE));
-    },
+    run: (ctx) =>
+      Effect.gen(function* () {
+        const open = proposals.pending();
+        if (open.length === 0) {
+          return yield* Effect.asVoid(ctx.reply(`There are no open ${kind.noun} proposals.`));
+        }
+        const lines = open.map((p) => proposals.describe(p.proposal, p.poll));
+        yield* ctx.replyPages(embedPages(`Open ${kind.noun} proposals`, lines, LIST_PAGE_SIZE));
+      }),
   });
 
   const approve = defineCommand({
@@ -149,12 +162,13 @@ export function proposalCommands(
     description: `End the vote early and add the ${kind.noun}.`,
     options: [id, reason],
     permission: `${kind.type}.decide`,
-    async run(ctx) {
-      await proposals.decide(ctx.options.id, ctx.userId, "approve", ctx.options.reason);
-      await ctx.reply(
-        `Poll \`${normalizeSlug(ctx.options.id)}\` approved; the result is posted in <#${pollsChannelId}>.`,
-      );
-    },
+    run: (ctx) =>
+      Effect.gen(function* () {
+        yield* proposals.decide(ctx.options.id, ctx.userId, "approve", ctx.options.reason);
+        yield* ctx.reply(
+          `Poll \`${normalizeSlug(ctx.options.id)}\` approved; the result is posted in <#${pollsChannelId}>.`,
+        );
+      }),
   });
 
   const reject = defineCommand({
@@ -162,27 +176,30 @@ export function proposalCommands(
     description: `End the vote early without adding the ${kind.noun}.`,
     options: [id, reason],
     permission: `${kind.type}.decide`,
-    async run(ctx) {
-      await proposals.decide(ctx.options.id, ctx.userId, "reject", ctx.options.reason);
-      await ctx.reply(
-        `Poll \`${normalizeSlug(ctx.options.id)}\` rejected; the result is posted in <#${pollsChannelId}>.`,
-      );
-    },
+    run: (ctx) =>
+      Effect.gen(function* () {
+        yield* proposals.decide(ctx.options.id, ctx.userId, "reject", ctx.options.reason);
+        yield* ctx.reply(
+          `Poll \`${normalizeSlug(ctx.options.id)}\` rejected; the result is posted in <#${pollsChannelId}>.`,
+        );
+      }),
   });
 
   const cancel = defineCommand({
     name: "cancel",
     description: `Withdraw your proposal, or anyone's with \`${kind.type}.cancel-any\`.`,
     options: [id],
-    async run(ctx) {
-      await proposals.cancel(ctx.options.id, ctx.userId);
-      await ctx.reply(`Poll \`${normalizeSlug(ctx.options.id)}\` was cancelled.`);
-    },
+    run: (ctx) =>
+      Effect.gen(function* () {
+        yield* proposals.cancel(ctx.options.id, ctx.userId);
+        yield* ctx.reply(`Poll \`${normalizeSlug(ctx.options.id)}\` was cancelled.`);
+      }),
   });
 
-  return {
+  const group: CommandGroup = {
     name: kind.type,
     description: `${kind.noun[0]!.toUpperCase()}${kind.noun.slice(1)} proposals.`,
     subcommands: [...inputCommands, list, approve, reject, cancel],
   };
-}
+  return group;
+});

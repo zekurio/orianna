@@ -1,13 +1,15 @@
 import { and, asc, eq } from "drizzle-orm";
-import { UserError } from "../commands/command.ts";
+import { Clock, Context, Effect } from "effect";
+import { refuse, type UserError } from "../commands/command.ts";
 import type { PollsConfig } from "../config.ts";
-import type { DB } from "../db/index.ts";
+import { Database } from "../db/index.ts";
 import { type PollOption, polls } from "../db/schema.ts";
 import { emojiKey, type ParsedEmoji, parseEmoji, type ReactionEmoji, reactionKey } from "../emoji.ts";
+import type { FluxerError } from "../fluxer.ts";
 import { ACCENT, type MessageBody } from "../messages/body.ts";
-import type { GuildAccess } from "../permissions/rules.ts";
+import { GuildAccess } from "../permissions/rules.ts";
 import { HOUR, looksLikeDuration, MINUTE, parseDuration, plural, WEEK } from "./duration.ts";
-import { type Poll, type PollHandler, type PollService, type Tally, timestamp } from "./service.ts";
+import { type Poll, type PollHandler, PollService, type Tally, timestamp } from "./service.ts";
 import type { PollTransport } from "./transport.ts";
 
 /** Poll kind of the polls members start with `!poll`. */
@@ -56,32 +58,28 @@ const BAR_FILLED = "🟨";
 const BAR_EMPTY = "⬛";
 
 /** What community polls need from the chat platform besides the poll service. */
-export interface CommunityPollChat
-  extends Pick<PollTransport, "react" | "removeReaction" | "reactionUsers"> {
-  /** Replies to a poll message. Only the `notify` users are pinged. */
-  reply(
-    channelId: string,
-    messageId: string,
-    content: string,
-    notify: readonly string[],
-  ): Promise<void>;
-  /** Removes every reaction with `emoji`. */
-  clearReaction(channelId: string, messageId: string, emoji: string): Promise<void>;
-  /** IDs of the guild's custom emoji. */
-  emojiIds(): Promise<string[]>;
-  /** A link that jumps to the message. */
-  messageLink(channelId: string, messageId: string): string;
-}
-
-export interface CommunityPollsDeps {
-  db: DB;
-  polls: PollService;
-  chat: CommunityPollChat;
-  access: GuildAccess;
-  config: PollsConfig;
-  guildId: string;
-  now?: () => number;
-}
+export class CommunityPollChat extends Context.Service<
+  CommunityPollChat,
+  Pick<PollTransport["Service"], "react" | "removeReaction" | "reactionUsers"> & {
+    /** Replies to a poll message. Only the `notify` users are pinged. */
+    readonly reply: (
+      channelId: string,
+      messageId: string,
+      content: string,
+      notify: readonly string[],
+    ) => Effect.Effect<void, FluxerError>;
+    /** Removes every reaction with `emoji`. */
+    readonly clearReaction: (
+      channelId: string,
+      messageId: string,
+      emoji: string,
+    ) => Effect.Effect<void, FluxerError>;
+    /** IDs of the guild's custom emoji. */
+    readonly emojiIds: Effect.Effect<string[], FluxerError>;
+    /** A link that jumps to the message. */
+    readonly messageLink: (channelId: string, messageId: string) => string;
+  }
+>()("orianna/CommunityPollChat") {}
 
 /** A poll as typed after `!poll`. */
 export interface PollInput {
@@ -92,17 +90,18 @@ export interface PollInput {
   multi: boolean;
 }
 
-/** Polls members start themselves, like Discord's. */
-export class CommunityPolls implements PollHandler {
-  private readonly now: () => number;
+export type CommunityPolls = Effect.Success<ReturnType<typeof makeCommunityPolls>>;
 
-  constructor(private readonly deps: CommunityPollsDeps) {
-    this.now = deps.now ?? Date.now;
-  }
+/** Polls members start themselves, like Discord's. Registers itself with the poll service. */
+export const makeCommunityPolls = Effect.fnUntraced(function* (config: PollsConfig, guildId: string) {
+  const db = yield* Database;
+  const service = yield* PollService;
+  const chat = yield* CommunityPollChat;
+  const access = yield* GuildAccess;
 
   /** Open community polls, the ones closing soonest first. */
-  open(): Poll[] {
-    return this.deps.db
+  function open(): Poll[] {
+    return db
       .select()
       .from(polls)
       .where(and(eq(polls.kind, COMMUNITY_POLL), eq(polls.status, "open")))
@@ -111,137 +110,146 @@ export class CommunityPolls implements PollHandler {
   }
 
   /** Posts a poll in `channelId`. `text` is read by {@link parsePollInput}. */
-  async start(userId: string, channelId: string, text: string): Promise<Poll> {
-    const { config, chat } = this.deps;
-    const input = parsePollInput(text);
-    await this.checkCustomEmoji(input.options);
+  const start = Effect.fn("CommunityPolls.start")(function* (
+    userId: string,
+    channelId: string,
+    text: string,
+  ) {
+    const input = yield* parsePollInput(text);
+    yield* checkCustomEmoji(input.options);
 
-    const mine = this.open().filter((p) => p.createdBy === userId);
+    const mine = open().filter((p) => p.createdBy === userId);
     if (mine.length >= config.maxOpenPerUser) {
-      throw new UserError(
+      return yield* refuse(
         `You already have ${mine.length} open polls; end one with ${STOP} or wait for one to finish.`,
       );
     }
 
-    const poll = await this.deps.polls.create({
+    const now = yield* Clock.currentTimeMillis;
+    const poll = yield* service.create({
       kind: COMMUNITY_POLL,
-      guildId: this.deps.guildId,
+      guildId,
       channelId,
       question: input.question,
       options: input.options,
       mode: input.multi ? "multi" : "single",
-      closesAt: new Date(this.now() + (input.duration ?? config.defaultHours * HOUR)),
+      closesAt: new Date(now + (input.duration ?? config.defaultHours * HOUR)),
       createdBy: userId,
     });
     // Best effort, like the answers: anyone may add it themselves.
-    await chat.react(channelId, poll.messageId!, STOP).catch(warn(poll, `could not add ${STOP}`));
+    yield* chat.react(channelId, poll.messageId!, STOP).pipe(Effect.catch(warn(poll, `could not add ${STOP}`)));
     return poll;
-  }
-
-  /**
-   * 🛑 from the creator, or someone with `polls.end-any`, ends the poll.
-   * Anyone else's is taken back.
-   */
-  async onOtherReaction(poll: Poll, userId: string, emoji: ReactionEmoji) {
-    if (reactionKey(emoji) !== emojiKey(STOP)) return;
-    if (await this.mayEnd(poll, userId)) {
-      await this.deps.polls.close(poll.id);
-    } else {
-      await this.takeBackStop(poll, userId);
-    }
-  }
+  });
 
   /** A deleted poll message calls the poll off. */
-  async messageDeleted(messageId: string) {
-    const poll = this.deps.polls.byMessage(messageId);
+  const messageDeleted = Effect.fnUntraced(function* (messageId: string) {
+    const poll = service.byMessage(messageId);
     if (poll?.kind !== COMMUNITY_POLL) return;
-    await this.deps.polls.cancel(poll.id, { messageDeleted: true });
-  }
+    yield* service.cancel(poll.id, { messageDeleted: true });
+  });
 
   /** Acts on 🛑 reactions added while the bot was offline. */
-  async reconcile() {
-    for (const poll of this.open()) {
-      if (!poll.messageId) continue;
-      try {
-        const users = await this.deps.chat.reactionUsers(poll.channelId, poll.messageId, STOP);
+  const reconcile = Effect.fn("CommunityPolls.reconcile")(function* () {
+    for (const poll of open()) {
+      const { messageId } = poll;
+      if (!messageId) continue;
+      yield* Effect.gen(function* () {
+        const users = yield* chat.reactionUsers(poll.channelId, messageId, STOP);
         for (const userId of users) {
-          if (await this.mayEnd(poll, userId)) {
-            await this.deps.polls.close(poll.id);
+          if (yield* mayEnd(poll, userId)) {
+            yield* service.close(poll.id);
             break;
           }
-          await this.takeBackStop(poll, userId);
+          yield* takeBackStop(poll, userId);
         }
-      } catch (err) {
-        warn(poll, `could not check ${STOP} reactions`)(err);
-      }
+      }).pipe(
+        Effect.catch((err) => Effect.logWarning(`poll ${poll.id}: could not check ${STOP} reactions: ${err.message}`)),
+      );
     }
-  }
+  });
 
-  render(poll: Poll, tally: Tally): MessageBody {
-    return renderCommunityPoll(poll, tally);
-  }
-
-  async onClose(poll: Poll, tally: Tally) {
-    if (!poll.messageId) return;
-    const { chat } = this.deps;
-    await chat
-      .clearReaction(poll.channelId, poll.messageId, STOP)
-      .catch(warn(poll, `could not clear ${STOP}`));
-    await chat
-      .reply(poll.channelId, poll.messageId, announcement(poll, tally), [poll.createdBy])
-      .catch(warn(poll, "could not announce the result"));
-  }
-
-  describe(poll: Poll): string {
+  function describe(poll: Poll): string {
     const question = truncate(poll.question, 60).replace(/[[\]]/g, "");
     const title = poll.messageId
-      ? `[${question}](${this.deps.chat.messageLink(poll.channelId, poll.messageId)})`
+      ? `[${question}](${chat.messageLink(poll.channelId, poll.messageId)})`
       : question;
     return `${title} by <@${poll.createdBy}> in <#${poll.channelId}>, ends ${timestamp(poll.closesAt)}`;
   }
 
   /** The bot can only react with custom emoji from its own guild. */
-  private async checkCustomEmoji(options: readonly PollOption[]) {
+  const checkCustomEmoji = Effect.fnUntraced(function* (options: readonly PollOption[]) {
     const custom = options.filter((o) => /^\d+$/.test(emojiKey(o.emoji)));
     if (custom.length === 0) return;
-    const known = new Set(await this.deps.chat.emojiIds());
+    const known = new Set(yield* chat.emojiIds);
     const foreign = custom.find((o) => !known.has(emojiKey(o.emoji)));
     if (foreign) {
-      throw new UserError(
-        `${emojiText(foreign)} isn't an emoji of this server, so I can't react with it.`,
-      );
+      return yield* refuse(`${emojiText(foreign)} isn't an emoji of this server, so I can't react with it.`);
     }
+  });
+
+  function mayEnd(poll: Poll, userId: string): Effect.Effect<boolean, UserError | FluxerError> {
+    return poll.createdBy === userId ? Effect.succeed(true) : access.can(userId, "polls.end-any");
   }
 
-  private async mayEnd(poll: Poll, userId: string): Promise<boolean> {
-    return poll.createdBy === userId || (await this.deps.access.can(userId, "polls.end-any"));
-  }
-
-  private async takeBackStop(poll: Poll, userId: string) {
-    if (!poll.messageId) return;
-    await this.deps.chat
+  function takeBackStop(poll: Poll, userId: string): Effect.Effect<void> {
+    if (!poll.messageId) return Effect.void;
+    return chat
       .removeReaction(poll.channelId, poll.messageId, STOP, userId)
-      .catch(warn(poll, `could not remove ${STOP}`));
+      .pipe(Effect.catch(warn(poll, `could not remove ${STOP}`)));
   }
-}
+
+  const handler: PollHandler = {
+    render: renderCommunityPoll,
+
+    /**
+     * 🛑 from the creator, or someone with `polls.end-any`, ends the poll.
+     * Anyone else's is taken back.
+     */
+    onOtherReaction: (poll, userId, emoji) =>
+      Effect.gen(function* () {
+        if (reactionKey(emoji) !== emojiKey(STOP)) return;
+        if (yield* mayEnd(poll, userId)) {
+          yield* service.close(poll.id);
+        } else {
+          yield* takeBackStop(poll, userId);
+        }
+      }),
+
+    onClose: (poll, tally) =>
+      Effect.gen(function* () {
+        if (!poll.messageId) return;
+        yield* chat
+          .clearReaction(poll.channelId, poll.messageId, STOP)
+          .pipe(Effect.catch(warn(poll, `could not clear ${STOP}`)));
+        yield* chat
+          .reply(poll.channelId, poll.messageId, announcement(poll, tally), [poll.createdBy])
+          .pipe(Effect.catch(warn(poll, "could not announce the result")));
+      }),
+  };
+  service.register(COMMUNITY_POLL, handler);
+
+  return { open, start, messageDeleted, reconcile, describe };
+});
 
 /**
  * Reads what follows `!poll`. Quoted parts are the question and then the
  * answers, and each word outside quotes is a setting: a duration like `3h`
  * or `multi`. Without any quotes, the whole text is a yes/no question.
  */
-export function parsePollInput(text: string): PollInput {
+export const parsePollInput = Effect.fnUntraced(function* (text: string) {
   const parts = text.split(QUOTE);
   if (parts.length === 1) {
-    return { question: checkQuestion(clean(text)), options: YES_NO, multi: false };
+    const question = yield* checkQuestion(clean(text));
+    const input: PollInput = { question, options: YES_NO, multi: false };
+    return input;
   }
   if (parts.length % 2 === 0) {
-    throw new UserError(`One of the quotes isn't closed. Quote the question and each answer: ${EXAMPLE}`);
+    return yield* refuse(`One of the quotes isn't closed. Quote the question and each answer: ${EXAMPLE}`);
   }
 
   // Odd parts were inside quotes.
   const quoted = parts.filter((_, i) => i % 2 === 1).map(clean);
-  if (quoted.includes("")) throw new UserError("There's an empty pair of quotes in the poll.");
+  if (quoted.includes("")) return yield* refuse("There's an empty pair of quotes in the poll.");
   const words = parts
     .filter((_, i) => i % 2 === 0)
     .flatMap((part) => part.split(/[\s,]+/))
@@ -253,10 +261,10 @@ export function parsePollInput(text: string): PollInput {
     if (word.toLowerCase() === "multi") {
       multi = true;
     } else if (looksLikeDuration(word)) {
-      if (duration !== undefined) throw new UserError("Give the poll only one duration.");
-      duration = checkDuration(word);
+      if (duration !== undefined) return yield* refuse("Give the poll only one duration.");
+      duration = yield* checkDuration(word);
     } else {
-      throw new UserError(
+      return yield* refuse(
         `I don't know what \`${word}\` means there. Put the question and each answer in quotes, ` +
           `then add a duration or \`multi\` if you like: ${EXAMPLE}`,
       );
@@ -264,40 +272,46 @@ export function parsePollInput(text: string): PollInput {
   }
 
   const [question, ...answers] = quoted;
-  return { question: checkQuestion(question!), options: parseAnswers(answers), duration, multi };
-}
+  const input: PollInput = {
+    question: yield* checkQuestion(question!),
+    options: yield* parseAnswers(answers),
+    duration,
+    multi,
+  };
+  return input;
+});
 
-function checkQuestion(question: string): string {
-  if (!question) throw new UserError("A poll needs a question.");
+function checkQuestion(question: string): Effect.Effect<string, UserError> {
+  if (!question) return refuse("A poll needs a question.");
   if (question.length > QUESTION_MAX) {
-    throw new UserError(`Questions can be at most ${QUESTION_MAX} characters long.`);
+    return refuse(`Questions can be at most ${QUESTION_MAX} characters long.`);
   }
-  return question;
+  return Effect.succeed(question);
 }
 
-function checkDuration(word: string): number {
+function checkDuration(word: string): Effect.Effect<number, UserError> {
   const ms = parseDuration(word);
   if (ms === undefined) {
-    throw new UserError(
+    return refuse(
       `\`${word}\` isn't a duration I know. Use m, h, d or w, like \`30m\`, \`3h\`, \`3d\` or \`1w\`.`,
     );
   }
-  if (ms < MINUTE) throw new UserError("A poll has to run for at least a minute.");
-  if (ms > MAX_DURATION) throw new UserError("A poll can run for 4 weeks at most.");
-  return ms;
+  if (ms < MINUTE) return refuse("A poll has to run for at least a minute.");
+  if (ms > MAX_DURATION) return refuse("A poll can run for 4 weeks at most.");
+  return Effect.succeed(ms);
 }
 
 /**
  * Turns the answers into poll options. An answer may start with the emoji to
  * vote with; the others get numbers. Without answers it's a yes/no question.
  */
-function parseAnswers(answers: readonly string[]): PollOption[] {
+const parseAnswers = Effect.fnUntraced(function* (answers: readonly string[]) {
   if (answers.length === 0) return YES_NO;
   if (answers.length === 1) {
-    throw new UserError("A poll needs at least two answers; leave them out for a yes/no poll.");
+    return yield* refuse("A poll needs at least two answers; leave them out for a yes/no poll.");
   }
   if (answers.length > MAX_ANSWERS) {
-    throw new UserError(`A poll can have at most ${MAX_ANSWERS} answers.`);
+    return yield* refuse(`A poll can have at most ${MAX_ANSWERS} answers.`);
   }
 
   const parsed = answers.map(parseAnswer);
@@ -305,17 +319,17 @@ function parseAnswers(answers: readonly string[]): PollOption[] {
   const taken = new Set<string>();
   for (const { emoji, label } of parsed) {
     if (label.length > ANSWER_MAX) {
-      throw new UserError(`Answers can be at most ${ANSWER_MAX} characters long.`);
+      return yield* refuse(`Answers can be at most ${ANSWER_MAX} characters long.`);
     }
     const lower = label.toLowerCase();
-    if (lower && labels.has(lower)) throw new UserError(`\`${label}\` is an answer twice.`);
+    if (lower && labels.has(lower)) return yield* refuse(`\`${label}\` is an answer twice.`);
     labels.add(lower);
     if (!emoji) continue;
     if (emoji.key === emojiKey(STOP)) {
-      throw new UserError(`${STOP} is for ending the poll; pick another emoji for that answer.`);
+      return yield* refuse(`${STOP} is for ending the poll; pick another emoji for that answer.`);
     }
     if (taken.has(emoji.key)) {
-      throw new UserError(`Each answer needs its own emoji, but ${emoji.text} is used twice.`);
+      return yield* refuse(`Each answer needs its own emoji, but ${emoji.text} is used twice.`);
     }
     taken.add(emoji.key);
   }
@@ -329,7 +343,7 @@ function parseAnswers(answers: readonly string[]): PollOption[] {
     }
     return { key: String(i + 1), emoji: api, label };
   });
-}
+});
 
 function parseAnswer(answer: string): { emoji?: ParsedEmoji; label: string } {
   const match = LEADING_EMOJI.exec(answer)?.[0];
@@ -436,5 +450,5 @@ function truncate(text: string, max: number): string {
 }
 
 function warn(poll: Poll, what: string) {
-  return (err: unknown) => console.warn(`poll ${poll.id}: ${what}:`, err);
+  return (err: FluxerError) => Effect.logWarning(`poll ${poll.id}: ${what}: ${err.reason}`);
 }

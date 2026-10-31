@@ -10,9 +10,10 @@
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
+    "@effect/platform-bun": "^4.1.1",
     "@fluxerjs/core": "^3.3.0",
     "drizzle-orm": "^0.45.4",
-    "typebox": "^1.4.3",
+    "effect": "^4.1.1",
     "unique-names-generator": "^4.7.1"
   },
   "devDependencies": {

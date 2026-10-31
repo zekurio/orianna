@@ -1,14 +1,15 @@
 import { and, asc, count, eq } from "drizzle-orm";
-import { UserError } from "../commands/command.ts";
+import { type Cause, Clock, Context, Data, Effect, Exit } from "effect";
+import { refuse, type UserError } from "../commands/command.ts";
 import type { ProposalConfig } from "../config.ts";
-import type { DB } from "../db/index.ts";
+import { Database } from "../db/index.ts";
 import { polls, proposalImages, proposals } from "../db/schema.ts";
+import type { FluxerError } from "../fluxer.ts";
 import { defuseEveryone } from "../messages/body.ts";
-import type { GuildAccess } from "../permissions/rules.ts";
-import type { Poll, PollHandler, PollService, Tally } from "../polls/service.ts";
-import { timestamp } from "../polls/service.ts";
+import { GuildAccess } from "../permissions/rules.ts";
+import { type Poll, type PollHandler, PollService, type Tally, timestamp } from "../polls/service.ts";
 import { SOURCE_MAX_BYTES } from "./image.ts";
-import { cutImage, inspectImage, type ProcessedImage, pieceCount } from "./process.ts";
+import { ImageMagick, type ProcessedImage, pieceCount } from "./process.ts";
 
 export type Proposal = typeof proposals.$inferSelect;
 export type ProposalImage = typeof proposalImages.$inferSelect;
@@ -38,25 +39,40 @@ export interface CreatedExpression {
 }
 
 /** What expression proposals need from the guild. */
-export interface ExpressionGuild {
-  list(type: ExpressionType): Promise<Expression[]>;
-  /** Throws ExpressionRejected when Fluxer refuses it for good. */
-  create(type: ExpressionType, expression: NewExpression): Promise<CreatedExpression>;
-  /**
-   * Deletes an expression; one that is already gone counts as deleted.
-   * Throws ExpressionRejected when Fluxer refuses for good.
-   */
-  remove(type: ExpressionType, id: string, reason: string): Promise<void>;
-  /** Mentions in `content` notify only the users in `notify`. */
-  send(channelId: string, content: string, notify: readonly string[], replyTo?: string): Promise<void>;
-  /** IDs of the non-bot members who can see the channel. */
-  voters(channelId: string): Promise<string[]>;
-}
+export class ExpressionGuild extends Context.Service<
+  ExpressionGuild,
+  {
+    readonly list: (type: ExpressionType) => Effect.Effect<Expression[], FluxerError>;
+    /** Fails with ExpressionRejected when Fluxer refuses it for good. */
+    readonly create: (
+      type: ExpressionType,
+      expression: NewExpression,
+    ) => Effect.Effect<CreatedExpression, ExpressionRejected | FluxerError>;
+    /**
+     * Deletes an expression; one that is already gone counts as deleted.
+     * Fails with ExpressionRejected when Fluxer refuses for good.
+     */
+    readonly remove: (
+      type: ExpressionType,
+      id: string,
+      reason: string,
+    ) => Effect.Effect<void, ExpressionRejected | FluxerError>;
+    /** Mentions in `content` notify only the users in `notify`. */
+    readonly send: (
+      channelId: string,
+      content: string,
+      notify: readonly string[],
+      replyTo?: string,
+    ) => Effect.Effect<void, FluxerError>;
+    /** IDs of the non-bot members who can see the channel. */
+    readonly voters: (channelId: string) => Effect.Effect<string[], FluxerError>;
+  }
+>()("orianna/ExpressionGuild") {}
 
 /** Fluxer refused the request (bad image, slot limit, missing permission, ...); retrying won't help. */
-export class ExpressionRejected extends Error {
-  override name = "ExpressionRejected";
-}
+export class ExpressionRejected extends Data.TaggedError("ExpressionRejected")<{
+  readonly message: string;
+}> {}
 
 /** How one kind of expression differs from the other. */
 export interface ExpressionKind {
@@ -67,8 +83,8 @@ export interface ExpressionKind {
   noun: string;
   /** "emojis", "stickers" */
   plural: string;
-  /** Throws UserError when Fluxer would refuse the name. */
-  checkName(name: string): void;
+  /** Fails with a UserError when Fluxer would refuse the name. */
+  checkName(name: string): Effect.Effect<void, UserError>;
   /**
    * Turns a name from elsewhere, like a 7TV emote's, into one Fluxer takes.
    * Undefined when too little of it is left.
@@ -94,13 +110,12 @@ export const EMOJI: ExpressionKind = {
   pollKind: "emoji-proposal",
   noun: "emoji",
   plural: "emojis",
-  checkName(name) {
-    if (!EMOJI_NAME.test(name)) {
-      throw new UserError(
-        `Emoji names must be 2 to ${EMOJI_NAME_MAX} characters long and use only letters, digits and underscores.`,
-      );
-    }
-  },
+  checkName: (name) =>
+    EMOJI_NAME.test(name)
+      ? Effect.void
+      : refuse(
+          `Emoji names must be 2 to ${EMOJI_NAME_MAX} characters long and use only letters, digits and underscores.`,
+        ),
   fitName(name) {
     const fitted = name
       .replace(/[^A-Za-z0-9_]+/g, "_")
@@ -127,11 +142,10 @@ export const STICKER: ExpressionKind = {
   pollKind: "sticker-proposal",
   noun: "sticker",
   plural: "stickers",
-  checkName(name) {
-    if (name.length < 2 || name.length > STICKER_NAME_MAX) {
-      throw new UserError(`Sticker names must be 2 to ${STICKER_NAME_MAX} characters long.`);
-    }
-  },
+  checkName: (name) =>
+    name.length < 2 || name.length > STICKER_NAME_MAX
+      ? refuse(`Sticker names must be 2 to ${STICKER_NAME_MAX} characters long.`)
+      : Effect.void,
   fitName(name) {
     const fitted = truncate(name.trim(), STICKER_NAME_MAX).trimEnd();
     return fitted.length >= 2 ? fitted : undefined;
@@ -173,8 +187,8 @@ function truncate(text: string, max: number): string {
  * Splits `sad, cry,Sad` into `["sad", "cry"]`: trimmed, lowercased, empty
  * entries and duplicates dropped.
  */
-export function parseTags(input: string | undefined): string[] {
-  if (!input) return [];
+export function parseTags(input: string | undefined): Effect.Effect<string[], UserError> {
+  if (!input) return Effect.succeed([]);
   const tags = [
     ...new Set(
       input
@@ -184,13 +198,13 @@ export function parseTags(input: string | undefined): string[] {
     ),
   ];
   if (tags.length > STICKER_TAGS_MAX) {
-    throw new UserError(`A sticker can have at most ${STICKER_TAGS_MAX} tags.`);
+    return refuse(`A sticker can have at most ${STICKER_TAGS_MAX} tags.`);
   }
   const long = tags.find((t) => t.length > STICKER_TAG_LENGTH_MAX);
   if (long) {
-    throw new UserError(`Tags can be at most ${STICKER_TAG_LENGTH_MAX} characters long: \`${long}\`.`);
+    return refuse(`Tags can be at most ${STICKER_TAG_LENGTH_MAX} characters long: \`${long}\`.`);
   }
-  return tags;
+  return Effect.succeed(tags);
 }
 
 export interface ExpressionInput {
@@ -239,51 +253,43 @@ type AddOutcome =
   /** A piece couldn't be added; the ones before it were rolled back, except `kept`. */
   | { status: "refused"; piece: string; problem: string; kept: string[] }
   /** Only without `resume`: something else went wrong, and was rolled back except `kept`. */
-  | { status: "failed"; error: unknown; kept: string[] };
+  | { status: "failed"; cause: Cause.Cause<FluxerError>; kept: string[] };
 
-export interface ExpressionProposalsDeps {
-  db: DB;
-  polls: PollService;
-  guild: ExpressionGuild;
-  access: GuildAccess;
+export interface ProposalSettings {
   config: ProposalConfig;
   guildId: string;
   /** Where proposal polls are posted. */
   channelId: string;
-  now?: () => number;
 }
 
-/** Proposals for one kind of expression; register one instance per kind. */
-export class ExpressionProposals implements PollHandler {
-  private readonly now: () => number;
+export type ExpressionProposals = Effect.Success<ReturnType<typeof makeExpressionProposals>>;
+
+/** Proposals for one kind of expression. Registers its poll kind with the poll service. */
+export const makeExpressionProposals = Effect.fnUntraced(function* (
+  kind: ExpressionKind,
+  { config, guildId, channelId }: ProposalSettings,
+) {
+  const db = yield* Database;
+  const pollService = yield* PollService;
+  const guild = yield* ExpressionGuild;
+  const access = yield* GuildAccess;
+  const magick = yield* ImageMagick;
   /** Lowercased names a command is adding or proposing right now. */
-  private readonly reserved = new Set<string>();
+  const reserved = new Set<string>();
   /** Proposals each user has in the works, which count towards `maxOpenPerUser`. */
-  private readonly preparing = new Map<string, number>();
+  const preparing = new Map<string, number>();
 
-  constructor(
-    readonly kind: ExpressionKind,
-    private readonly deps: ExpressionProposalsDeps,
-  ) {
-    this.now = deps.now ?? Date.now;
-  }
-
-  /** Largest image worth downloading. */
-  get downloadLimit(): number {
-    return Math.max(SOURCE_MAX_BYTES, this.deps.config.maxImageBytes);
-  }
-
-  get(pollId: number): Proposal | undefined {
-    return this.deps.db
+  function get(pollId: number): Proposal | undefined {
+    return db
       .select()
       .from(proposals)
-      .where(and(eq(proposals.pollId, pollId), eq(proposals.type, this.kind.type)))
+      .where(and(eq(proposals.pollId, pollId), eq(proposals.type, kind.type)))
       .get();
   }
 
   /** The images a proposal adds, in order. */
-  images(pollId: number): ProposalImage[] {
-    return this.deps.db
+  function images(pollId: number): ProposalImage[] {
+    return db
       .select()
       .from(proposalImages)
       .where(eq(proposalImages.pollId, pollId))
@@ -291,55 +297,51 @@ export class ExpressionProposals implements PollHandler {
       .all();
   }
 
-  pending(): { proposal: Proposal; poll: Poll }[] {
-    return this.deps.db
+  function pending(): { proposal: Proposal; poll: Poll }[] {
+    return db
       .select({ proposal: proposals, poll: polls })
       .from(proposals)
       .innerJoin(polls, eq(polls.id, proposals.pollId))
-      .where(and(eq(proposals.type, this.kind.type), eq(proposals.status, "pending")))
+      .where(and(eq(proposals.type, kind.type), eq(proposals.status, "pending")))
       .orderBy(asc(polls.closesAt))
       .all();
   }
 
   /** Puts the expression up for a vote. Returns the poll and the names it would add. */
-  async propose(proposerId: string, input: ExpressionInput): Promise<{ poll: Poll; names: string[] }> {
-    const { config } = this.deps;
-    const { kind } = this;
-
+  const propose = Effect.fn("ExpressionProposals.propose")(function* (
+    proposerId: string,
+    input: ExpressionInput,
+  ) {
     // Proposals still being prepared count too, so commands sent at the same
     // time can't get past the limit while their images are processed.
-    const preparing = this.preparing.get(proposerId) ?? 0;
-    const open =
-      this.pending().filter((p) => p.proposal.proposerId === proposerId).length + preparing;
+    const inWorks = preparing.get(proposerId) ?? 0;
+    const open = pending().filter((p) => p.proposal.proposerId === proposerId).length + inWorks;
     if (open >= config.maxOpenPerUser) {
-      throw new UserError(
+      return yield* refuse(
         `You already have ${open} open ${kind.noun} proposals; wait for one to finish first.`,
       );
     }
 
-    this.preparing.set(proposerId, preparing + 1);
-    try {
-      return await this.withDraft(input, (draft) => this.post(proposerId, draft));
-    } finally {
-      const left = this.preparing.get(proposerId)! - 1;
-      if (left > 0) this.preparing.set(proposerId, left);
-      else this.preparing.delete(proposerId);
-    }
-  }
+    preparing.set(proposerId, inWorks + 1);
+    return yield* withDraft(input, (draft) => post(proposerId, draft)).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          const left = preparing.get(proposerId)! - 1;
+          if (left > 0) preparing.set(proposerId, left);
+          else preparing.delete(proposerId);
+        }),
+      ),
+    );
+  });
 
   /** Posts the poll for a proposal and stores it. */
-  private async post(
-    proposerId: string,
-    { name, description, tags, pieces }: Draft,
-  ): Promise<{ poll: Poll; names: string[] }> {
-    const { config, db, guild } = this.deps;
-    const { kind } = this;
+  const post = Effect.fnUntraced(function* (proposerId: string, { name, description, tags, pieces }: Draft) {
     const names = pieces.map((p) => p.name);
 
     // The bar is set now, so people who join later and config changes don't
     // move it for votes already running. It rounds up from just below the
     // exact share, since 0.7 × 10 comes out as 7.000000000000001.
-    const voters = await guild.voters(this.deps.channelId);
+    const voters = yield* guild.voters(channelId);
     const members = Math.max(1, voters.length);
     const requiredYes = Math.max(1, Math.ceil(members * config.threshold - 1e-9));
     const needs =
@@ -357,22 +359,19 @@ export class ExpressionProposals implements PollHandler {
       names.length > 1 &&
         `Cut into ${names.length} ${kind.plural}: ${names.map((n) => kind.code(defuseEveryone(n))).join(" ")}`,
     ].filter(Boolean);
-    const poll = await this.deps.polls.create({
+    const now = yield* Clock.currentTimeMillis;
+    const poll = yield* pollService.create({
       kind: kind.pollKind,
-      guildId: this.deps.guildId,
-      channelId: this.deps.channelId,
+      guildId,
+      channelId,
       question: `Add the ${kind.display(defuseEveryone(name))}?`,
-      description: [
-        ...details,
-        `Proposed by <@${proposerId}>. Needs ${needs}.`,
-        "@here",
-      ].join("\n"),
+      description: [...details, `Proposed by <@${proposerId}>. Needs ${needs}.`, "@here"].join("\n"),
       options: [
         { key: "yes", emoji: "✅", label: "Add it" },
         { key: "no", emoji: "❌", label: "Don't add it" },
       ],
       mode: "single",
-      closesAt: new Date(this.now() + config.votingHours * 3_600_000),
+      closesAt: new Date(now + config.votingHours * 3_600_000),
       createdBy: proposerId,
       files: pieces.map((p) => ({ name: `${p.name}.${p.type.ext}`, data: p.image })),
       // Proposals ping @here, as they always have.
@@ -396,23 +395,18 @@ export class ExpressionProposals implements PollHandler {
         .run();
     });
     return { poll, names };
-  }
+  });
 
   /**
    * Adds the expression right away, without a vote. The pieces of a cut image
    * go in together or not at all.
    */
-  async add(userId: string, input: ExpressionInput): Promise<CreatedExpression[]> {
-    return this.withDraft(input, (draft) => this.addNow(userId, draft));
-  }
+  const add = Effect.fn("ExpressionProposals.add")(function* (userId: string, input: ExpressionInput) {
+    return yield* withDraft(input, (draft) => addNow(userId, draft));
+  });
 
-  private async addNow(
-    userId: string,
-    { name, description, tags, pieces }: Draft,
-  ): Promise<CreatedExpression[]> {
-    const { kind } = this;
-
-    const outcome = await this.addPieces(
+  const addNow = Effect.fnUntraced(function* (userId: string, { name, description, tags, pieces }: Draft) {
+    const outcome = yield* addPieces(
       pieces.map((p, position) => ({
         position,
         name: p.name,
@@ -425,89 +419,80 @@ export class ExpressionProposals implements PollHandler {
       case "added":
         return outcome.created;
       case "refused":
-        throw new UserError(
+        return yield* refuse(
           pieces.length === 1
             ? `Couldn't add the ${kind.display(name)}: ${outcome.problem}.`
             : `Couldn't add ${kind.code(outcome.piece)}: ${outcome.problem}. ` +
                 rolledBack(kind, pieces.length, outcome.kept),
         );
       case "failed":
-        if (outcome.kept.length === 0) throw outcome.error;
-        console.error(`adding the ${kind.noun} ${name} failed:`, outcome.error);
-        throw new UserError(`Adding the ${kind.display(name)} failed. ${notRemoved(kind, outcome.kept)}`);
+        if (outcome.kept.length === 0) return yield* Effect.failCause(outcome.cause);
+        yield* Effect.logError(`adding the ${kind.noun} ${name} failed`, outcome.cause);
+        return yield* refuse(`Adding the ${kind.display(name)} failed. ${notRemoved(kind, outcome.kept)}`);
     }
-  }
+  });
 
   /** Someone with the decide permission approves or rejects before the vote ends. */
-  async decide(
+  const decide = Effect.fn("ExpressionProposals.decide")(function* (
     slug: string,
     deciderId: string,
     decision: "approve" | "reject",
     reason?: string,
   ) {
-    const { poll } = this.requirePending(slug);
-    this.setStatus(poll.id, { decision, decidedBy: deciderId, reason });
+    const { poll } = yield* requirePending(slug);
+    setStatus(poll.id, { decision, decidedBy: deciderId, reason });
 
-    if (!(await this.deps.polls.close(poll.id))) {
+    if (!(yield* pollService.close(poll.id))) {
       // The vote ended on its own in the meantime; let that outcome stand.
-      this.deps.db
-        .update(proposals)
+      db.update(proposals)
         .set({ decision: null, decidedBy: null, reason: null })
         .where(and(eq(proposals.pollId, poll.id), eq(proposals.status, "pending")))
         .run();
-      throw new UserError(`Voting on poll \`${poll.slug}\` has already ended.`);
+      return yield* refuse(`Voting on poll \`${poll.slug}\` has already ended.`);
     }
-  }
+  });
 
   /** The proposer, or someone with the cancel-any permission, withdraws a proposal. */
-  async cancel(slug: string, userId: string) {
-    const { proposal, poll } = this.requirePending(slug);
-    const anyone = `${this.kind.type}.cancel-any` as const;
-    if (proposal.proposerId !== userId && !(await this.deps.access.can(userId, anyone))) {
-      throw new UserError(`Only the proposer, or someone with \`${anyone}\`, can cancel a proposal.`);
+  const cancel = Effect.fn("ExpressionProposals.cancel")(function* (slug: string, userId: string) {
+    const { proposal, poll } = yield* requirePending(slug);
+    const anyone = `${kind.type}.cancel-any` as const;
+    if (proposal.proposerId !== userId && !(yield* access.can(userId, anyone))) {
+      return yield* refuse(`Only the proposer, or someone with \`${anyone}\`, can cancel a proposal.`);
     }
-    if (!(await this.deps.polls.cancel(poll.id))) {
-      throw new UserError(`Voting on poll \`${poll.slug}\` has already ended.`);
+    if (!(yield* pollService.cancel(poll.id))) {
+      return yield* refuse(`Voting on poll \`${poll.slug}\` has already ended.`);
     }
-    this.setStatus(poll.id, { status: "cancelled", decidedBy: userId });
-  }
+    setStatus(poll.id, { status: "cancelled", decidedBy: userId });
+  });
 
-  /** Ends the vote as soon as it has enough yes votes. */
-  isDecided(poll: Poll, tally: Tally): boolean {
-    const proposal = this.get(poll.id);
-    return proposal?.status === "pending" && passes(proposal, tally);
-  }
-
-  async onClose(poll: Poll, tally: Tally) {
-    const proposal = this.get(poll.id);
+  const onClose = Effect.fnUntraced(function* (poll: Poll, tally: Tally) {
+    const proposal = get(poll.id);
     if (!proposal) {
-      console.warn(`poll ${poll.id}: no ${this.kind.noun} proposal stored for it`);
+      yield* Effect.logWarning(`poll ${poll.id}: no ${kind.noun} proposal stored for it`);
       return;
     }
     if (proposal.status !== "pending") return;
 
     const yes = tally.counts.yes ?? 0;
     const no = tally.counts.no ?? 0;
-    const approved = proposal.decision
-      ? proposal.decision === "approve"
-      : passes(proposal, tally);
+    const approved = proposal.decision ? proposal.decision === "approve" : passes(proposal, tally);
 
     const why = proposal.decision
       ? `${proposal.decision === "approve" ? "approved" : "rejected"} by <@${proposal.decidedBy}>` +
         (proposal.reason ? `: ${proposal.reason}` : "")
       : `${yes} yes, ${no} no, ${proposal.requiredYes} needed`;
-    const subject = `the ${this.kind.display(proposal.name)}`;
+    const subject = `the ${kind.display(proposal.name)}`;
     const mention = `<@${proposal.proposerId}>`;
 
     if (!approved) {
-      this.setStatus(poll.id, { status: "rejected" });
-      await this.announce(poll, proposal, `${mention} ${subject} was not added (${why}).`);
+      setStatus(poll.id, { status: "rejected" });
+      yield* announce(poll, proposal, `${mention} ${subject} was not added (${why}).`);
       return;
     }
 
-    const images = this.images(poll.id);
-    const outcome = await this.addPieces(
-      images.map((image) => ({
+    const stored = images(poll.id);
+    const outcome = yield* addPieces(
+      stored.map((image) => ({
         position: image.position,
         name: image.name,
         image: dataUrl(image.contentType, image.image),
@@ -519,37 +504,36 @@ export class ExpressionProposals implements PollHandler {
         reason: `Voted in with poll ${poll.slug}, proposed by user ${proposal.proposerId}`,
         // Network trouble leaves the poll closed; the next attempt picks up here.
         resume: true,
-        save: (piece, expressionId) => this.setExpressionId(poll.id, piece.position, expressionId),
+        save: (piece, expressionId) => setExpressionId(poll.id, piece.position, expressionId),
       },
     );
-    if (outcome.status === "failed") throw outcome.error;
+    if (outcome.status === "failed") return yield* Effect.failCause(outcome.cause);
     if (outcome.status === "refused") {
-      this.setStatus(poll.id, { status: "failed", error: outcome.problem });
-      await this.announce(
+      setStatus(poll.id, { status: "failed", error: outcome.problem });
+      yield* announce(
         poll,
         proposal,
-        images.length === 1
+        stored.length === 1
           ? `${mention} ${subject} was approved (${why}) but couldn't be added: ${outcome.problem}.`
-          : `${mention} ${subject} was approved (${why}) but ${this.kind.code(outcome.piece)} ` +
-              `couldn't be added: ${outcome.problem}. ${rolledBack(this.kind, images.length, outcome.kept)}`,
+          : `${mention} ${subject} was approved (${why}) but ${kind.code(outcome.piece)} ` +
+              `couldn't be added: ${outcome.problem}. ${rolledBack(kind, stored.length, outcome.kept)}`,
       );
       return;
     }
 
-    this.setStatus(poll.id, { status: "added" });
-    const as = images.length > 1 ? ` as ${images.map((i) => this.kind.code(i.name)).join(" ")}` : "";
-    await this.announce(poll, proposal, `${mention} ${subject} has been added${as} (${why}).`);
-  }
+    setStatus(poll.id, { status: "added" });
+    const as = stored.length > 1 ? ` as ${stored.map((i) => kind.code(i.name)).join(" ")}` : "";
+    yield* announce(poll, proposal, `${mention} ${subject} has been added${as} (${why}).`);
+  });
 
-  describe(proposal: Proposal, poll: Poll): string {
-    const pieces =
-      this.deps.db
-        .select({ n: count() })
-        .from(proposalImages)
-        .where(eq(proposalImages.pollId, poll.id))
-        .get()!.n;
+  function describe(proposal: Proposal, poll: Poll): string {
+    const pieces = db
+      .select({ n: count() })
+      .from(proposalImages)
+      .where(eq(proposalImages.pollId, poll.id))
+      .get()!.n;
     const cut = pieces > 1 ? ` in ${pieces} pieces` : "";
-    return `\`${poll.slug}\` ${this.kind.display(proposal.name)}${cut} by <@${proposal.proposerId}>, needs ${proposal.requiredYes} yes, closes ${timestamp(poll.closesAt)}`;
+    return `\`${poll.slug}\` ${kind.display(proposal.name)}${cut} by <@${proposal.proposerId}>, needs ${proposal.requiredYes} yes, closes ${timestamp(poll.closesAt)}`;
   }
 
   /**
@@ -557,188 +541,226 @@ export class ExpressionProposals implements PollHandler {
    * The names stay reserved until `use` is done, so another command can't take
    * them while this one is still processing the image or posting the poll.
    */
-  private async withDraft<T>(input: ExpressionInput, use: (draft: Draft) => Promise<T>): Promise<T> {
-    const { kind } = this;
-    const description = input.description?.trim() || null;
+  function withDraft<A, E>(input: ExpressionInput, use: (draft: Draft) => Effect.Effect<A, E>) {
+    return Effect.gen(function* () {
+      const description = input.description?.trim() || null;
 
-    kind.checkName(input.name);
-    if (description && description.length > STICKER_DESCRIPTION_MAX) {
-      throw new UserError(`Descriptions can be at most ${STICKER_DESCRIPTION_MAX} characters long.`);
-    }
+      yield* kind.checkName(input.name);
+      if (description && description.length > STICKER_DESCRIPTION_MAX) {
+        return yield* refuse(`Descriptions can be at most ${STICKER_DESCRIPTION_MAX} characters long.`);
+      }
 
-    const info = await inspectImage(input.image);
-    const names = kind.pieceNames(input.name, pieceCount(info, kind.maxPieces));
-    this.reserve(names);
-    try {
-      await this.checkNotInGuild(names);
-      const images = await cutImage(input.image, info, {
-        count: names.length,
-        size: kind.size,
-        maxBytes: this.deps.config.maxImageBytes,
-      });
-      return await use({
-        name: input.name,
-        description,
-        tags: input.tags ?? [],
-        pieces: images.map((image, i) => ({ ...image, name: names[i]! })),
-      });
-    } finally {
-      for (const name of names) this.reserved.delete(name.toLowerCase());
-    }
+      const info = yield* magick.inspect(input.image);
+      const names = kind.pieceNames(input.name, pieceCount(info, kind.maxPieces));
+      return yield* Effect.acquireUseRelease(
+        reserve(names),
+        () =>
+          Effect.gen(function* () {
+            yield* checkNotInGuild(names);
+            const images = yield* magick.cut(input.image, info, {
+              count: names.length,
+              size: kind.size,
+              maxBytes: config.maxImageBytes,
+            });
+            return yield* use({
+              name: input.name,
+              description,
+              tags: input.tags ?? [],
+              pieces: images.map((image, i) => ({ ...image, name: names[i]! })),
+            });
+          }),
+        () =>
+          Effect.sync(() => {
+            for (const name of names) reserved.delete(name.toLowerCase());
+          }),
+      );
+    });
   }
 
   /**
-   * Claims the names, or throws when one is up for a vote or being added by
-   * another command. Nothing in here awaits, so two commands can't both pass.
+   * Claims the names, or fails when one is up for a vote or being added by
+   * another command. Nothing in here yields, so two commands can't both pass.
    */
-  private reserve(names: string[]) {
-    const { kind } = this;
-    const wanted = names.map((n) => n.toLowerCase());
+  function reserve(names: string[]): Effect.Effect<void, UserError> {
+    return Effect.suspend(() => {
+      const wanted = names.map((n) => n.toLowerCase());
 
-    const busy = names.find((n) => this.reserved.has(n.toLowerCase()));
-    if (busy) throw new UserError(`Someone else is adding the ${kind.display(busy)} right now.`);
+      const busy = names.find((n) => reserved.has(n.toLowerCase()));
+      if (busy) return refuse(`Someone else is adding the ${kind.display(busy)} right now.`);
 
-    const pending = this.deps.db
-      .select({ name: proposalImages.name, slug: polls.slug })
-      .from(proposalImages)
-      .innerJoin(proposals, eq(proposals.pollId, proposalImages.pollId))
-      .innerJoin(polls, eq(polls.id, proposalImages.pollId))
-      .where(and(eq(proposals.type, kind.type), eq(proposals.status, "pending")))
-      .all()
-      .find((p) => wanted.includes(p.name.toLowerCase()));
-    if (pending) {
-      throw new UserError(
-        `The ${kind.display(pending.name)} is already up for a vote in poll \`${pending.slug}\`.`,
-      );
-    }
+      const taken = db
+        .select({ name: proposalImages.name, slug: polls.slug })
+        .from(proposalImages)
+        .innerJoin(proposals, eq(proposals.pollId, proposalImages.pollId))
+        .innerJoin(polls, eq(polls.id, proposalImages.pollId))
+        .where(and(eq(proposals.type, kind.type), eq(proposals.status, "pending")))
+        .all()
+        .find((p) => wanted.includes(p.name.toLowerCase()));
+      if (taken) {
+        return refuse(`The ${kind.display(taken.name)} is already up for a vote in poll \`${taken.slug}\`.`);
+      }
 
-    for (const name of wanted) this.reserved.add(name);
+      for (const name of wanted) reserved.add(name);
+      return Effect.void;
+    });
   }
 
-  /** Throws when the guild already has one of the names. */
-  private async checkNotInGuild(names: string[]) {
+  /** Fails when the guild already has one of the names. */
+  const checkNotInGuild = Effect.fnUntraced(function* (names: string[]) {
     const wanted = new Set(names.map((n) => n.toLowerCase()));
-    const existing = (await this.deps.guild.list(this.kind.type)).find((e) =>
-      wanted.has(e.name.toLowerCase()),
-    );
-    if (existing) throw new UserError(`The ${this.kind.display(existing.name)} already exists.`);
-  }
+    const existing = (yield* guild.list(kind.type)).find((e) => wanted.has(e.name.toLowerCase()));
+    if (existing) return yield* refuse(`The ${kind.display(existing.name)} already exists.`);
+  });
 
-  private requirePending(slug: string): { proposal: Proposal; poll: Poll } {
-    const poll = this.deps.polls.bySlug(slug);
-    const proposal = poll?.kind === this.kind.pollKind ? this.get(poll.id) : undefined;
+  function requirePending(slug: string): Effect.Effect<{ proposal: Proposal; poll: Poll }, UserError> {
+    const poll = pollService.bySlug(slug);
+    const proposal = poll?.kind === kind.pollKind ? get(poll.id) : undefined;
     if (!poll || !proposal || proposal.status !== "pending") {
-      throw new UserError(`There is no open ${this.kind.noun} proposal \`${slug}\`.`);
+      return refuse(`There is no open ${kind.noun} proposal \`${slug}\`.`);
     }
-    return { proposal, poll };
+    return Effect.succeed({ proposal, poll });
   }
 
   /**
    * Adds the pieces that have no ID yet, in order, so that they go in together
    * or not at all. When Fluxer refuses one, or someone else has since added an
-   * expression with its name, the pieces added so far are deleted again.
+   * expression with its name, the pieces added so far are deleted again. Runs
+   * to the end even when interrupted, so a rollback is never cut short.
    */
-  private async addPieces(pieces: Piece[], options: AddOptions): Promise<AddOutcome> {
-    const { guild } = this.deps;
-    const { kind } = this;
-    const created: CreatedExpression[] = [];
-    let current: Piece | undefined;
-    let refusal: { piece: string; problem: string } | undefined;
+  function addPieces(pieces: Piece[], options: AddOptions): Effect.Effect<AddOutcome, FluxerError> {
+    return Effect.gen(function* () {
+      const created: CreatedExpression[] = [];
+      let current: Piece | undefined;
+      let refusal: { piece: string; problem: string } | undefined;
 
-    try {
-      const existing = await guild.list(kind.type);
-      for (const piece of pieces) {
-        if (piece.expressionId) continue;
-        current = piece;
-        const lower = piece.name.toLowerCase();
-        const same = existing.find((e) => e.name.toLowerCase() === lower);
-        // When resuming, the bot may have added it just before it went down,
-        // without saving the ID. Anyone else's is in the way.
-        if (same && !(options.resume && same.mine)) {
-          refusal = {
-            piece: piece.name,
-            problem: `another ${kind.noun} with that name was added in the meantime`,
-          };
-          break;
+      const exit = yield* Effect.gen(function* () {
+        const existing = yield* guild.list(kind.type);
+        for (const piece of pieces) {
+          if (piece.expressionId) continue;
+          current = piece;
+          const lower = piece.name.toLowerCase();
+          const same = existing.find((e) => e.name.toLowerCase() === lower);
+          // When resuming, the bot may have added it just before it went down,
+          // without saving the ID. Anyone else's is in the way.
+          if (same && !(options.resume && same.mine)) {
+            refusal = {
+              piece: piece.name,
+              problem: `another ${kind.noun} with that name was added in the meantime`,
+            };
+            return;
+          }
+          let id = same?.id;
+          if (!id) {
+            const added = yield* guild.create(kind.type, {
+              name: piece.name,
+              image: piece.image,
+              description: options.description,
+              tags: options.tags,
+              reason: options.reason,
+            });
+            created.push(added);
+            id = added.id;
+          }
+          setPieceId(piece, id, options);
         }
-        let id = same?.id;
-        if (!id) {
-          const added = await guild.create(kind.type, {
-            name: piece.name,
-            image: piece.image,
-            description: options.description,
-            tags: options.tags,
-            reason: options.reason,
-          });
-          created.push(added);
-          id = added.id;
-        }
-        this.setPieceId(piece, id, options);
-      }
-    } catch (err) {
-      if (!(err instanceof ExpressionRejected)) {
-        if (options.resume) throw err;
-        const kept = await this.removePieces(pieces, `Rolled back: adding ${current?.name} failed`, options);
-        return { status: "failed", error: err, kept };
-      }
-      refusal = { piece: current!.name, problem: `Fluxer refused it (${err.message})` };
-    }
+      }).pipe(
+        Effect.catchTag("ExpressionRejected", (err) =>
+          Effect.sync(() => {
+            refusal = { piece: current!.name, problem: `Fluxer refused it (${err.message})` };
+          }),
+        ),
+        Effect.exit,
+      );
 
-    if (!refusal) return { status: "added", created };
-    const kept = await this.removePieces(
-      pieces,
-      `Rolled back: ${refusal.piece} couldn't be added`,
-      options,
-    );
-    return { status: "refused", ...refusal, kept };
+      if (Exit.isFailure(exit)) {
+        if (options.resume) return yield* Effect.failCause(exit.cause);
+        const kept = yield* removePieces(pieces, `Rolled back: adding ${current?.name} failed`, options);
+        const outcome: AddOutcome = { status: "failed", cause: exit.cause, kept };
+        return outcome;
+      }
+      if (!refusal) {
+        const outcome: AddOutcome = { status: "added", created };
+        return outcome;
+      }
+      const kept = yield* removePieces(pieces, `Rolled back: ${refusal.piece} couldn't be added`, options);
+      const outcome: AddOutcome = { status: "refused", ...refusal, kept };
+      return outcome;
+    }).pipe(Effect.uninterruptible);
   }
 
   /**
    * Deletes the pieces that have an ID and returns the names of those left
-   * in the guild. When resuming, errors other than a refusal are thrown
+   * in the guild. When resuming, failures other than a refusal are passed on
    * instead; the next attempt runs into the same problem and finishes the job.
    */
-  private async removePieces(pieces: Piece[], reason: string, options: AddOptions): Promise<string[]> {
+  const removePieces = Effect.fnUntraced(function* (pieces: Piece[], reason: string, options: AddOptions) {
     const kept: string[] = [];
     for (const piece of pieces) {
       if (!piece.expressionId) continue;
-      try {
-        await this.deps.guild.remove(this.kind.type, piece.expressionId, reason);
-      } catch (err) {
-        if (options.resume && !(err instanceof ExpressionRejected)) throw err;
-        console.warn(`could not roll back the ${this.kind.display(piece.name)}:`, err);
+      const removed = yield* guild.remove(kind.type, piece.expressionId, reason).pipe(
+        Effect.as(true),
+        Effect.catch((err) =>
+          options.resume && err._tag !== "ExpressionRejected"
+            ? Effect.fail(err)
+            : Effect.logWarning(`could not roll back the ${kind.display(piece.name)}: ${err.message}`).pipe(
+                Effect.as(false),
+              ),
+        ),
+      );
+      if (!removed) {
         kept.push(piece.name);
         continue;
       }
-      this.setPieceId(piece, null, options);
+      setPieceId(piece, null, options);
     }
     return kept;
-  }
+  });
 
-  private setPieceId(piece: Piece, expressionId: string | null, options: AddOptions) {
+  function setPieceId(piece: Piece, expressionId: string | null, options: AddOptions) {
     piece.expressionId = expressionId;
     options.save?.(piece, expressionId);
   }
 
-  private setExpressionId(pollId: number, position: number, expressionId: string | null) {
-    this.deps.db
-      .update(proposalImages)
+  function setExpressionId(pollId: number, position: number, expressionId: string | null) {
+    db.update(proposalImages)
       .set({ expressionId })
       .where(and(eq(proposalImages.pollId, pollId), eq(proposalImages.position, position)))
       .run();
   }
 
-  private setStatus(pollId: number, values: Partial<Proposal>) {
-    this.deps.db.update(proposals).set(values).where(eq(proposals.pollId, pollId)).run();
+  function setStatus(pollId: number, values: Partial<Proposal>) {
+    db.update(proposals).set(values).where(eq(proposals.pollId, pollId)).run();
   }
 
   /** Pings only the proposer; the name and the decider's reason may hold mentions too. */
-  private async announce(poll: Poll, proposal: Proposal, content: string) {
-    await this.deps.guild
+  function announce(poll: Poll, proposal: Proposal, content: string) {
+    return guild
       .send(poll.channelId, content, [proposal.proposerId], poll.messageId ?? undefined)
-      .catch((err) => console.warn(`poll ${poll.id}: could not announce result:`, err));
+      .pipe(Effect.catch((err) => Effect.logWarning(`poll ${poll.id}: could not announce result: ${err.reason}`)));
   }
-}
+
+  const handler: PollHandler = {
+    onClose,
+    /** Ends the vote as soon as it has enough yes votes. */
+    isDecided(poll, tally) {
+      const proposal = get(poll.id);
+      return proposal?.status === "pending" && passes(proposal, tally);
+    },
+  };
+  pollService.register(kind.pollKind, handler);
+
+  return {
+    kind,
+    /** Largest image worth downloading. */
+    downloadLimit: Math.max(SOURCE_MAX_BYTES, config.maxImageBytes),
+    pending,
+    describe,
+    propose,
+    add,
+    decide,
+    cancel,
+  };
+});
 
 /** Enough yes votes, and more yes than no. */
 function passes(proposal: Proposal, tally: Tally): boolean {

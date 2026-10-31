@@ -1,6 +1,9 @@
-import type { Bot } from "../bot.ts";
+import { Data, Effect } from "effect";
+import type { AppConfig } from "../config.ts";
+import type { Fluxer, FluxerError } from "../fluxer.ts";
 import type { MessageBody } from "../messages/body.ts";
-import type { MemberPermissions, Permission } from "../permissions/rules.ts";
+import type { GuildAccess, MemberPermissions, Permission } from "../permissions/rules.ts";
+import type { CommandRouter } from "./router.ts";
 
 // Commands are written against this module only. The prefix adapter in
 // router.ts turns a chat message into a CommandContext; slash commands will get
@@ -55,19 +58,27 @@ export type Options<O extends readonly OptionSpec[]> = {
 };
 
 /**
- * An error whose message is meant for the user. Throw it from anywhere a
+ * An error whose message is meant for the user. Fail with it from anywhere a
  * command calls into; the router answers with `ctx.error(message)`.
  */
-export class UserError extends Error {
-  override name = "UserError";
+export class UserError extends Data.TaggedError("UserError")<{ readonly message: string }> {}
+
+/** Fails with a UserError, for `return yield* refuse(...)`. */
+export function refuse(message: string): Effect.Effect<never, UserError> {
+  return Effect.fail(new UserError({ message }));
 }
 
+/** Services every command may use. */
+export type CommandServices = AppConfig | GuildAccess | Fluxer | CommandRouter;
+
+/** What a command may fail with. Anything else that goes wrong is a defect. */
+export type CommandError = UserError | FluxerError;
+
 export interface SentReply {
-  edit(body: MessageBody): Promise<void>;
+  edit(body: MessageBody): Effect.Effect<void, FluxerError>;
 }
 
 export interface CommandContext<O = {}> {
-  bot: Bot;
   userId: string;
   guildId: string;
   channelId: string;
@@ -76,23 +87,23 @@ export interface CommandContext<O = {}> {
    * Answers the invoking user. Mentions in the reply show but don't notify
    * anyone; only the invoking user is pinged, by the reply itself.
    */
-  reply(body: MessageBody): Promise<SentReply>;
+  reply(body: MessageBody): Effect.Effect<SentReply, FluxerError>;
   /**
    * Answers with pages the invoking user can flip through. A single page is
    * sent as a plain reply.
    */
-  replyPages(pages: readonly MessageBody[]): Promise<void>;
+  replyPages(pages: readonly MessageBody[]): Effect.Effect<void, FluxerError>;
   /**
    * Answers the invoking user with an error, formatted the same way everywhere.
-   * Use `return ctx.error(...)` to stop a command; deeper code can throw
-   * `UserError` instead.
+   * Use `return yield* ctx.error(...)` to stop a command; deeper code can fail
+   * with `UserError` instead.
    */
-  error(message: string): Promise<void>;
+  error(message: string): Effect.Effect<void, FluxerError>;
   /**
    * Deletes the message that ran the command, for commands whose result
    * stands on its own. Does nothing when the bot isn't allowed to.
    */
-  deleteInvocation(): Promise<void>;
+  deleteInvocation(): Effect.Effect<void>;
 }
 
 /** How every adapter renders `ctx.error`. */
@@ -106,7 +117,7 @@ export interface Command<O extends readonly OptionSpec[] = readonly OptionSpec[]
   options?: O;
   /** Members without it are refused, and `!help` leaves the command out for them. */
   permission?: Permission;
-  run(ctx: CommandContext<Options<O>>): Promise<void>;
+  run(ctx: CommandContext<Options<O>>): Effect.Effect<void, CommandError, CommandServices>;
 }
 
 export interface CommandGroup {

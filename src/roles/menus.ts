@@ -1,6 +1,7 @@
 import { and, eq, notInArray } from "drizzle-orm";
+import { Context, Effect, Semaphore } from "effect";
 import type { RoleMenuConfig, RoleMenusConfig } from "../config.ts";
-import type { DB } from "../db/index.ts";
+import { Database } from "../db/index.ts";
 import { roleMenuReactions, roleMenus } from "../db/schema.ts";
 import {
   apiName,
@@ -9,6 +10,7 @@ import {
   type ReactionEmoji,
   reactionKey,
 } from "../emoji.ts";
+import { type FluxerError, logFailure } from "../fluxer.ts";
 import { ACCENT, type MessageBody } from "../messages/body.ts";
 import type { ReactionListener } from "../reactions.ts";
 
@@ -20,27 +22,42 @@ export interface MenuReaction {
 }
 
 /** What role menus need from the guild. */
-export interface RoleGuild {
-  /** Why members can't be given each role. Roles that are fine are left out. */
-  vetRoles(roleIds: readonly string[]): Promise<Map<string, string>>;
-  /** The member's role IDs, or null when they aren't in the guild. */
-  memberRoles(userId: string): Promise<readonly string[] | null>;
-  addRole(userId: string, roleId: string, reason: string): Promise<void>;
-  removeRole(userId: string, roleId: string, reason: string): Promise<void>;
-  /** Posts a message and returns its ID. */
-  post(channelId: string, body: MessageBody): Promise<string>;
-  edit(channelId: string, messageId: string, body: MessageBody): Promise<void>;
-  /** Also succeeds when the message is already gone. */
-  delete(channelId: string, messageId: string): Promise<void>;
-  /** The message's reactions, or null when the message is gone. */
-  reactions(channelId: string, messageId: string): Promise<MenuReaction[] | null>;
-  react(channelId: string, messageId: string, emoji: string): Promise<void>;
-  removeReaction(channelId: string, messageId: string, emoji: string, userId: string): Promise<void>;
-  /** Removes every reaction with `emoji`. */
-  clearReaction(channelId: string, messageId: string, emoji: string): Promise<void>;
-  /** Every non-bot user who reacted with `emoji`. */
-  reactionUsers(channelId: string, messageId: string, emoji: string): Promise<string[]>;
-}
+export class RoleGuild extends Context.Service<
+  RoleGuild,
+  {
+    /** Why members can't be given each role. Roles that are fine are left out. */
+    readonly vetRoles: (roleIds: readonly string[]) => Effect.Effect<Map<string, string>, FluxerError>;
+    /** The member's role IDs, or null when they aren't in the guild. */
+    readonly memberRoles: (userId: string) => Effect.Effect<readonly string[] | null, FluxerError>;
+    readonly addRole: (userId: string, roleId: string, reason: string) => Effect.Effect<void, FluxerError>;
+    readonly removeRole: (userId: string, roleId: string, reason: string) => Effect.Effect<void, FluxerError>;
+    /** Posts a message and returns its ID. */
+    readonly post: (channelId: string, body: MessageBody) => Effect.Effect<string, FluxerError>;
+    readonly edit: (channelId: string, messageId: string, body: MessageBody) => Effect.Effect<void, FluxerError>;
+    /** Also succeeds when the message is already gone. */
+    readonly delete: (channelId: string, messageId: string) => Effect.Effect<void, FluxerError>;
+    /** The message's reactions, or null when the message is gone. */
+    readonly reactions: (
+      channelId: string,
+      messageId: string,
+    ) => Effect.Effect<MenuReaction[] | null, FluxerError>;
+    readonly react: (channelId: string, messageId: string, emoji: string) => Effect.Effect<void, FluxerError>;
+    readonly removeReaction: (
+      channelId: string,
+      messageId: string,
+      emoji: string,
+      userId: string,
+    ) => Effect.Effect<void, FluxerError>;
+    /** Removes every reaction with `emoji`. */
+    readonly clearReaction: (channelId: string, messageId: string, emoji: string) => Effect.Effect<void, FluxerError>;
+    /** Every non-bot user who reacted with `emoji`. */
+    readonly reactionUsers: (
+      channelId: string,
+      messageId: string,
+      emoji: string,
+    ) => Effect.Effect<string[], FluxerError>;
+  }
+>()("orianna/RoleGuild") {}
 
 interface MenuOption {
   roleId: string;
@@ -72,220 +89,132 @@ const FOOTER = {
   single: "React to pick one. Picking another replaces it.",
 } as const;
 
+export type RoleMenus = Effect.Success<ReturnType<typeof makeRoleMenus>>;
+
 /**
  * Messages where members react to give themselves roles. All work runs one
  * task at a time, so quick clicks and the startup catch-up can't race.
  */
-export class RoleMenus implements ReactionListener {
+export const makeRoleMenus = Effect.fnUntraced(function* (config: RoleMenusConfig | undefined) {
+  const db = yield* Database;
+  const guild = yield* RoleGuild;
   /** By message ID. */
-  private readonly live = new Map<string, LiveMenu>();
-  private queue: Promise<void> = Promise.resolve();
+  const live = new Map<string, LiveMenu>();
+  const lock = yield* Semaphore.make(1);
 
-  constructor(
-    private readonly db: DB,
-    private readonly guild: RoleGuild,
-    private readonly config: RoleMenusConfig | undefined,
-  ) {}
-
-  /**
-   * Makes the menu messages match the config, then catches up on reactions
-   * added or removed while the bot was offline.
-   */
-  sync(): Promise<void> {
-    return this.enqueue("sync", () => this.syncAll());
+  function enqueue<E>(label: string, task: Effect.Effect<void, E>): Effect.Effect<void> {
+    return lock.withPermits(1)(task).pipe(Effect.catchCause(logFailure(`role menus: ${label}`)));
   }
 
-  reactionAdded(messageId: string, userId: string, emoji: ReactionEmoji) {
-    return this.enqueue("reaction", async () => {
-      const menu = this.live.get(messageId);
-      if (!menu) return;
-      const option = findOption(menu, emoji);
-      if (option) {
-        await this.grant(menu, option, userId);
-        return;
-      }
-
-      const key = reactionKey(emoji);
-      const name = apiName(emoji);
-      if (!key || !name || menu.paused.has(key)) return;
-      // Keeps the row of reactions down to the menu's own emoji.
-      await this.guild
-        .removeReaction(menu.channelId, messageId, name, userId)
-        .catch(warn(menu, `could not remove ${name}`));
-    });
-  }
-
-  reactionRemoved(messageId: string, userId: string, emoji: ReactionEmoji) {
-    return this.enqueue("reaction", async () => {
-      const menu = this.live.get(messageId);
-      const option = menu && findOption(menu, emoji);
-      if (menu && option) await this.revoke(menu, userId, option.roleId);
-    });
-  }
-
-  /**
-   * A moderator removed all reactions, or all of one emoji. Members keep their
-   * roles, and the bot puts its own reactions back.
-   */
-  reactionsCleared(messageId: string, emoji?: ReactionEmoji) {
-    return this.enqueue("reaction clear", async () => {
-      const menu = this.live.get(messageId);
-      if (!menu) return;
-      const option = emoji && findOption(menu, emoji);
-      const cleared = emoji ? (option ? [option] : []) : menu.options;
-      for (const option of cleared) {
-        this.db
-          .delete(roleMenuReactions)
-          .where(
-            and(eq(roleMenuReactions.menu, menu.name), eq(roleMenuReactions.roleId, option.roleId)),
-          )
-          .run();
-        await this.guild
-          .react(menu.channelId, messageId, option.emoji.api)
-          .catch(warn(menu, `could not react with ${option.emoji.api}`));
-      }
-    });
-  }
-
-  /** Someone deleted a menu message. Members keep their roles. */
-  messageDeleted(messageId: string) {
-    return this.enqueue("message delete", async () => {
-      const row = this.db.select().from(roleMenus).where(eq(roleMenus.messageId, messageId)).get();
-      if (!row) return;
-      this.live.delete(messageId);
-      this.forget(row.name);
-      console.info(`role menu ${row.name}: message was deleted; it's posted again on the next start`);
-    });
-  }
-
-  /** Removes the member's reactions, so they find the menus clean if they come back. */
-  memberLeft(userId: string) {
-    return this.enqueue("member leave", async () => {
-      const rows = this.db
-        .delete(roleMenuReactions)
-        .where(eq(roleMenuReactions.userId, userId))
-        .returning()
-        .all();
-      for (const row of rows) {
-        const menu = [...this.live.values()].find((m) => m.name === row.menu);
-        const option = menu?.options.find((o) => o.roleId === row.roleId);
-        if (!menu || !option) continue;
-        await this.guild
-          .removeReaction(menu.channelId, menu.messageId, option.emoji.api, userId)
-          .catch(warn(menu, `could not remove a reaction of ${userId}`));
-      }
-    });
-  }
-
-  private async syncAll() {
-    const menus = this.config?.menus ?? [];
+  const syncAll = Effect.gen(function* () {
+    const menus = config?.menus ?? [];
     const names = new Set(menus.map((m) => m.name));
-    this.live.clear();
+    live.clear();
 
-    for (const row of this.db.select().from(roleMenus).all()) {
+    for (const row of db.select().from(roleMenus).all()) {
       if (names.has(row.name)) continue;
-      try {
-        await this.guild.delete(row.channelId, row.messageId);
-      } catch (err) {
-        console.warn(`role menu ${row.name}: could not delete its message, will retry:`, err);
-        continue;
-      }
-      this.forget(row.name);
-      console.info(`role menu ${row.name}: no longer in the config, deleted its message`);
+      const deleted = yield* guild.delete(row.channelId, row.messageId).pipe(
+        Effect.as(true),
+        Effect.catch((err) =>
+          Effect.logWarning(`role menu ${row.name}: could not delete its message, will retry: ${err.message}`).pipe(
+            Effect.as(false),
+          ),
+        ),
+      );
+      if (!deleted) continue;
+      forget(row.name);
+      yield* Effect.logInfo(`role menu ${row.name}: no longer in the config, deleted its message`);
     }
     if (menus.length === 0) return;
 
-    const problems = await this.guild.vetRoles(menus.flatMap((m) => m.options.map((o) => o.roleId)));
+    const problems = yield* guild.vetRoles(menus.flatMap((m) => m.options.map((o) => o.roleId)));
     for (const menu of menus) {
-      try {
-        await this.syncMenu(menu, problems);
-      } catch (err) {
-        console.error(`role menu ${menu.name}: sync failed:`, err);
-      }
+      yield* syncMenu(menu, problems).pipe(Effect.catchCause(logFailure(`role menu ${menu.name}: sync`)));
     }
-  }
+  });
 
-  private async syncMenu(config: RoleMenuConfig, problems: Map<string, string>) {
+  const syncMenu = Effect.fnUntraced(function* (menuConfig: RoleMenuConfig, problems: Map<string, string>) {
     const options: MenuOption[] = [];
     const paused = new Set<string>();
-    for (const option of config.options) {
+    for (const option of menuConfig.options) {
       // The config check already rejected anything that doesn't parse.
       const emoji = parseEmoji(option.emoji)!;
       const problem = problems.get(option.roleId);
       if (problem) {
-        console.warn(`role menu ${config.name}: leaving out role ${option.roleId}: ${problem}`);
+        yield* Effect.logWarning(`role menu ${menuConfig.name}: leaving out role ${option.roleId}: ${problem}`);
         paused.add(emoji.key);
         continue;
       }
       options.push({ roleId: option.roleId, emoji, description: option.description });
     }
     if (options.length === 0) {
-      console.warn(`role menu ${config.name}: none of its roles can be given out; leaving it as is`);
+      yield* Effect.logWarning(
+        `role menu ${menuConfig.name}: none of its roles can be given out; leaving it as is`,
+      );
       return;
     }
 
     const menu: Menu = {
-      name: config.name,
-      title: config.title,
-      description: config.description,
-      mode: config.mode,
-      channelId: config.channelId ?? this.config!.channelId,
+      name: menuConfig.name,
+      title: menuConfig.title,
+      description: menuConfig.description,
+      mode: menuConfig.mode,
+      channelId: menuConfig.channelId ?? config!.channelId,
       options,
     };
     const body = renderMenu(menu);
     const rendered = JSON.stringify(body);
 
-    let row = this.db.select().from(roleMenus).where(eq(roleMenus.name, menu.name)).get();
+    let row = db.select().from(roleMenus).where(eq(roleMenus.name, menu.name)).get();
     let reactions: MenuReaction[] | null = [];
     if (row && row.channelId !== menu.channelId) {
-      await this.guild.delete(row.channelId, row.messageId);
-      this.forget(row.name);
+      yield* guild.delete(row.channelId, row.messageId);
+      forget(row.name);
       row = undefined;
     }
     if (row) {
-      reactions = await this.guild.reactions(row.channelId, row.messageId);
+      reactions = yield* guild.reactions(row.channelId, row.messageId);
       if (!reactions) {
-        console.info(`role menu ${menu.name}: message is gone, posting it again`);
-        this.forget(row.name);
+        yield* Effect.logInfo(`role menu ${menu.name}: message is gone, posting it again`);
+        forget(row.name);
         row = undefined;
       }
     }
     if (!row) {
-      const messageId = await this.guild.post(menu.channelId, body);
-      row = this.db
+      const messageId = yield* guild.post(menu.channelId, body);
+      row = db
         .insert(roleMenus)
         .values({ name: menu.name, channelId: menu.channelId, messageId, rendered })
         .returning()
         .get();
       reactions = [];
     } else if (row.rendered !== rendered) {
-      await this.guild.edit(row.channelId, row.messageId, body);
-      this.db.update(roleMenus).set({ rendered }).where(eq(roleMenus.name, menu.name)).run();
+      yield* guild.edit(row.channelId, row.messageId, body);
+      db.update(roleMenus).set({ rendered }).where(eq(roleMenus.name, menu.name)).run();
     }
 
-    const live: LiveMenu = { ...menu, messageId: row.messageId, paused };
-    this.live.set(live.messageId, live);
+    const liveMenu: LiveMenu = { ...menu, messageId: row.messageId, paused };
+    live.set(liveMenu.messageId, liveMenu);
 
     // Roles taken out of the menu stay with whoever has them; only the records go.
-    this.db
-      .delete(roleMenuReactions)
+    db.delete(roleMenuReactions)
       .where(
         and(
           eq(roleMenuReactions.menu, menu.name),
           notInArray(
             roleMenuReactions.roleId,
-            config.options.map((o) => o.roleId),
+            menuConfig.options.map((o) => o.roleId),
           ),
         ),
       )
       .run();
 
-    await this.syncReactions(live, reactions ?? []);
-    await this.catchUp(live);
-  }
+    yield* syncReactions(liveMenu, reactions ?? []);
+    yield* catchUp(liveMenu);
+  });
 
   /** Adds the bot's reaction for each option and clears emoji that aren't options. */
-  private async syncReactions(menu: LiveMenu, reactions: MenuReaction[]) {
+  const syncReactions = Effect.fnUntraced(function* (menu: LiveMenu, reactions: MenuReaction[]) {
     const { channelId, messageId } = menu;
     const mine = new Set<string>();
     for (const reaction of reactions) {
@@ -297,38 +226,38 @@ export class RoleMenus implements ReactionListener {
       }
       const name = apiName(reaction.emoji);
       if (name) {
-        await this.guild
+        yield* guild
           .clearReaction(channelId, messageId, name)
-          .catch(warn(menu, `could not clear ${name}`));
+          .pipe(Effect.catch(warn(menu, `could not clear ${name}`)));
       }
     }
     for (const option of menu.options) {
       if (mine.has(option.emoji.key)) continue;
-      await this.guild
+      yield* guild
         .react(channelId, messageId, option.emoji.api)
-        .catch(warn(menu, `could not react with ${option.emoji.api}`));
+        .pipe(Effect.catch(warn(menu, `could not react with ${option.emoji.api}`)));
     }
-  }
+  });
 
   /** Applies reactions added or removed while the bot was offline. */
-  private async catchUp(menu: LiveMenu) {
+  const catchUp = Effect.fnUntraced(function* (menu: LiveMenu) {
     const { channelId, messageId } = menu;
     const reacted = new Map<string, MenuOption[]>();
     for (const option of menu.options) {
-      for (const userId of await this.guild.reactionUsers(channelId, messageId, option.emoji.api)) {
+      for (const userId of yield* guild.reactionUsers(channelId, messageId, option.emoji.api)) {
         reacted.set(userId, [...(reacted.get(userId) ?? []), option]);
       }
     }
 
-    const records = this.records(menu.name);
+    const all = records(menu.name);
     const recorded = (userId: string, roleId: string) =>
-      records.some((r) => r.userId === userId && r.roleId === roleId);
+      all.some((r) => r.userId === userId && r.roleId === roleId);
 
-    for (const record of records) {
+    for (const record of all) {
       // Paused options weren't read, so their reactions look removed.
       if (!menu.options.some((o) => o.roleId === record.roleId)) continue;
       if (reacted.get(record.userId)?.some((o) => o.roleId === record.roleId)) continue;
-      await this.revoke(menu, record.userId, record.roleId);
+      yield* revoke(menu, record.userId, record.roleId);
     }
 
     for (const [userId, picked] of reacted) {
@@ -338,92 +267,90 @@ export class RoleMenus implements ReactionListener {
         const keep = picked.find((o) => recorded(userId, o.roleId)) ?? picked[0]!;
         for (const option of picked) {
           if (option === keep) continue;
-          await this.revoke(menu, userId, option.roleId);
-          await this.guild
+          yield* revoke(menu, userId, option.roleId);
+          yield* guild
             .removeReaction(channelId, messageId, option.emoji.api, userId)
-            .catch(warn(menu, `could not remove a reaction of ${userId}`));
+            .pipe(Effect.catch(warn(menu, `could not remove a reaction of ${userId}`)));
         }
         missing = missing.includes(keep) ? [keep] : [];
       }
-      for (const option of missing) await this.grant(menu, option, userId);
+      for (const option of missing) yield* grant(menu, option, userId);
     }
-  }
+  });
 
   /**
    * Gives the role for a reaction, or takes the reaction back when that fails
    * so the menu never shows a role the member doesn't have. In single-choice
    * menus this also takes away the member's other roles from the menu.
    */
-  private async grant(menu: LiveMenu, option: MenuOption, userId: string) {
+  const grant = Effect.fnUntraced(function* (menu: LiveMenu, option: MenuOption, userId: string) {
     const { channelId, messageId } = menu;
-    const dropReaction = () =>
-      this.guild
-        .removeReaction(channelId, messageId, option.emoji.api, userId)
-        .catch(warn(menu, `could not remove a reaction of ${userId}`));
+    const dropReaction = guild
+      .removeReaction(channelId, messageId, option.emoji.api, userId)
+      .pipe(Effect.catch(warn(menu, `could not remove a reaction of ${userId}`)));
 
-    const roles = await this.guild.memberRoles(userId);
-    if (!roles) {
-      await dropReaction();
-      return;
-    }
-    try {
-      // Always sent: the cached roles can lag behind a removal a moment ago.
-      await this.guild.addRole(userId, option.roleId, reason(menu));
-    } catch (err) {
-      console.warn(`role menu ${menu.name}: could not give role ${option.roleId} to ${userId}:`, err);
-      await dropReaction();
-      return;
-    }
-    this.db
-      .insert(roleMenuReactions)
+    const roles = yield* guild.memberRoles(userId);
+    if (!roles) return yield* dropReaction;
+    // Always sent: the cached roles can lag behind a removal a moment ago.
+    const given = yield* guild.addRole(userId, option.roleId, reason(menu)).pipe(
+      Effect.as(true),
+      Effect.catch((err) =>
+        warn(menu, `could not give role ${option.roleId} to ${userId}`)(err).pipe(Effect.as(false)),
+      ),
+    );
+    if (!given) return yield* dropReaction;
+
+    db.insert(roleMenuReactions)
       .values({ menu: menu.name, roleId: option.roleId, userId })
       .onConflictDoNothing()
       .run();
     if (menu.mode !== "single") return;
 
-    const records = new Set(this.records(menu.name, userId).map((r) => r.roleId));
+    const held = new Set(records(menu.name, userId).map((r) => r.roleId));
     for (const other of menu.options) {
       if (other === option) continue;
-      if (records.has(other.roleId)) {
-        await this.revoke(menu, userId, other.roleId);
-        await this.guild
+      if (held.has(other.roleId)) {
+        yield* revoke(menu, userId, other.roleId);
+        yield* guild
           .removeReaction(channelId, messageId, other.emoji.api, userId)
-          .catch(warn(menu, `could not remove a reaction of ${userId}`));
+          .pipe(Effect.catch(warn(menu, `could not remove a reaction of ${userId}`)));
       } else if (roles.includes(other.roleId)) {
-        await this.guild
+        yield* guild
           .removeRole(userId, other.roleId, reason(menu))
-          .catch(warn(menu, `could not take role ${other.roleId} from ${userId}`));
+          .pipe(Effect.catch(warn(menu, `could not take role ${other.roleId} from ${userId}`)));
       }
     }
-  }
+  });
 
   /**
    * Takes back a role the bot gave for a reaction. Without a record there's
    * nothing to take back, which is also why the bot removing a reaction itself
    * doesn't loop back here.
    */
-  private async revoke(menu: Menu, userId: string, roleId: string) {
-    const removed = this.db
-      .delete(roleMenuReactions)
-      .where(
-        and(
-          eq(roleMenuReactions.menu, menu.name),
-          eq(roleMenuReactions.roleId, roleId),
-          eq(roleMenuReactions.userId, userId),
-        ),
-      )
-      .returning()
-      .all();
-    if (removed.length === 0) return;
-    await this.guild
-      .removeRole(userId, roleId, reason(menu))
-      .catch(warn(menu, `could not take role ${roleId} from ${userId}`));
+  function revoke(menu: Menu, userId: string, roleId: string): Effect.Effect<void> {
+    return Effect.suspend(() => {
+      const removed = db
+        .delete(roleMenuReactions)
+        .where(
+          and(
+            eq(roleMenuReactions.menu, menu.name),
+            eq(roleMenuReactions.roleId, roleId),
+            eq(roleMenuReactions.userId, userId),
+          ),
+        )
+        .returning()
+        .all();
+      if (removed.length === 0) return Effect.void;
+      return guild
+        .removeRole(userId, roleId, reason(menu))
+        .pipe(Effect.catch(warn(menu, `could not take role ${roleId} from ${userId}`)));
+    });
   }
 
-  private records(menu: string, userId?: string) {
+  function records(menu: string, userId?: string) {
     const conditions = [eq(roleMenuReactions.menu, menu)];
     if (userId) conditions.push(eq(roleMenuReactions.userId, userId));
-    return this.db
+    return db
       .select()
       .from(roleMenuReactions)
       .where(and(...conditions))
@@ -431,18 +358,101 @@ export class RoleMenus implements ReactionListener {
   }
 
   /** Drops a menu's row and, with it, its records. */
-  private forget(name: string) {
-    this.db.delete(roleMenus).where(eq(roleMenus.name, name)).run();
+  function forget(name: string) {
+    db.delete(roleMenus).where(eq(roleMenus.name, name)).run();
   }
 
-  private enqueue(label: string, task: () => Promise<void>): Promise<void> {
-    const next = this.queue
-      .then(task)
-      .catch((err) => console.error(`role menus: ${label} failed:`, err));
-    this.queue = next;
-    return next;
-  }
-}
+  const menus = {
+    /**
+     * Makes the menu messages match the config, then catches up on reactions
+     * added or removed while the bot was offline.
+     */
+    sync: enqueue("sync", syncAll),
+
+    reactionAdded: (messageId: string, userId: string, emoji: ReactionEmoji) =>
+      enqueue(
+        "reaction",
+        Effect.gen(function* () {
+          const menu = live.get(messageId);
+          if (!menu) return;
+          const option = findOption(menu, emoji);
+          if (option) return yield* grant(menu, option, userId);
+
+          const key = reactionKey(emoji);
+          const name = apiName(emoji);
+          if (!key || !name || menu.paused.has(key)) return;
+          // Keeps the row of reactions down to the menu's own emoji.
+          yield* guild
+            .removeReaction(menu.channelId, messageId, name, userId)
+            .pipe(Effect.catch(warn(menu, `could not remove ${name}`)));
+        }),
+      ),
+
+    reactionRemoved: (messageId: string, userId: string, emoji: ReactionEmoji) =>
+      enqueue(
+        "reaction",
+        Effect.suspend(() => {
+          const menu = live.get(messageId);
+          const option = menu && findOption(menu, emoji);
+          return menu && option ? revoke(menu, userId, option.roleId) : Effect.void;
+        }),
+      ),
+
+    /**
+     * A moderator removed all reactions, or all of one emoji. Members keep their
+     * roles, and the bot puts its own reactions back.
+     */
+    reactionsCleared: (messageId: string, emoji?: ReactionEmoji) =>
+      enqueue(
+        "reaction clear",
+        Effect.gen(function* () {
+          const menu = live.get(messageId);
+          if (!menu) return;
+          const option = emoji && findOption(menu, emoji);
+          const cleared = emoji ? (option ? [option] : []) : menu.options;
+          for (const option of cleared) {
+            db.delete(roleMenuReactions)
+              .where(and(eq(roleMenuReactions.menu, menu.name), eq(roleMenuReactions.roleId, option.roleId)))
+              .run();
+            yield* guild
+              .react(menu.channelId, messageId, option.emoji.api)
+              .pipe(Effect.catch(warn(menu, `could not react with ${option.emoji.api}`)));
+          }
+        }),
+      ),
+
+    /** Someone deleted a menu message. Members keep their roles. */
+    messageDeleted: (messageId: string) =>
+      enqueue(
+        "message delete",
+        Effect.gen(function* () {
+          const row = db.select().from(roleMenus).where(eq(roleMenus.messageId, messageId)).get();
+          if (!row) return;
+          live.delete(messageId);
+          forget(row.name);
+          yield* Effect.logInfo(`role menu ${row.name}: message was deleted; it's posted again on the next start`);
+        }),
+      ),
+
+    /** Removes the member's reactions, so they find the menus clean if they come back. */
+    memberLeft: (userId: string) =>
+      enqueue(
+        "member leave",
+        Effect.gen(function* () {
+          const rows = db.delete(roleMenuReactions).where(eq(roleMenuReactions.userId, userId)).returning().all();
+          for (const row of rows) {
+            const menu = [...live.values()].find((m) => m.name === row.menu);
+            const option = menu?.options.find((o) => o.roleId === row.roleId);
+            if (!menu || !option) continue;
+            yield* guild
+              .removeReaction(menu.channelId, menu.messageId, option.emoji.api, userId)
+              .pipe(Effect.catch(warn(menu, `could not remove a reaction of ${userId}`)));
+          }
+        }),
+      ),
+  };
+  return menus satisfies ReactionListener;
+});
 
 export function renderMenu(menu: Menu): MessageBody {
   const lines = menu.options.map(
@@ -471,5 +481,5 @@ function reason(menu: Menu): string {
 }
 
 function warn(menu: { name: string }, what: string) {
-  return (err: unknown) => console.warn(`role menu ${menu.name}: ${what}:`, err);
+  return (err: FluxerError) => Effect.logWarning(`role menu ${menu.name}: ${what}: ${err.reason}`);
 }

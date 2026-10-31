@@ -1,8 +1,11 @@
+import { Context, type Effect } from "effect";
+import type { UserError } from "../commands/command.ts";
 import type { PermissionsConfig } from "../config.ts";
+import type { FluxerError } from "../fluxer.ts";
 
 // Who may do what. The config holds rules like `+emoji.add` or `-polls.*` for
 // everyone and per role; MemberPermissions works out which rule decides a
-// permission for a member. Nothing here knows about Fluxer.
+// permission for a member. permissions/fluxer.ts looks up the member.
 
 /** Everything a rule can allow or deny. src/config.ts says what each one does. */
 export const PERMISSIONS = [
@@ -136,7 +139,16 @@ function specificity(target: string, permission: Permission): number {
 }
 
 /** Answers what members of the bot's guild may do. */
-export interface GuildAccess {
-  permissionsOf(userId: string): Promise<MemberPermissions>;
-  can(userId: string, permission: Permission): Promise<boolean>;
-}
+export class GuildAccess extends Context.Service<
+  GuildAccess,
+  {
+    /** Fails with a UserError when the user isn't a member. */
+    readonly permissionsOf: (userId: string) => Effect.Effect<MemberPermissions, UserError | FluxerError>;
+    readonly can: (
+      userId: string,
+      permission: Permission,
+    ) => Effect.Effect<boolean, UserError | FluxerError>;
+    /** Role IDs with rules in the config that the guild doesn't have. */
+    readonly unknownRoles: Effect.Effect<string[], FluxerError>;
+  }
+>()("orianna/GuildAccess") {}

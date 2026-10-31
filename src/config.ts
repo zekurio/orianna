@@ -1,93 +1,94 @@
-import Type from "typebox";
-import Value from "typebox/value";
+import {
+  Config as Env,
+  Context,
+  Data,
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  Redacted,
+  Ref,
+  Schema,
+  SchemaIssue,
+} from "effect";
 import { parseEmoji } from "./emoji.ts";
 import { ruleProblem } from "./permissions/rules.ts";
 
-const Snowflake = Type.String({ pattern: "^[0-9]+$" });
+const Snowflake = Schema.String.check(Schema.isPattern(/^[0-9]+$/));
+
+/** Fills in `value` when the key is missing. */
+const orDefault = <S extends Schema.Top>(value: S["Encoded"]) =>
+  Schema.withDecodingDefaultKey<S>(Effect.succeed(value));
 
 /** Shared by the `emoji` and `sticker` sections. */
-const ProposalConfigSchema = Type.Object(
-  {
-    votingHours: Type.Number({ exclusiveMinimum: 0, default: 48 }),
-    maxOpenPerUser: Type.Integer({ minimum: 1, default: 3 }),
-    /**
-     * Should match the instance's `emoji_max_size` / `sticker_max_size`
-     * (512 KiB for both by default). Larger images are scaled down to fit.
-     */
-    maxImageBytes: Type.Integer({ minimum: 1, default: 524288 }),
-    /**
-     * Share of the members who can see the polls channel when a proposal goes
-     * up that have to vote ✅, rounded up: 0.5 is half of them, 1 all of them.
-     * A proposal also needs more ✅ than ❌.
-     */
-    threshold: Type.Number({ exclusiveMinimum: 0, maximum: 1, default: 1 }),
-  },
-  { additionalProperties: false },
-);
+const ProposalConfigSchema = Schema.Struct({
+  votingHours: Schema.Number.check(Schema.isGreaterThan(0)).pipe(orDefault(48)),
+  maxOpenPerUser: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(orDefault(3)),
+  /**
+   * Should match the instance's `emoji_max_size` / `sticker_max_size`
+   * (512 KiB for both by default). Larger images are scaled down to fit.
+   */
+  maxImageBytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(orDefault(524288)),
+  /**
+   * Share of the members who can see the polls channel when a proposal goes
+   * up that have to vote ✅, rounded up: 0.5 is half of them, 1 all of them.
+   * A proposal also needs more ✅ than ❌.
+   */
+  threshold: Schema.Number.check(Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(1)).pipe(
+    orDefault(1),
+  ),
+});
 
-const PollsConfigSchema = Type.Object(
-  {
-    /** How long a poll runs when it's given no duration. Polls run 4 weeks at most. */
-    defaultHours: Type.Number({ exclusiveMinimum: 0, maximum: 672, default: 24 }),
-    maxOpenPerUser: Type.Integer({ minimum: 1, default: 5 }),
-  },
-  { additionalProperties: false },
-);
+const PollsConfigSchema = Schema.Struct({
+  /** How long a poll runs when it's given no duration. Polls run 4 weeks at most. */
+  defaultHours: Schema.Number.check(Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(672)).pipe(
+    orDefault(24),
+  ),
+  maxOpenPerUser: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(orDefault(5)),
+});
 
 /** Rules are lists like `["+emoji.*", "-emoji.decide"]`; see `permissions` below. */
-const PermissionsSchema = Type.Object(
-  {
-    /**
-     * Rules for every member. Setting it replaces the default, which lets
-     * everyone propose emojis and stickers and start polls.
-     */
-    everyone: Type.Array(Type.String(), {
-      default: ["+emoji.propose", "+sticker.propose", "+polls.create"],
-    }),
-    /** Rules for members with a role, keyed by role ID. */
-    roles: Type.Record(Type.String(), Type.Array(Type.String()), { default: {} }),
-  },
-  { additionalProperties: false, default: {} },
-);
+const PermissionsSchema = Schema.Struct({
+  /**
+   * Rules for every member. Setting it replaces the default, which lets
+   * everyone propose emojis and stickers and start polls.
+   */
+  everyone: Schema.Array(Schema.String).pipe(
+    orDefault(["+emoji.propose", "+sticker.propose", "+polls.create"]),
+  ),
+  /** Rules for members with a role, keyed by role ID. */
+  roles: Schema.Record(Schema.String, Schema.Array(Schema.String)).pipe(orDefault({})),
+});
 
-const RoleMenuOptionSchema = Type.Object(
-  {
-    /** A Unicode emoji, `name:id` or `<:name:id>` (`<a:name:id>` for an animated one). */
-    emoji: Type.String({ minLength: 1 }),
-    roleId: Snowflake,
-    /** Shown after the role, e.g. "server news and downtime". */
-    description: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
-  },
-  { additionalProperties: false },
-);
+const RoleMenuOptionSchema = Schema.Struct({
+  /** A Unicode emoji, `name:id` or `<:name:id>` (`<a:name:id>` for an animated one). */
+  emoji: Schema.String.check(Schema.isMinLength(1)),
+  roleId: Snowflake,
+  /** Shown after the role, e.g. "server news and downtime". */
+  description: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100))),
+});
 
-const RoleMenuSchema = Type.Object(
-  {
-    /**
-     * Identifies the menu across restarts and in the audit log. Renaming it
-     * deletes the old message and posts a new one.
-     */
-    name: Type.String({ pattern: "^[a-z0-9][a-z0-9-]{0,31}$" }),
-    title: Type.String({ minLength: 1, maxLength: 256 }),
-    description: Type.Optional(Type.String({ minLength: 1, maxLength: 1000 })),
-    /** `multi` lets members take any number of roles; in `single`, picking one replaces the last. */
-    mode: Type.Enum(["multi", "single"], { default: "multi" }),
-    /** Overrides `roleMenus.channelId` for this menu. */
-    channelId: Type.Optional(Snowflake),
-    /** A message can carry 30 different reactions. */
-    options: Type.Array(RoleMenuOptionSchema, { minItems: 1, maxItems: 30 }),
-  },
-  { additionalProperties: false },
-);
+const RoleMenuSchema = Schema.Struct({
+  /**
+   * Identifies the menu across restarts and in the audit log. Renaming it
+   * deletes the old message and posts a new one.
+   */
+  name: Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]{0,31}$/)),
+  title: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
+  description: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1000))),
+  /** `multi` lets members take any number of roles; in `single`, picking one replaces the last. */
+  mode: Schema.Literals(["multi", "single"]).pipe(orDefault("multi")),
+  /** Overrides `roleMenus.channelId` for this menu. */
+  channelId: Schema.optionalKey(Snowflake),
+  /** A message can carry 30 different reactions. */
+  options: Schema.Array(RoleMenuOptionSchema).check(Schema.isMinLength(1), Schema.isMaxLength(30)),
+});
 
-const RoleMenusSchema = Type.Object(
-  {
-    /** Where menus are posted unless they set their own `channelId`. */
-    channelId: Snowflake,
-    menus: Type.Array(RoleMenuSchema, { default: [] }),
-  },
-  { additionalProperties: false },
-);
+const RoleMenusSchema = Schema.Struct({
+  /** Where menus are posted unless they set their own `channelId`. */
+  channelId: Snowflake,
+  menus: Schema.Array(RoleMenuSchema).pipe(orDefault([])),
+});
 
 /**
  * On SIGHUP (`systemctl reload orianna`) the bot reads the file again and
@@ -95,114 +96,119 @@ const RoleMenusSchema = Type.Object(
  * and changing it takes a restart. A file that doesn't load is ignored, and the
  * bot keeps the config it has.
  */
-export const ConfigSchema = Type.Object(
-  {
-    /** Origin of the Fluxer instance. The client reads `/.well-known/fluxer` from here. */
-    instance: Type.String({ minLength: 1 }),
-    /** The guild this bot serves. Messages from anywhere else are ignored. */
-    guildId: Snowflake,
-    /** Channel where emoji and sticker proposals are put to a vote. Required when either is on. */
-    pollsChannelId: Type.Optional(Snowflake),
-    /** What commands start with, e.g. `!` for `!help`. */
-    prefix: Type.String({ minLength: 1, default: "!" }),
-    /** SQLite file. Relative paths resolve against the working directory. */
-    database: Type.String({ minLength: 1, default: "./data/orianna.db" }),
-    /**
-     * Who may do what, as rules like `+emoji.add` to allow and `-polls.*` to
-     * deny. A rule names one permission, a group like `emoji.*`, or `*` for
-     * all of them:
-     *
-     * - `emoji.propose`: put an emoji up for a vote
-     * - `emoji.add`: add an emoji without a vote
-     * - `emoji.decide`: approve or reject a proposal before the vote ends
-     * - `emoji.cancel-any`: withdraw anyone's proposal, not just one's own
-     * - `sticker.propose`, `sticker.add`, `sticker.decide`, `sticker.cancel-any`
-     * - `polls.create`: start a poll with `!poll`
-     * - `polls.end-any`: end anyone's poll early with 🛑, not just one's own
-     *
-     * The most specific rule that names a permission decides it, so
-     * `-emoji.decide` beats `+emoji.*`, which beats `+*`. Between rules that
-     * are just as specific, a role's rule beats Manage Expressions, which beats
-     * `everyone`, and a higher role beats a lower one. A permission no rule
-     * names is denied.
-     *
-     * Members with Manage Expressions get `+emoji.*` and `+sticker.*`. The
-     * guild owner and members with Administrator may do everything. `!perms`
-     * shows what a member may do and which rule decided it.
-     */
-    permissions: PermissionsSchema,
-    /** Emoji proposals are disabled when this section is missing. */
-    emoji: Type.Optional(ProposalConfigSchema),
-    /** Sticker proposals are disabled when this section is missing. */
-    sticker: Type.Optional(ProposalConfigSchema),
-    /**
-     * Polls members start with `!poll`, posted in the channel the command is
-     * used in. Disabled when this section is missing. The bot needs Send
-     * Messages, Embed Links and Add Reactions there, and Manage Messages to
-     * delete the `!poll` message, move votes in single-choice polls, and take
-     * back 🛑 from members who may not end a poll.
-     */
-    polls: Type.Optional(PollsConfigSchema),
-    /**
-     * Messages where members react to give themselves roles. The bot posts and
-     * updates them on startup. It needs Manage Roles, with its own role above
-     * every menu role, and Send Messages, Embed Links, Add Reactions and Manage
-     * Messages in the menu channels. Removing a menu or an option takes down
-     * its message or reactions; members keep the roles they have.
-     */
-    roleMenus: Type.Optional(RoleMenusSchema),
-  },
-  { additionalProperties: false },
-);
+export const ConfigSchema = Schema.Struct({
+  /** Origin of the Fluxer instance. The client reads `/.well-known/fluxer` from here. */
+  instance: Schema.String.check(Schema.isMinLength(1)),
+  /** The guild this bot serves. Messages from anywhere else are ignored. */
+  guildId: Snowflake,
+  /** Channel where emoji and sticker proposals are put to a vote. Required when either is on. */
+  pollsChannelId: Schema.optionalKey(Snowflake),
+  /** What commands start with, e.g. `!` for `!help`. */
+  prefix: Schema.String.check(Schema.isMinLength(1)).pipe(orDefault("!")),
+  /** SQLite file. Relative paths resolve against the working directory. */
+  database: Schema.String.check(Schema.isMinLength(1)).pipe(orDefault("./data/orianna.db")),
+  /**
+   * Who may do what, as rules like `+emoji.add` to allow and `-polls.*` to
+   * deny. A rule names one permission, a group like `emoji.*`, or `*` for
+   * all of them:
+   *
+   * - `emoji.propose`: put an emoji up for a vote
+   * - `emoji.add`: add an emoji without a vote
+   * - `emoji.decide`: approve or reject a proposal before the vote ends
+   * - `emoji.cancel-any`: withdraw anyone's proposal, not just one's own
+   * - `sticker.propose`, `sticker.add`, `sticker.decide`, `sticker.cancel-any`
+   * - `polls.create`: start a poll with `!poll`
+   * - `polls.end-any`: end anyone's poll early with 🛑, not just one's own
+   *
+   * The most specific rule that names a permission decides it, so
+   * `-emoji.decide` beats `+emoji.*`, which beats `+*`. Between rules that
+   * are just as specific, a role's rule beats Manage Expressions, which beats
+   * `everyone`, and a higher role beats a lower one. A permission no rule
+   * names is denied.
+   *
+   * Members with Manage Expressions get `+emoji.*` and `+sticker.*`. The
+   * guild owner and members with Administrator may do everything. `!perms`
+   * shows what a member may do and which rule decided it.
+   */
+  permissions: PermissionsSchema.pipe(orDefault({})),
+  /** Emoji proposals are disabled when this section is missing. */
+  emoji: Schema.optionalKey(ProposalConfigSchema),
+  /** Sticker proposals are disabled when this section is missing. */
+  sticker: Schema.optionalKey(ProposalConfigSchema),
+  /**
+   * Polls members start with `!poll`, posted in the channel the command is
+   * used in. Disabled when this section is missing. The bot needs Send
+   * Messages, Embed Links and Add Reactions there, and Manage Messages to
+   * delete the `!poll` message, move votes in single-choice polls, and take
+   * back 🛑 from members who may not end a poll.
+   */
+  polls: Schema.optionalKey(PollsConfigSchema),
+  /**
+   * Messages where members react to give themselves roles. The bot posts and
+   * updates them on startup. It needs Manage Roles, with its own role above
+   * every menu role, and Send Messages, Embed Links, Add Reactions and Manage
+   * Messages in the menu channels. Removing a menu or an option takes down
+   * its message or reactions; members keep the roles they have.
+   */
+  roleMenus: Schema.optionalKey(RoleMenusSchema),
+});
 
-export type Config = Type.Static<typeof ConfigSchema>;
-export type ProposalConfig = Type.Static<typeof ProposalConfigSchema>;
-export type PollsConfig = Type.Static<typeof PollsConfigSchema>;
-export type PermissionsConfig = Type.Static<typeof PermissionsSchema>;
-export type RoleMenusConfig = Type.Static<typeof RoleMenusSchema>;
-export type RoleMenuConfig = Type.Static<typeof RoleMenuSchema>;
+export type Config = typeof ConfigSchema.Type;
+export type ProposalConfig = typeof ProposalConfigSchema.Type;
+export type PollsConfig = typeof PollsConfigSchema.Type;
+export type PermissionsConfig = typeof PermissionsSchema.Type;
+export type RoleMenusConfig = typeof RoleMenusSchema.Type;
+export type RoleMenuConfig = typeof RoleMenuSchema.Type;
 
-export class ConfigError extends Error {
-  override name = "ConfigError";
-}
+export class ConfigError extends Data.TaggedError("ConfigError")<{ readonly message: string }> {}
 
-export function parseConfig(raw: unknown): Config {
-  const value = Value.Default(ConfigSchema, Value.Clone(raw));
-  if (Value.Check(ConfigSchema, value)) {
-    checkPollsChannel(value);
-    checkPermissions(value);
-    checkRoleMenus(value);
-    return value;
-  }
+const invalid = (problems: readonly string[]) =>
+  new ConfigError({ message: `invalid config:\n${problems.join("\n")}` });
 
-  const problems = Value.Errors(ConfigSchema, value).flatMap((e) => {
-    // `additionalProperties: false` reports each extra key twice; keep the readable one.
-    if (e.keyword === "boolean" && e.schemaPath.endsWith("/additionalProperties")) {
-      return [];
-    }
-    if (e.keyword === "additionalProperties") {
-      const keys = (e.params as { additionalProperties: string[] }).additionalProperties;
-      return [`  ${e.instancePath || "/"}: unknown key(s): ${keys.join(", ")}`];
-    }
-    return [`  ${e.instancePath || "/"}: ${e.message}`];
-  });
-  throw new ConfigError(`invalid config:\n${problems.join("\n")}`);
-}
-
-/** What the schema can't express: proposals need a channel to vote in. */
-function checkPollsChannel(config: Config) {
-  const sections = (["emoji", "sticker"] as const).filter((key) => config[key]);
-  if (config.pollsChannelId !== undefined || sections.length === 0) return;
-
-  const names = sections.join(" and ");
-  const paths = sections.map((key) => `/${key}`).join(" and ");
-  throw new ConfigError(
-    `invalid config:\n  /pollsChannelId: ${names} proposals need a channel to vote in; set it, or remove ${paths}`,
+export function parseConfig(raw: unknown): Effect.Effect<Config, ConfigError> {
+  return Schema.decodeUnknownEffect(ConfigSchema)(raw, {
+    errors: "all",
+    onExcessProperty: "error",
+  }).pipe(
+    Effect.mapError((err) => invalid(schemaProblems(err.issue))),
+    Effect.flatMap((config) => {
+      const problems = [
+        ...checkPollsChannel(config),
+        ...checkPermissions(config),
+        ...checkRoleMenus(config),
+      ];
+      return problems.length > 0 ? Effect.fail(invalid(problems)) : Effect.succeed(config);
+    }),
   );
 }
 
+const formatIssue = SchemaIssue.makeFormatterStandardSchemaV1();
+
+/** One line per problem, each starting with where in the file it is. */
+function schemaProblems(issue: SchemaIssue.Issue): string[] {
+  return formatIssue(issue).issues.map(({ path = [], message }) => {
+    const keys = path.map((p) => String(typeof p === "object" ? p.key : p));
+    if (message === "Expected no excess property") {
+      return `  /${keys.slice(0, -1).join("/")}: unknown key ${keys.at(-1)}`;
+    }
+    return `  /${keys.join("/")}: ${message}`;
+  });
+}
+
+/** What the schema can't express: proposals need a channel to vote in. */
+function checkPollsChannel(config: Config): string[] {
+  const sections = (["emoji", "sticker"] as const).filter((key) => config[key]);
+  if (config.pollsChannelId !== undefined || sections.length === 0) return [];
+
+  const names = sections.join(" and ");
+  const paths = sections.map((key) => `/${key}`).join(" and ");
+  return [
+    `  /pollsChannelId: ${names} proposals need a channel to vote in; set it, or remove ${paths}`,
+  ];
+}
+
 /** What the schema can't express: rule syntax, one rule per permission, and role IDs. */
-function checkPermissions(config: Config) {
+function checkPermissions(config: Config): string[] {
   const { everyone, roles } = config.permissions;
   const problems = checkRules(everyone, "/permissions/everyone");
 
@@ -216,8 +222,7 @@ function checkPermissions(config: Config) {
       problems.push(...checkRules(rules, at));
     }
   }
-
-  if (problems.length > 0) throw new ConfigError(`invalid config:\n${problems.join("\n")}`);
+  return problems;
 }
 
 /**
@@ -241,7 +246,7 @@ function checkRules(rules: readonly string[], at: string): string[] {
 }
 
 /** What the schema can't express: unique names, emoji per menu, and roles. */
-function checkRoleMenus(config: Config) {
+function checkRoleMenus(config: Config): string[] {
   const problems: string[] = [];
   const names = new Set<string>();
   const menuOfRole = new Map<string, string>();
@@ -273,26 +278,24 @@ function checkRoleMenus(config: Config) {
       }
     });
   });
-
-  if (problems.length > 0) throw new ConfigError(`invalid config:\n${problems.join("\n")}`);
+  return problems;
 }
 
-export async function loadConfig(
-  path = process.env.ORIANNA_CONFIG ?? "config.json",
-): Promise<Config> {
-  const file = Bun.file(path);
-  if (!(await file.exists())) {
-    throw new ConfigError(`config file not found: ${path}`);
+export const loadConfig = Effect.fn("loadConfig")(function* (path: string) {
+  const fs = yield* FileSystem.FileSystem;
+  const unreadable = (err: { message: string }) =>
+    new ConfigError({ message: `couldn't read ${path}: ${err.message}` });
+  if (!(yield* fs.exists(path).pipe(Effect.mapError(unreadable)))) {
+    return yield* new ConfigError({ message: `config file not found: ${path}` });
   }
 
-  let raw: unknown;
-  try {
-    raw = await file.json();
-  } catch (err) {
-    throw new ConfigError(`${path} is not valid JSON: ${(err as Error).message}`);
-  }
-  return parseConfig(raw);
-}
+  const text = yield* fs.readFileString(path).pipe(Effect.mapError(unreadable));
+  const raw = yield* Effect.try({
+    try: (): unknown => JSON.parse(text),
+    catch: (err) => new ConfigError({ message: `${path} is not valid JSON: ${(err as Error).message}` }),
+  });
+  return yield* parseConfig(raw);
+});
 
 /**
  * What a reload applies: `prefix` and `permissions` from `next`, the rest kept
@@ -307,24 +310,64 @@ export function reloadedConfig(current: Config, next: Config) {
   return { config, needRestart };
 }
 
+/** The config file, read at startup and again on every reload. */
+export class AppConfig extends Context.Service<
+  AppConfig,
+  {
+    /** The config as it is now. A reload replaces it, so read it when you need it. */
+    readonly get: Effect.Effect<Config>;
+    /** Reads the file again. Returns the changed keys that only a restart applies. */
+    readonly reload: Effect.Effect<string[], ConfigError>;
+  }
+>()("orianna/AppConfig") {
+  /** Reads ORIANNA_CONFIG, or `config.json` in the working directory. */
+  static readonly layer = Layer.effect(
+    AppConfig,
+    Effect.gen(function* () {
+      const path = yield* Env.String("ORIANNA_CONFIG").pipe(Env.withDefault("config.json"));
+      const fs = yield* FileSystem.FileSystem;
+      const load = loadConfig(path).pipe(Effect.provideService(FileSystem.FileSystem, fs));
+      const ref = yield* Ref.make(yield* load);
+      return {
+        get: Ref.get(ref),
+        reload: Effect.gen(function* () {
+          const next = reloadedConfig(yield* Ref.get(ref), yield* load);
+          yield* Ref.set(ref, next.config);
+          return next.needRestart;
+        }),
+      };
+    }),
+  );
+
+  static readonly current: Effect.Effect<Config, never, AppConfig> = Effect.gen(function* () {
+    return yield* (yield* AppConfig).get;
+  });
+}
+
 /**
  * Reads the bot token from the systemd credential `token` when running as a
  * service, falling back to FLUXER_BOT_TOKEN for local development.
  */
-export async function readToken(env = process.env): Promise<string> {
-  const credentials = env.CREDENTIALS_DIRECTORY;
-  if (credentials) {
-    const file = Bun.file(`${credentials}/token`);
-    if (await file.exists()) {
-      const token = (await file.text()).trim();
-      if (token) return token;
+export const readToken = Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem;
+  const credentials = yield* Env.option(Env.String("CREDENTIALS_DIRECTORY"));
+  if (Option.isSome(credentials) && credentials.value) {
+    const file = `${credentials.value}/token`;
+    if (yield* fs.exists(file)) {
+      const token = (yield* fs.readFileString(file)).trim();
+      if (token) return Redacted.make(token);
     }
   }
 
-  const token = env.FLUXER_BOT_TOKEN?.trim();
-  if (token) return token;
+  const token = Option.getOrUndefined(yield* Env.option(Env.String("FLUXER_BOT_TOKEN")))?.trim();
+  if (token) return Redacted.make(token);
 
-  throw new ConfigError(
-    "no bot token: set FLUXER_BOT_TOKEN or provide a `token` systemd credential",
-  );
-}
+  return yield* new ConfigError({
+    message: "no bot token: set FLUXER_BOT_TOKEN or provide a `token` systemd credential",
+  });
+}).pipe(
+  Effect.catchTags({
+    PlatformError: (err) => Effect.fail(new ConfigError({ message: `couldn't read the token: ${err.message}` })),
+    ConfigError: (err) => Effect.fail(new ConfigError({ message: err.message })),
+  }),
+);
