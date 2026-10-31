@@ -1,7 +1,7 @@
 import { type ReactNode, useState } from "react";
 import type { Names } from "../rpc.ts";
 
-// Message text as Fluxer shows it, as far as a board needs: mentions, custom
+// Message text as Fluxer shows it, as far as the starboard needs: mentions, custom
 // emoji, links, bold, inline code and spoilers. Everything else stays as typed.
 
 const TOKEN =

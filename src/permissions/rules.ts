@@ -19,14 +19,13 @@ export const PERMISSIONS = [
   "sticker.cancel-any",
   "polls.create",
   "polls.end-any",
-  "boards.remove",
-  "boards.manage",
+  "starboard.config",
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
 
 /** Named after the settings section that turns the feature on. */
-export type PermissionGroup = "emoji" | "sticker" | "polls" | "boards";
+export type PermissionGroup = "emoji" | "sticker" | "polls" | "starboard";
 
 export function groupOf(permission: Permission): PermissionGroup {
   return permission.slice(0, permission.indexOf(".")) as PermissionGroup;

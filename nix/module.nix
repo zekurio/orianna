@@ -48,7 +48,7 @@ in
         docs/configuration.md for every key. Unknown keys are rejected when the bot
         starts, and any change restarts it.
 
-        Bot settings like `permissions`, `emoji` or `boards` live in the bot's
+        Bot settings like `permissions`, `emoji` or `starboard` live in the bot's
         database and are edited with `!settings`, not here.
       '';
       example = lib.literalExpression ''

@@ -39,8 +39,8 @@ export const Session = Schema.Struct({
   }),
   /** The guild owner or a member with Administrator, who may change the bot settings. */
   admin: Schema.Boolean,
-  /** The member has `boards.manage`, so may set up boards. */
-  manageBoards: Schema.Boolean,
+  /** The member has `starboard.config`, so may change the starboard. */
+  configStarboard: Schema.Boolean,
   /** What commands start with. */
   prefix: Schema.String,
   /**
@@ -54,9 +54,8 @@ export type Session = typeof Session.Type;
 /** The bot won't do what the member asked, and says why. */
 export class Refused extends Schema.TaggedError<Refused>()("Refused", { message: Schema.String }) {}
 
-/** A board the member can see. */
-export const Board = Schema.Struct({
-  name: Schema.String,
+/** The starboard, when it's on and the member can see its channel. */
+export const StarboardInfo = Schema.Struct({
   /** As a message has it: the Unicode emoji, or `<:name:id>`. */
   emoji: Schema.String,
   /** The picture of a custom emoji, null for a Unicode one. */
@@ -64,10 +63,9 @@ export const Board = Schema.Struct({
   channelId: Schema.String,
   channelName: Schema.String,
   threshold: Schema.Number,
-  keep: Schema.Boolean,
   nsfw: Schema.Boolean,
 });
-export type Board = typeof Board.Type;
+export type StarboardInfo = typeof StarboardInfo.Type;
 
 const Media = Schema.Struct({
   url: Schema.String,
@@ -79,10 +77,9 @@ const Media = Schema.Struct({
   linked: Schema.optionalKey(Schema.Boolean),
 });
 
-/** A message on a board, as its post shows it. */
-export const BoardPost = Schema.Struct({
+/** A message in the starboard, as its post shows it. */
+export const StarboardEntry = Schema.Struct({
   messageId: Schema.String,
-  postId: Schema.String,
   channelId: Schema.String,
   authorId: Schema.String,
   authorName: Schema.NullOr(Schema.String),
@@ -90,25 +87,21 @@ export const BoardPost = Schema.Struct({
   /** Null until the bot catches up on a post from before it kept them. */
   content: Schema.NullOr(Schema.String),
   media: Schema.Array(Media),
-  /** Members other than the author who reacted. */
-  count: Schema.Number,
-  /** In milliseconds since 1970, like `Date.now()`. */
-  sentAt: Schema.NullOr(Schema.Number),
-  postedAt: Schema.Number,
+  /** The votes, the author's own included. */
+  score: Schema.Number,
   messageUrl: Schema.String,
-  postUrl: Schema.String,
 });
-export type BoardPost = typeof BoardPost.Type;
+export type StarboardEntry = typeof StarboardEntry.Type;
 
-/** How many posts `boardPosts` answers with at a time. */
-export const BOARD_PAGE_SIZE = 20;
+/** How many entries `starboardEntries` answers with at a time, as many as shinpuru loads. */
+export const STARBOARD_PAGE_SIZE = 10;
 
-export const PostSort = Schema.Literals(["latest", "top"]);
-export type PostSort = typeof PostSort.Type;
+export const StarboardSort = Schema.Literals(["latest", "top"]);
+export type StarboardSort = typeof StarboardSort.Type;
 
 /**
- * Names for the members and channels the posts mention, and pictures of the
- * custom emoji in them, by ID. A channel the member can't see has no name.
+ * Names for the members and channels the entries mention, and pictures of
+ * the custom emoji in them, by ID. A channel the member can't see has no name.
  */
 const Names = Schema.Struct({
   users: Schema.Record(Schema.String, Schema.String),
@@ -117,59 +110,40 @@ const Names = Schema.Struct({
 });
 export type Names = typeof Names.Type;
 
-/** A member on a board's leaderboard. */
-export const Leader = Schema.Struct({
-  userId: Schema.String,
-  /** Null when none of their posts says. */
-  name: Schema.NullOr(Schema.String),
-  avatarUrl: Schema.NullOr(Schema.String),
-  posts: Schema.Number,
-  reactions: Schema.Number,
-});
-export type Leader = typeof Leader.Type;
-
-const ChannelId = (message: string) => Schema.String.check(Schema.isPattern(/^[0-9]+$/, { message }));
-
 /**
- * A board as members with `boards.manage` set it up. The checks are the
- * settings schema's, worded for the form, which shows them under each field
- * before it sends anything.
+ * The starboard as members with `starboard.config` set it, like
+ * `!starboard set`. The checks are the settings schema's, worded for the
+ * form, which shows them under each field before it sends anything.
  */
-export const BoardInput = Schema.Struct({
-  name: Schema.String.check(
-    Schema.isNonEmpty({ message: "Give it a name." }),
-    Schema.isPattern(/^[a-z0-9][a-z0-9-]{0,31}$/, {
-      message: "Lowercase letters, digits and hyphens, up to 32, starting with a letter or digit.",
-    }),
-  ),
-  /** A Unicode emoji, or a custom one as `<:name:id>`. */
-  emoji: Schema.String.check(
-    Schema.isNonEmpty({ message: "Pick an emoji." }),
-    Schema.makeFilter((emoji: string) => parseEmoji(emoji) !== undefined, {
-      message: "That isn't an emoji. Type or paste one, or :name: of one of the server's.",
-    }),
-  ),
-  channelId: ChannelId("Pick a channel."),
+export const StarboardInput = Schema.Struct({
+  channelId: Schema.String.check(Schema.isPattern(/^[0-9]+$/, { message: "Pick a channel." })),
   threshold: Schema.Number.check(
     Schema.isInt({ message: "A whole number, 1 or more." }),
     Schema.isGreaterThanOrEqualTo(1, { message: "A whole number, 1 or more." }),
   ),
-  keep: Schema.Boolean,
-  ignoredChannelIds: Schema.Array(ChannelId("That isn't a channel.")),
-});
-export type BoardInput = typeof BoardInput.Type;
-
-/** What the form for setting up boards needs. */
-export const BoardSetup = Schema.Struct({
-  boards: Schema.Array(
-    Schema.Struct({ ...BoardInput.fields, emojiUrl: Schema.NullOr(Schema.String) }),
+  /** A Unicode emoji, or a custom one as `<:name:id>`. */
+  emoji: Schema.String.check(
+    Schema.isNonEmpty({ message: "Pick an emoji." }),
+    Schema.makeFilter((emoji: string) => parseEmoji(emoji) !== undefined, { message: "That isn't an emoji." }),
   ),
-  /** Channels a board can post in or ignore, of those the member can see. */
+});
+export type StarboardInput = typeof StarboardInput.Type;
+
+/** What the starboard settings form needs. */
+export const StarboardSetup = Schema.Struct({
+  /** As it's set now; `channelId` is null while the starboard is off. */
+  config: Schema.Struct({
+    channelId: Schema.NullOr(Schema.String),
+    threshold: Schema.Number,
+    emoji: Schema.String,
+    emojiUrl: Schema.NullOr(Schema.String),
+  }),
+  /** Channels the starboard can go in, of those the member can see. */
   channels: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String, nsfw: Schema.Boolean })),
   /** The server's custom emoji. */
   emojis: Schema.Array(Schema.Struct({ text: Schema.String, name: Schema.String, url: Schema.String })),
 });
-export type BoardSetup = typeof BoardSetup.Type;
+export type StarboardSetup = typeof StarboardSetup.Type;
 
 /** A Unicode emoji for the picker, named the way Fluxer names it. */
 export const UnicodeEmoji = Schema.Struct({
@@ -188,41 +162,28 @@ export type EmojiCategory = typeof EmojiCategory.Type;
 export const WebRpcs = RpcGroup.make(
   /** Who is signed in, and what the app needs to show them. */
   Rpc.make("session", { success: Session }),
-  /** The boards whose channels the member can see, in the order of the settings. */
-  Rpc.make("boards", {
-    success: Schema.Struct({
-      boards: Schema.Array(Board),
-      /** The member has `boards.remove`. */
-      canRemove: Schema.Boolean,
-    }),
+  /** The starboard, null while it's off or its channel is hidden from the member. */
+  Rpc.make("starboard", { success: Schema.NullOr(StarboardInfo) }),
+  /** A page of the starboard's entries, and how many there are. */
+  Rpc.make("starboardEntries", {
+    payload: { sort: StarboardSort, offset: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)) },
+    success: Schema.Struct({ entries: Schema.Array(StarboardEntry), total: Schema.Number, names: Names }),
   }),
-  /** A page of a board's posts, and how many there are. */
-  Rpc.make("boardPosts", {
-    payload: { board: Schema.String, sort: PostSort, offset: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)) },
-    success: Schema.Struct({ posts: Schema.Array(BoardPost), total: Schema.Number, names: Names }),
-    error: Refused,
-  }),
-  /** The members with the most posts on a board, like `!board top`. */
-  Rpc.make("boardTop", { payload: { board: Schema.String }, success: Schema.Array(Leader), error: Refused }),
-  /** Takes a message off a board for good, like `!board remove` with a link to its post. */
-  Rpc.make("removeFromBoard", { payload: { board: Schema.String, postId: Schema.String }, error: Refused }),
-  /** Whether the member keeps their messages off the boards, like `!board optout`. */
-  Rpc.make("boardOptOut", { success: Schema.Boolean }),
+  /** Whether the member opted out from the starboard, like `!starboard optout`. */
+  Rpc.make("starboardOptOut", { success: Schema.Boolean }),
   /**
-   * Keeps the member's messages off the boards, or lets them go up again, like
-   * `!board optout` and `optin`. Answers how many posts came down.
+   * Opts the member out from the starboard, or back in, like
+   * `!starboard optout` and `optin`. Answers how many posts came down.
    */
-  Rpc.make("setBoardOptOut", { payload: { optedOut: Schema.Boolean }, success: Schema.Number }),
+  Rpc.make("setStarboardOptOut", { payload: { optedOut: Schema.Boolean }, success: Schema.Number }),
   /** The Unicode emoji, in Fluxer's categories, for the emoji picker. */
   Rpc.make("unicodeEmoji", { success: Schema.Array(EmojiCategory) }),
-  /** Every board as it's set up, for members with `boards.manage`. */
-  Rpc.make("boardSetup", { success: BoardSetup, error: Refused }),
-  /** Adds a board, like `!board create`. */
-  Rpc.make("createBoard", { payload: { board: BoardInput }, error: Refused }),
-  /** Sets up the board called `name` as `board` says, like `!board edit`. Answers whether anything changed. */
-  Rpc.make("editBoard", { payload: { name: Schema.String, board: BoardInput }, success: Schema.Boolean, error: Refused }),
-  /** Deletes a board, like `!board delete`. */
-  Rpc.make("deleteBoard", { payload: { name: Schema.String }, error: Refused }),
+  /** The starboard settings, for members with `starboard.config`. */
+  Rpc.make("starboardSetup", { success: StarboardSetup, error: Refused }),
+  /** Sets the starboard, like `!starboard set`. */
+  Rpc.make("setStarboard", { payload: { starboard: StarboardInput }, error: Refused }),
+  /** Disables the starboard, like `!starboard disable`. */
+  Rpc.make("disableStarboard", { error: Refused }),
 ).middleware(Authentication);
 
 /**

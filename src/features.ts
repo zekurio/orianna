@@ -1,7 +1,4 @@
 import { Deferred, Effect, Exit, Scope, Stream, SubscriptionRef } from "effect";
-import { LiveBoards, makeBoards } from "./boards/boards.ts";
-import { boardCommands } from "./boards/commands.ts";
-import { attachBoardEvents } from "./boards/fluxer.ts";
 import type { CommandEntry } from "./commands/command.ts";
 import type { CommandRouter } from "./commands/router.ts";
 import { AppConfig, type BotSettings } from "./config.ts";
@@ -16,6 +13,9 @@ import { attachPollMessageDeletes } from "./polls/fluxer.ts";
 import { attachRoleMenuEvents } from "./roles/fluxer.ts";
 import { makeRoleMenus } from "./roles/menus.ts";
 import { Settings } from "./settings/settings.ts";
+import { starboardCommands } from "./starboard/commands.ts";
+import { attachStarboardEvents } from "./starboard/fluxer.ts";
+import { LiveStarboard, makeStarboard } from "./starboard/starboard.ts";
 
 // The features the bot settings turn on, built from the settings and built
 // again when they change. main.ts runs them next to what outlives a change:
@@ -76,7 +76,7 @@ const startFeatures = Effect.fnUntraced(function* (
   }
   const imageUsers = [
     ...(settings.emoji || settings.sticker ? ["emoji and sticker images"] : []),
-    ...(settings.boards?.length ? ["blurring NSFW images on boards"] : []),
+    ...(settings.starboard?.channelId ? ["blurring NSFW images on the starboard"] : []),
   ];
   if (imageUsers.length > 0) {
     // Polls and role menus work without ImageMagick, so this only warns.
@@ -90,23 +90,23 @@ const startFeatures = Effect.fnUntraced(function* (
   }
   const community = settings.polls ? yield* makeCommunityPolls(settings.polls, guildId) : undefined;
   if (community) commands.push(...pollCommands(community));
-  // Built without boards too, so `!board create` can add the first one.
-  const boards = yield* makeBoards(settings.boards ?? [], guildId);
-  commands.push(yield* boardCommands(boards));
-  yield* LiveBoards.provide(boards);
+  // Built while it's off too, so `!starboard set` can turn it on.
+  const starboard = yield* makeStarboard(settings.starboard, guildId);
+  commands.push(yield* starboardCommands(starboard));
+  yield* LiveStarboard.provide(starboard);
   // Built even without a `roleMenus` section, so removing it takes the menus down.
   const roleMenus = yield* makeRoleMenus(settings.roleMenus);
 
   yield* Effect.acquireRelease(router.setCommands(commands), () => router.setCommands(base));
   if (community) yield* attachPollMessageDeletes(community);
   yield* attachRoleMenuEvents(roleMenus);
-  if (boards.boards.length > 0) yield* attachBoardEvents(boards);
+  if (starboard.board) yield* attachStarboardEvents(starboard);
 
   // Right away when the bot is already logged in, which is the case after a
   // change, and again on every login. 🛑 from while offline waits for the
   // votes, so a poll it ends counts them.
   yield* whenever(milestones.logins, roleMenus.sync);
-  if (boards.boards.length > 0) yield* whenever(milestones.logins, boards.catchUp);
+  if (starboard.board) yield* whenever(milestones.logins, starboard.catchUp);
   if (community) {
     const reconcile = community.reconcile().pipe(Effect.catchCause(logFailure("poll reconcile")));
     yield* whenever(milestones.pollCatchUps, reconcile);

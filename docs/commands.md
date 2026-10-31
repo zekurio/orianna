@@ -186,62 +186,50 @@ in [Configuration](configuration.md#role-menus). React to get a role, and
 remove the reaction to drop it. In a menu where you pick one, picking another
 swaps the role.
 
-## Boards
+## Starboard
 
-Boards are set up with `!board create`, `edit` and `delete` below, on the
-boards page of the web interface, or in the `boards` section of the
-settings, described in
-[Configuration](configuration.md#boards). Once enough members react to a
-message with a board's emoji, the bot posts it in the board's channel with
-the author, the text, the first image and a link back. A link to an image in
-the text counts as an image. On a board that isn't NSFW, NSFW images come
-blurred, as [Configuration](configuration.md#boards) describes. The author's own
-reaction doesn't count, and neither do bots.
+The starboard is copied from shinpuru: honor and highlight memorable, funny,
+deep or simply dumb messages. Members vote a message into it by reacting with
+the starboard's emoji, ⭐ by default. Once a message has as many votes as the
+threshold, the author's own included, the bot posts it in the starboard
+channel with the author, the text, the first image, a link to jump to the
+message, and its vote count. A link to an image in the text counts as an
+image. On a starboard that isn't NSFW, NSFW images come blurred, as
+[Configuration](configuration.md#starboard) describes.
 
-The post shows how many reacted and changes as that does. When the message is
-edited, so is the post. When it's deleted, the post goes too. When reactions
-drop below the threshold, the bot takes the post down, unless the board has
-`keep` set.
-
-Deleting a post takes the message off that board for good, the same as
-`!board remove`.
+The post's vote count changes with the votes. When the message is edited, so
+is the post. When it's deleted, the post goes too. When votes drop below the
+threshold, the bot takes the post down, and puts it back up if the message
+gets there again. Deleting a post keeps its message out of the starboard for
+good.
 
 | Command | Permission | What it does |
 |---|---|---|
-| `!board list` | | Lists the boards with their emoji, channel and threshold |
-| `!board top [board]` | | Lists the 10 members with the most messages on a board, the first one in the settings by default |
-| `!board optout` | | Keeps your messages off every board and takes down the ones already there |
-| `!board optin` | | Lets your messages go up again |
-| `!board remove <message>` | `boards.remove` | Takes a message off every board it's on, for good. Takes a link to the message or to a post, or either ID. Given a post, it only takes the message off that post's board. |
-| `!board create <name> <emoji> <channel> [--threshold n] [--keep yes\|no] [--ignore channels]` | `boards.manage` | Adds a board |
-| `!board edit <board> [--name name] [--emoji emoji] [--channel channel] [--threshold n] [--keep yes\|no] [--ignore channels]` | `boards.manage` | Changes a board. What you leave out stays as it is. |
-| `!board delete <board>` | `boards.manage` | Deletes a board. Its posts stay in its channel, but the bot forgets them, so they no longer follow their messages or count for `!board top`. |
+| `!starboard set [--channel channel] [--threshold n] [--emoji emoji]` | `starboard.config` | Sets starboard settings. What you leave out stays as it is. |
+| `!starboard disable` | `starboard.config` | Disables the starboard. The threshold and emoji stay for when a channel turns it on again. |
+| `!starboard optout` | | Opts you out from the starboard globally and takes down your messages already in it |
+| `!starboard optin` | | Lets your messages into the starboard again |
 
-The options are the board's keys in the settings:
+The options of `!starboard set`:
 
-- `name`: lowercase letters, digits and hyphens, up to 32. Renaming a board
-  keeps its posts and leaderboard.
-- `emoji`: a Unicode emoji, or a custom one as `<:name:id>` or `name:id`.
-- `channel`: where the bot posts. Mention it, like `#gems`, or give its ID.
-- `--threshold`: how many members other than the author have to react, 5 by
-  default.
-- `--keep yes`: leaves a post up when reactions drop below the threshold
-  again.
-- `--ignore`: channels whose messages never go up on this board, mentioned or
-  as IDs, separated by spaces or commas. `--ignore none` clears the list.
+- `--channel`: the channel where the starboard messages will appear. Mention
+  it, like `#starboard`, or give its ID.
+- `--threshold`: the minimum number of emoji votes until a message gets into
+  the starboard, 5 by default.
+- `--emoji`: the emoji to be used for starring messages, a Unicode emoji or a
+  custom one as `<:name:id>` or `name:id`.
 
 ```
-!board create gems 💎 #gems --threshold 5
-!board edit gems --threshold 8 --ignore #staff #mod-log
-!board delete coal
+!starboard set --channel #starboard --threshold 5 --emoji ⭐
+!starboard disable
 ```
 
-The web interface's boards page shows the same as `!board top`, and has a
-button for `!board remove` on each post for members with `boards.remove`.
-Members opt out and back in on their profile page there too.
+The web interface's starboard page lists the entries, latest or top posts
+first, and members with `starboard.config` change the settings there too.
+Members opt out and back in on their profile page.
 
-A change is a settings change, so `!settings log` lists it and the boards
-start over, as [Configuration](configuration.md#changes-while-the-bot-runs)
+A change is a settings change, so `!settings log` lists it and the starboard
+starts over, as [Configuration](configuration.md#changes-while-the-bot-runs)
 describes.
 
 ## Settings
@@ -267,7 +255,7 @@ the reply lists each problem with its path, and the settings stay as they
 were:
 
 ```
-/boards/1/threshold: Expected a value greater than or equal to 1
+/starboard/threshold: Expected a value greater than or equal to 1
 /pollsChannelId: emoji proposals need a channel to vote in; set it, or remove /emoji
 ```
 

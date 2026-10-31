@@ -1,24 +1,23 @@
 import { cdnEmojiURL } from "@fluxerjs/core";
 import { Effect, Layer, Option, Result } from "effect";
 import { Headers } from "effect/http";
-import { BoardGuild, LiveBoards, noBoard } from "../boards/boards.ts";
-import { createBoard, deleteBoard, editBoard } from "../boards/manage.ts";
-import { parseEmoji } from "../emoji.ts";
-import { unicodeEmoji } from "./emoji.ts";
 import type { UserError } from "../commands/command.ts";
+import { type ParsedEmoji, parseEmoji } from "../emoji.ts";
 import { Fluxer, type FluxerError, logFailure, request } from "../fluxer.ts";
 import { GuildAccess } from "../permissions/rules.ts";
 import { Settings } from "../settings/settings.ts";
+import { currentStarboard, disableStarboard, setStarboard } from "../starboard/manage.ts";
+import { LiveStarboard, StarboardGuild } from "../starboard/starboard.ts";
+import { unicodeEmoji } from "./emoji.ts";
 import {
-  type Board,
-  type BoardPost,
   Authentication,
-  BOARD_PAGE_SIZE,
   CurrentMember,
   type Names,
   NotMember,
   Refused,
+  STARBOARD_PAGE_SIZE,
   SignedOut,
+  type StarboardEntry,
   WebRpcs,
 } from "./rpc.ts";
 import { SESSION_COOKIE, Sessions } from "./sessions.ts";
@@ -87,46 +86,41 @@ export const HandlersLive = WebRpcs.toLayer(
     const { client } = yield* Fluxer;
     const settings = yield* Settings;
     const access = yield* GuildAccess;
-    const guild = yield* BoardGuild;
-    const live = yield* LiveBoards;
-    const boardsNow = LiveBoards.current.pipe(
-      Effect.provideService(LiveBoards, live),
+    const guild = yield* StarboardGuild;
+    const live = yield* LiveStarboard;
+    const starboardNow = LiveStarboard.current.pipe(
+      Effect.provideService(LiveStarboard, live),
       Effect.provideService(Settings, settings),
     );
     const emojiUrl = (id: string, animated: boolean) =>
       cdnEmojiURL(id, animated, { mediaBase: client.instance.endpoints.media });
+    /** The picture of a custom emoji, null for a Unicode one. */
+    const customEmojiUrl = (emoji: ParsedEmoji | undefined) =>
+      emoji && /^\d+$/.test(emoji.key) ? emojiUrl(emoji.key, emoji.text.startsWith("<a:")) : null;
 
-    /** The boards whose channels the member can see. */
-    const visibleBoards = Effect.gen(function* () {
+    /** The starboard, while it's on and the member can see its channel. */
+    const visibleStarboard = Effect.gen(function* () {
       const { userId } = yield* CurrentMember;
-      const boards = yield* boardsNow;
-      const visible = new Set(yield* access.visibleChannels(userId, boards.boards.map((b) => b.channelId)));
-      return boards.boards.filter((b) => visible.has(b.channelId));
+      const starboard = yield* starboardNow;
+      const board = starboard.board;
+      if (!board || !(yield* access.canView(userId, board.channelId))) return undefined;
+      return { starboard, board };
     });
 
-    /** Refuses members without `boards.manage`. */
-    const mayManage = Effect.gen(function* () {
+    /** Refuses members without `starboard.config`. */
+    const mayConfig = Effect.gen(function* () {
       const { userId } = yield* CurrentMember;
-      if (!(yield* access.can(userId, "boards.manage"))) {
-        return yield* new Refused({ message: "Setting up boards takes the boards.manage permission." });
+      if (!(yield* access.can(userId, "starboard.config"))) {
+        return yield* new Refused({ message: "Changing the starboard takes the starboard.config permission." });
       }
       return userId;
     });
 
-    /** Runs a change from boards/manage.ts with the services it needs. */
-    const managing = <A, E>(effect: Effect.Effect<A, E, BoardGuild | Settings>) =>
-      effect.pipe(Effect.provideService(BoardGuild, guild), Effect.provideService(Settings, settings));
+    /** Runs a change from starboard/manage.ts with the services it needs. */
+    const configuring = <A, E>(effect: Effect.Effect<A, E, StarboardGuild | Settings>) =>
+      effect.pipe(Effect.provideService(StarboardGuild, guild), Effect.provideService(Settings, settings));
 
-    /** A board the member can see; any other name is no board at all to them. */
-    const visibleBoard = (name: string) =>
-      visibleBoards.pipe(
-        Effect.flatMap((boards) => {
-          const board = boards.find((b) => b.name === name.toLowerCase());
-          return board ? Effect.succeed(board) : noBoard(name, boards);
-        }),
-      );
-
-    /** The names the posts' mentions show, of channels the member can see. */
+    /** The names the entries' mentions show, of channels the member can see. */
     const namesFor = Effect.fnUntraced(function* (texts: readonly string[], channelIds: readonly string[]) {
       const { userId } = yield* CurrentMember;
       const all = texts.join("\n");
@@ -175,127 +169,85 @@ export const HandlersLive = WebRpcs.toLayer(
               avatarUrl: user.displayAvatarURL({ size: 64 }),
             },
             admin,
-            manageBoards: yield* access.can(userId, "boards.manage"),
+            configStarboard: yield* access.can(userId, "starboard.config"),
             prefix,
             emojiImages: `${client.instance.endpoints.static_cdn.replace(/\/+$/, "")}/emoji`,
           };
         }).pipe(hide("loading the session")),
 
-      boards: () =>
+      starboard: () =>
         Effect.gen(function* () {
-          const { userId } = yield* CurrentMember;
-          const boards = yield* visibleBoards;
-          const listed = yield* Effect.forEach(
-            boards,
-            (b) =>
-              guild.channel(b.channelId).pipe(
-                Effect.map((channel): Board => {
-                  const custom = /^\d+$/.test(b.emoji.key);
-                  return {
-                    name: b.name,
-                    emoji: b.emoji.text,
-                    emojiUrl: custom ? emojiUrl(b.emoji.key, b.emoji.text.startsWith("<a:")) : null,
-                    channelId: b.channelId,
-                    channelName: channel?.name ?? "deleted-channel",
-                    threshold: b.threshold,
-                    keep: b.keep,
-                    nsfw: channel?.nsfw ?? false,
-                  };
-                }),
-              ),
-            { concurrency: 4 },
-          );
+          const visible = yield* visibleStarboard;
+          if (!visible) return null;
+          const { board } = visible;
+          const channel = yield* guild.channel(board.channelId);
           return {
-            boards: listed,
-            canRemove: yield* access.can(userId, "boards.remove"),
+            emoji: board.emoji.text,
+            emojiUrl: customEmojiUrl(board.emoji),
+            channelId: board.channelId,
+            channelName: channel?.name ?? "deleted-channel",
+            threshold: board.threshold,
+            nsfw: channel?.nsfw ?? false,
           };
-        }).pipe(hide("listing the boards")),
+        }).pipe(hide("loading the starboard")),
 
-      boardPosts: ({ board, sort, offset }) =>
+      starboardEntries: ({ sort, offset }) =>
         Effect.gen(function* () {
-          const { name } = yield* visibleBoard(board);
-          const { rows, total } = yield* (yield* boardsNow).posts(name, sort, offset, BOARD_PAGE_SIZE);
-          const posts = rows.map(
-            (row): BoardPost => ({
+          const visible = yield* visibleStarboard;
+          if (!visible) return { entries: [], total: 0, names: { users: {}, channels: {}, emojis: {} } };
+          const { rows, total } = yield* visible.starboard.posts(sort, offset, STARBOARD_PAGE_SIZE);
+          const entries = rows.map(
+            (row): StarboardEntry => ({
               messageId: row.messageId,
-              postId: row.postId!,
               channelId: row.channelId,
               authorId: row.authorId,
               authorName: row.authorName,
               authorAvatar: row.authorAvatar,
               content: row.content,
               media: row.media ?? [],
-              count: row.count,
-              sentAt: row.sentAt?.getTime() ?? null,
-              postedAt: row.postedAt.getTime(),
+              score: row.count,
               messageUrl: guild.messageLink(row.channelId, row.messageId),
-              postUrl: guild.messageLink(row.postChannelId!, row.postId!),
             }),
           );
           const names = yield* namesFor(
             rows.map((r) => r.content ?? ""),
             rows.map((r) => r.channelId),
           );
-          return { posts, total, names };
-        }).pipe(answer("loading a board's posts")),
-
-      boardTop: ({ board }) =>
-        Effect.gen(function* () {
-          const { name } = yield* visibleBoard(board);
-          const { rows } = yield* (yield* boardsNow).top(name);
-          return rows.map((r) => ({
-            userId: r.authorId,
-            name: r.authorName,
-            avatarUrl: r.authorAvatar,
-            posts: r.posts,
-            reactions: r.reactions,
-          }));
-        }).pipe(answer("loading a leaderboard")),
-
-      removeFromBoard: ({ board, postId }) =>
-        Effect.gen(function* () {
-          const { userId } = yield* CurrentMember;
-          if (!(yield* access.can(userId, "boards.remove"))) {
-            return yield* new Refused({ message: "Taking messages off boards takes the boards.remove permission." });
-          }
-          yield* visibleBoard(board);
-          yield* (yield* boardsNow).remove(postId);
-        }).pipe(answer("taking a message off a board")),
+          return { entries, total, names };
+        }).pipe(hide("loading the starboard entries")),
 
       unicodeEmoji: () => Effect.sync(unicodeEmoji).pipe(hide("listing the emoji")),
 
-      boardOptOut: () =>
+      starboardOptOut: () =>
         Effect.gen(function* () {
           const { userId } = yield* CurrentMember;
-          return yield* (yield* boardsNow).optedOut(userId);
-        }).pipe(hide("loading the board opt-out")),
+          return yield* (yield* starboardNow).optedOut(userId);
+        }).pipe(hide("loading the starboard opt-out")),
 
-      setBoardOptOut: ({ optedOut }) =>
+      setStarboardOptOut: ({ optedOut }) =>
         Effect.gen(function* () {
           const { userId } = yield* CurrentMember;
-          const boards = yield* boardsNow;
-          if (optedOut) return yield* boards.optOut(userId);
-          yield* boards.optIn(userId);
+          const starboard = yield* starboardNow;
+          if (optedOut) return yield* starboard.optOut(userId);
+          yield* starboard.optIn(userId);
           return 0;
-        }).pipe(hide("changing the board opt-out")),
+        }).pipe(hide("changing the starboard opt-out")),
 
-      boardSetup: () =>
+      starboardSetup: () =>
         Effect.gen(function* () {
-          const userId = yield* mayManage;
-          const { boards } = yield* settings.get;
+          const userId = yield* mayConfig;
+          const config = yield* configuring(currentStarboard);
           const channels = yield* guild.textChannels;
           const visible = new Set(yield* access.visibleChannels(userId, channels.map((c) => c.id)));
           const emojis = yield* guild.emojis;
+          const emoji = parseEmoji(config.emoji);
           return {
-            boards: (boards ?? []).map((b) => {
-              const emoji = parseEmoji(b.emoji);
-              const custom = emoji && /^\d+$/.test(emoji.key);
-              return {
-                ...b,
-                emoji: emoji?.text ?? b.emoji,
-                emojiUrl: custom ? emojiUrl(emoji.key, emoji.text.startsWith("<a:")) : null,
-              };
-            }),
+            config: {
+              channelId: config.channelId ?? null,
+              threshold: config.threshold,
+              emoji: emoji?.text ?? config.emoji,
+              emojiUrl: customEmojiUrl(emoji),
+            },
             channels: channels.filter((c) => visible.has(c.id)).map(({ id, name, nsfw }) => ({ id, name, nsfw })),
             emojis: emojis.map((e) => ({
               text: `<${e.animated ? "a" : ""}:${e.name}:${e.id}>`,
@@ -303,26 +255,19 @@ export const HandlersLive = WebRpcs.toLayer(
               url: emojiUrl(e.id, e.animated),
             })),
           };
-        }).pipe(answer("loading the board setup")),
+        }).pipe(answer("loading the starboard settings")),
 
-      createBoard: ({ board }) =>
+      setStarboard: ({ starboard }) =>
         Effect.gen(function* () {
-          const userId = yield* mayManage;
-          yield* managing(createBoard(board, userId));
-        }).pipe(answer("creating a board")),
+          const userId = yield* mayConfig;
+          yield* configuring(setStarboard(starboard, userId));
+        }).pipe(answer("setting the starboard")),
 
-      editBoard: ({ name, board }) =>
+      disableStarboard: () =>
         Effect.gen(function* () {
-          const userId = yield* mayManage;
-          const { changed } = yield* managing(editBoard(name, board, userId));
-          return changed;
-        }).pipe(answer("changing a board")),
-
-      deleteBoard: ({ name }) =>
-        Effect.gen(function* () {
-          const userId = yield* mayManage;
-          yield* managing(deleteBoard(name, userId));
-        }).pipe(answer("deleting a board")),
+          const userId = yield* mayConfig;
+          yield* configuring(disableStarboard(userId));
+        }).pipe(answer("disabling the starboard")),
     };
   }),
 );

@@ -32,14 +32,13 @@ The bot token doesn't go in the file; see [Environment](#environment).
 ### The web interface
 
 The bot can serve a web interface, where members of the guild sign in with
-their Fluxer account. Its boards page lists each board's posts, newest or
-most reacted first, with their images and files, and the board's
-leaderboard. A member only sees the boards whose channels they can see, and
-members with `boards.remove` can take a message off a board from there.
-Members with `boards.manage` create, edit and delete boards on that page too.
+their Fluxer account. Its starboard page lists the starboard's entries,
+latest or top posts first, with their images and files, to members who can
+see the starboard channel. Members with `starboard.config` change the
+starboard's settings on that page too.
 
 Each member has a profile page, under their name in the top corner, for
-their own settings, like keeping their messages off the boards. The guild
+their own settings, like opting out from the starboard. The guild
 owner and members with Administrator get an Admin tab for the settings of
 the whole server. The commands page and the Admin tab are still empty.
 
@@ -86,7 +85,7 @@ members with Administrator edit it in chat:
 The import replaces all settings at once, so a section you leave out goes
 back to its default or turns its feature off. The bot checks the whole file
 first. If anything is wrong, it changes nothing and replies with each
-problem and its path, like `/boards/1/threshold`. Otherwise it replies with
+problem and its path, like `/starboard/threshold`. Otherwise it replies with
 the sections that changed, and they apply right away. `!settings log` shows
 who changed what, and when. [Commands](commands.md#settings) has the details.
 
@@ -200,55 +199,40 @@ deletes a menu message, the bot posts it again the next time it starts or
 the settings change. When
 a member leaves the guild, the bot removes their reactions.
 
-### Boards
+### Starboard
 
-A board is a channel where the bot reposts messages that got enough
-reactions with one emoji, like a starboard. You can have as many as you like,
-say 💎 for gems and 🪨 for a hall of shame. Members with `boards.manage` set
-them up in chat with `!board create`, `edit` and `delete`, described in
-[Commands](commands.md#boards), or on the boards page of the
+The starboard, copied from shinpuru: members vote memorable messages into it
+by reacting with its emoji, and once a message has enough votes, the bot
+posts it in the starboard channel. Members with `starboard.config` change it
+in chat with `!starboard set` and `disable`, described in
+[Commands](commands.md#starboard), or on the starboard page of the
 [web interface](#the-web-interface). Both change this section. It looks like this:
 
 ```json
-"boards": [
-  { "name": "gems", "emoji": "💎", "channelId": "000000000000000000", "threshold": 5 },
-  {
-    "name": "coal",
-    "emoji": "🪨",
-    "channelId": "000000000000000000",
-    "threshold": 8,
-    "keep": true,
-    "ignoredChannelIds": ["100000000000000020"]
-  }
-]
+"starboard": { "channelId": "000000000000000000", "threshold": 5, "emoji": "⭐" }
 ```
-
-Each board:
 
 | Key | Default | What it does |
 |---|---|---|
-| `name` | Required | Lowercase letters, digits and hyphens, up to 32, starting with a letter or digit. Members type it in `!board top`. Renaming a board here starts its leaderboard over; `!board edit --name` keeps it. |
-| `emoji` | Required | A Unicode emoji, `name:id` or `<:name:id>` |
-| `channelId` | Required | Where the bot posts |
-| `threshold` | `5` | How many members other than the author have to react before a message goes up |
-| `keep` | `false` | Leaves a post up when reactions drop below `threshold` again. Without it, the bot takes the post down and puts it back up if the message gets there again. |
-| `ignoredChannelIds` | `[]` | Channels whose messages never go up on this board |
+| `channelId` | None | The channel where the starboard messages will appear. The starboard is off without it. |
+| `threshold` | `5` | The minimum number of emoji votes until a message gets into the starboard. The author's own vote counts. |
+| `emoji` | `⭐` | The emoji to be used for starring messages: a Unicode emoji, `name:id` or `<:name:id>` |
 
-The bot posts from every channel it can read, private ones included, so put
-channels whose messages shouldn't be seen elsewhere in `ignoredChannelIds`.
-Messages in board channels never go up.
+The bot posts from every channel it can read, private ones included.
+Messages in the starboard channel never go up.
 
-On a board whose channel isn't NSFW, the bot blurs what would be NSFW there,
-like shinpuru does: every image of a message from an NSFW channel, and images
-their uploader marked NSFW. It posts the blurred copies with the post, up to
-four, and leaves out other files from them. An NSFW board shows everything.
+On a starboard whose channel isn't NSFW, the bot blurs what would be NSFW
+there, like shinpuru does: every image of a message from an NSFW channel, and
+images their uploader marked NSFW. It posts the blurred copies with the post,
+up to four, and leaves out other files from them. An NSFW starboard shows
+everything.
 
 The bot needs View Channel and Read Message History where members react, and
-Send Messages, Embed Links and Attach Files in the board channels. Fluxer doesn't tell the
-bot about reactions from while it was offline. It counts them the next time
-someone reacts to the message.
+Send Messages, Embed Links and Attach Files in the starboard channel. Fluxer
+doesn't tell the bot about reactions from while it was offline. It counts
+them the next time someone reacts to the message.
 
-[Commands](commands.md#boards) explains how a message goes up and comes down.
+[Commands](commands.md#starboard) explains how a message goes up and comes down.
 
 ## Environment
 
@@ -263,15 +247,16 @@ someone reacts to the message.
 
 A change to `prefix` or `permissions` applies to the next command. A change
 to any other section starts the features over: the bot takes down what it
-runs for emoji and sticker proposals, polls, role menus and boards, and
+runs for emoji and sticker proposals, polls, role menus and the starboard, and
 starts them again from the new settings. That takes a moment, and in that
 moment:
 
 - Work in flight stops, as it does when the bot shuts down. A role menu that
   was being brought up to date is brought up to date again right after.
   Commands that were already running finish.
-- Reactions to role menus and boards are missed. Role menus catch up on them
-  straight away, and boards count the reactions again on the next one.
+- Reactions to role menus and the starboard are missed. Role menus catch up
+  on them straight away, and the starboard counts the reactions again on the
+  next one.
 - Votes on polls still count. A 🛑 on a poll is acted on once polls are
   back. A vote that would have ended a proposal early ends it with the next
   vote, or at its deadline.

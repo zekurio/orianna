@@ -16,7 +16,7 @@ import portrait from "./orianna.png";
 import { Link, navigate } from "./router.tsx";
 
 const TABS: { to: string; label: string; icon: Icon }[] = [
-  { to: "/boards", label: "Boards", icon: Star },
+  { to: "/starboard", label: "Starboard", icon: Star },
   { to: "/commands", label: "Commands", icon: BookOpenText },
 ];
 
@@ -35,7 +35,7 @@ export function Header({ path }: { path: string }) {
         )}
       >
         <Link
-          to="/boards"
+          to="/starboard"
           className="flex items-center gap-2 font-heading text-[1.375rem] leading-none font-semibold text-foreground no-underline"
         >
           <img src={portrait} alt="" width={36} height={36} />

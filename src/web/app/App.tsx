@@ -6,10 +6,10 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { type Session, SignInError } from "../rpc.ts";
 import { Api } from "./api.ts";
 import { Header } from "./Header.tsx";
-import { BoardsPage, parseBoardPath } from "./Boards.tsx";
 import { AdminPage, CommandsPage, NotFoundPage, ProfilePage } from "./pages.tsx";
 import { navigate, usePath } from "./router.tsx";
 import { SignIn } from "./SignIn.tsx";
+import { StarboardPage } from "./Starboard.tsx";
 import { cn } from "cn";
 import { container, standalone } from "@/components/page";
 import { Button } from "@/components/ui/button";
@@ -84,7 +84,7 @@ function Shell() {
   const path = usePath();
 
   useEffect(() => {
-    const to = path === "/" ? "/boards" : MOVED[path];
+    const to = path === "/" ? "/starboard" : MOVED[path];
     if (to) navigate(to, { replace: true });
   }, [path]);
 
@@ -99,11 +99,10 @@ function Shell() {
 }
 
 function Page({ path }: { path: string }) {
-  const boards = parseBoardPath(path);
-  if (boards) return <BoardsPage board={boards.board} view={boards.view} />;
   switch (path) {
     case "/":
-      return <BoardsPage view="latest" />;
+    case "/starboard":
+      return <StarboardPage />;
     case "/commands":
       return <CommandsPage />;
     case "/profile":

@@ -29,12 +29,11 @@ Roles are keyed by role ID. Edit the section with `!settings export` and
 | `sticker.propose`, `sticker.add`, `sticker.decide`, `sticker.cancel-any` | The same, for stickers |
 | `polls.create` | Starting a poll with `!poll` |
 | `polls.end-any` | Ending anyone's poll early with 🛑. Everyone can end their own. |
-| `boards.remove` | Taking a message off the boards for good with `!board remove` |
-| `boards.manage` | Creating, changing and deleting boards with `!board create`, `edit` and `delete`, or on the boards page of the web interface |
+| `starboard.config` | Changing the starboard with `!starboard set` and `disable`, or on the starboard page of the web interface |
 
 Every member can run the other commands: `!help`, `!ping`, `!perms`, `!polls`,
-`list` under `!emoji` and `!sticker`, and `list`, `top`, `optout` and `optin`
-under `!board`. The exception is `!settings`, below.
+`list` under `!emoji` and `!sticker`, and `optout` and `optin` under
+`!starboard`. The exception is `!settings`, below.
 
 ## Who may change the settings
 

@@ -12,8 +12,8 @@ export class Api extends AtomRpc.Service<Api>()("orianna/web/Api", {
   ),
 }) {}
 
-/** Everything shown of the boards, refreshed when they're set up differently. */
-export const BOARD_KEYS = ["boards"];
+/** Everything shown of the starboard, refreshed when it's set differently. */
+export const STARBOARD_KEYS = ["starboard"];
 
 /**
  * What a failed call says to the member: the message of a refusal, or that

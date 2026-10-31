@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { useSession } from "./App.tsx";
-import { BoardOptOut } from "./BoardOptOut.tsx";
+import { StarboardOptOut } from "./StarboardOptOut.tsx";
 import { Link } from "./router.tsx";
 
 // The pages behind the tabs and the user menu. Some only say what they're for so far.
@@ -65,7 +65,7 @@ export function ProfilePage() {
         <SectionTitle>Your settings</SectionTitle>
         <Lead>Settings that only change things for you.</Lead>
       </div>
-      <BoardOptOut />
+      <StarboardOptOut />
     </>
   );
 }
@@ -107,7 +107,7 @@ export function NotFoundPage({ path }: { path: string }) {
         </EmptyHeader>
         <EmptyContent>
           <Button variant="outline" asChild>
-            <Link to="/boards">Go to the boards</Link>
+            <Link to="/starboard">Go to the starboard</Link>
           </Button>
         </EmptyContent>
       </Empty>

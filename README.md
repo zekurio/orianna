@@ -8,13 +8,13 @@ instance.
   linked, or taken from a 7TV emote. Wide images are cut into a row of emojis.
 - Members start their own polls with `!poll` and watch the results come in.
 - Role menus let members give themselves roles by reacting to a message.
-- Boards repost messages that got enough reactions, like a starboard, or a
-  hall of shame.
+- The starboard, copied from shinpuru, highlights memorable, funny, deep or
+  simply dumb messages that members vote in with ⭐.
 - Permission rules decide who may do what.
 - Settings live in the bot's database. The server's admins change them in chat
   while the bot runs, and every change is recorded.
 - Members sign in to a web interface with their Fluxer account, where they
-  browse the boards and their leaderboards.
+  browse the starboard.
 
 Fluxer has no slash commands or buttons yet, so commands start with a prefix,
 `!` by default, and every vote is a reaction.

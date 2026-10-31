@@ -277,7 +277,7 @@ const makeImageMagick = Effect.gen(function* () {
 
   /**
    * A small, heavily blurred still of the first frame, which shows roughly
-   * what an image is without what's in it. For NSFW images on a board that
+   * what an image is without what's in it. For NSFW images on a starboard that
    * isn't NSFW.
    */
   const blur = Effect.fn("ImageMagick.blur")(function* (image: Uint8Array) {

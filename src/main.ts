@@ -3,8 +3,6 @@ import * as BunDns from "@effect/platform-bun/BunDns";
 import { Events } from "@fluxerjs/core";
 import { Cause, Console, Deferred, Effect, Exit, Layer, Queue, SubscriptionRef } from "effect";
 import { FetchHttpClient } from "effect/http";
-import { LiveBoards } from "./boards/boards.ts";
-import { FluxerBoardGuild } from "./boards/fluxer.ts";
 import type { CommandEntry } from "./commands/command.ts";
 import { help, ping } from "./commands/general.ts";
 import { makeCommandRouter } from "./commands/router.ts";
@@ -22,6 +20,8 @@ import { attachReactions } from "./reactions.ts";
 import { FluxerRoleGuild } from "./roles/fluxer.ts";
 import { settingsCommands } from "./settings/commands.ts";
 import { Settings } from "./settings/settings.ts";
+import { FluxerStarboardGuild } from "./starboard/fluxer.ts";
+import { LiveStarboard } from "./starboard/starboard.ts";
 import { WebServer } from "./web/server.ts";
 
 const Platform = Layer.mergeAll(BunServices.layer, BunDns.layer, FetchHttpClient.layer);
@@ -35,12 +35,12 @@ const Core = Fluxer.layer.pipe(
 );
 
 const Adapters = Layer.mergeAll(
-  LiveBoards.layer,
+  LiveStarboard.layer,
   FluxerGuildAccess,
   FluxerPollTransport,
   FluxerRoleGuild,
   FluxerExpressionGuild,
-  FluxerBoardGuild,
+  FluxerStarboardGuild,
   ImageMagick.layer,
 ).pipe(Layer.provideMerge(Core));
 

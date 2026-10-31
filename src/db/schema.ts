@@ -151,14 +151,14 @@ export const roleMenuReactions = sqliteTable(
   ],
 );
 
-/** A file on a board post, as the web interface shows it. */
-export type BoardMedia = {
+/** A file on a starboard post, as the web interface shows it. */
+export type StarboardMedia = {
   url: string;
   name: string;
   kind: "image" | "video" | "file";
   /**
    * A blurred copy the bot uploaded with the post, of an NSFW image on a
-   * board that isn't NSFW.
+   * starboard that isn't NSFW.
    */
   blurred?: boolean;
   /** An image from a link in the text, not a file on the message. */
@@ -166,23 +166,22 @@ export type BoardMedia = {
 };
 
 /**
- * Messages that made it onto a board. A row goes when its post is taken down
- * because reactions dropped, and stays as `removed` when a moderator took it off.
+ * Messages that made it into the starboard. A row goes when its post is
+ * taken down because votes dropped, and stays as `removed` when someone
+ * deleted the post.
  */
-export const boardEntries = sqliteTable(
-  "board_entries",
+export const starboardEntries = sqliteTable(
+  "starboard_entries",
   {
-    messageId: text().notNull(),
-    /** The board's `name` in the config. */
-    board: text().notNull(),
+    messageId: text().primaryKey(),
     channelId: text().notNull(),
     authorId: text().notNull(),
-    /** The bot's post. Null once a moderator took the message off. */
+    /** The bot's post. Null once someone deleted it. */
     postChannelId: text(),
     postId: text(),
-    /** Members other than the author who reacted, as of the last update. */
+    /** The votes, the author's own included, as of the last update. */
     count: integer().notNull(),
-    /** A moderator took the message off, so it doesn't go up again. */
+    /** Someone deleted the post, so the message doesn't go up again. */
     removed: integer({ mode: "boolean" }).notNull().default(false),
     postedAt: integer({ mode: "timestamp_ms" }).notNull(),
     /**
@@ -192,19 +191,18 @@ export const boardEntries = sqliteTable(
     content: text(),
     authorName: text(),
     authorAvatar: text(),
-    media: text({ mode: "json" }).$type<BoardMedia[]>(),
+    media: text({ mode: "json" }).$type<StarboardMedia[]>(),
     /** When the message was sent. */
     sentAt: integer({ mode: "timestamp_ms" }),
   },
   (t) => [
-    primaryKey({ columns: [t.messageId, t.board] }),
-    uniqueIndex("board_entries_post_id_idx").on(t.postId),
-    index("board_entries_board_author_id_idx").on(t.board, t.authorId),
+    uniqueIndex("starboard_entries_post_id_idx").on(t.postId),
+    index("starboard_entries_author_id_idx").on(t.authorId),
   ],
 );
 
-/** Members whose messages never go on a board. */
-export const boardOptOuts = sqliteTable("board_opt_outs", {
+/** Members whose messages never go into the starboard. */
+export const starboardOptOuts = sqliteTable("starboard_opt_outs", {
   userId: text().primaryKey(),
   optedOutAt: integer({ mode: "timestamp_ms" }).notNull(),
 });
