@@ -24,8 +24,14 @@ export interface Embed {
   timestamp?: Date;
 }
 
-/** Plain text, or text and embeds. */
-export type MessageBody = string | { content?: string; embeds?: Embed[] };
+/** A file sent with a message. */
+export interface MessageFile {
+  name: string;
+  data: Uint8Array;
+}
+
+/** Plain text, or text, embeds and files. Editing a message leaves its files alone. */
+export type MessageBody = string | { content?: string; embeds?: Embed[]; files?: MessageFile[] };
 
 /** Colour of standing messages. */
 export const ACCENT = 0xc8a45a;
