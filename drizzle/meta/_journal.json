@@ -36,6 +36,13 @@
       "when": 1793473191576,
       "tag": "0004_web_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1793479819485,
+      "tag": "0005_board_snapshots",
+      "breakpoints": true
     }
   ]
 }

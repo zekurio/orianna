@@ -1,15 +1,19 @@
 import { Events, type Message, Routes } from "@fluxerjs/core";
 import { Effect, Layer } from "effect";
+import type { HttpClient } from "effect/http";
+import type { Dns } from "effect/net";
 import { reactionKey } from "../emoji.ts";
+import { downloadImage, SOURCE_MAX_BYTES } from "../expressions/image.ts";
 import { Fluxer, listen, orNotFound, reactionUsers, request } from "../fluxer.ts";
 import { editOptions, NO_MENTIONS, sendOptions } from "../messages/fluxer.ts";
-import { type BoardChannel, type BoardMessage, BoardGuild, type Boards } from "./boards.ts";
+import { type BoardAttachment, type BoardChannel, type BoardMessage, BoardGuild, type Boards } from "./boards.ts";
 
 /** Boards through fluxer.js. */
 export const FluxerBoardGuild = Layer.effect(
   BoardGuild,
   Effect.gen(function* () {
     const { client, guildId } = yield* Fluxer;
+    const http = yield* Effect.context<HttpClient.HttpClient | Dns.Dns>();
     /**
      * The message fetched last. Boards work one message at a time, so counting
      * its reactions right after doesn't fetch it again.
@@ -49,9 +53,21 @@ export const FluxerBoardGuild = Layer.effect(
           Effect.catchIf((err) => err.notFound || err.refused, () => Effect.succeed(null)),
         ),
 
+      // Attachments come from the media host, which may be on a private network.
+      downloadImage: (url) =>
+        downloadImage(url, SOURCE_MAX_BYTES, [client.instance.endpoints.media]).pipe(Effect.provideContext(http)),
+
       post: (channelId, body) =>
         request("posting to a board", () => client.channels.send(channelId, sendOptions(body, NO_MENTIONS))).pipe(
-          Effect.map((m) => m.id),
+          Effect.map((m) => ({
+            id: m.id,
+            files: new Map(
+              [...m.attachments.values()].flatMap((a) => {
+                const url = a.url ?? a.proxyUrl;
+                return url ? [[a.filename, url] as const] : [];
+              }),
+            ),
+          })),
         ),
 
       edit: (channelId, messageId, body) =>
@@ -94,11 +110,17 @@ function boardMessage(m: Message): BoardMessage {
     attachments: [...m.attachments.values()].flatMap((a) => {
       const url = a.url ?? a.proxyUrl;
       if (!url) return [];
-      return [{ name: a.filename, url, image: a.contentType?.startsWith("image/") ?? false, nsfw: a.nsfw }];
+      return [{ name: a.filename, url, kind: kindOf(a.contentType), nsfw: a.nsfw }];
     }),
     embedImages: m.embeds.flatMap((e) => e.image?.url ?? e.thumbnail?.url ?? []),
     reactionCounts,
   };
+}
+
+function kindOf(contentType: string | null | undefined): BoardAttachment["kind"] {
+  if (contentType?.startsWith("image/")) return "image";
+  if (contentType?.startsWith("video/")) return "video";
+  return "file";
 }
 
 /** Feeds reactions, edits and deletes into the boards, until the scope closes. */

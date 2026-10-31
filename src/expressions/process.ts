@@ -33,6 +33,9 @@ const NEEDED_FORMATS = { read: ["PNG", "JPEG", "GIF", "WEBP", "AVIF"], write: ["
 const PNG: ImageType = { ext: "png", mime: "image/png" };
 const WEBP: ImageType = { ext: "webp", mime: "image/webp" };
 const WEBP_QUALITY = "75";
+/** Longest side of a blurred image, and how strong the blur is. */
+const BLUR_SIDE = 500;
+const BLUR_SIGMA = "0x25";
 
 /** Images at least this many times wider than tall, or taller than wide, are cut up. */
 const SPLIT_RATIO = 2;
@@ -272,7 +275,32 @@ const makeImageMagick = Effect.gen(function* () {
     }).pipe(Effect.scoped);
   }
 
-  return { check, inspect, cut: cutImage };
+  /**
+   * A small, heavily blurred still of the first frame, which shows roughly
+   * what an image is without what's in it. For NSFW images on a board that
+   * isn't NSFW.
+   */
+  const blur = Effect.fn("ImageMagick.blur")(function* (image: Uint8Array) {
+    const type = sniffImage(image);
+    if (!type) return yield* refuse(UNSUPPORTED_IMAGE);
+    const blurred: ProcessedImage = {
+      image: yield* magickOrExplain(image, [
+        `${input(type)}[0]`,
+        "-auto-orient",
+        "-resize",
+        `${BLUR_SIDE}x${BLUR_SIDE}>`,
+        "-blur",
+        BLUR_SIGMA,
+        "-quality",
+        WEBP_QUALITY,
+        "webp:-",
+      ]),
+      type: WEBP,
+    };
+    return blurred;
+  });
+
+  return { check, inspect, cut: cutImage, blur };
 });
 
 /** Decodes and encodes images with ImageMagick's `magick`, a few at a time. */

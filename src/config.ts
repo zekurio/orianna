@@ -165,8 +165,8 @@ export const BotSettingsSchema = Schema.Struct({
   /**
    * Starboards: once enough members react to a message with a board's emoji,
    * the bot posts it in the board's channel. It needs View Channel and Read
-   * Message History where members react, and Send Messages and Embed Links in
-   * the board channels.
+   * Message History where members react, and Send Messages, Embed Links and
+   * Attach Files in the board channels.
    */
   boards: Schema.optionalKey(Schema.Array(BoardSchema)),
 });

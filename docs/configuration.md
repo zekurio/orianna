@@ -227,12 +227,15 @@ Each board:
 
 The bot posts from every channel it can read, private ones included, so put
 channels whose messages shouldn't be seen elsewhere in `ignoredChannelIds`.
-It leaves out messages from NSFW channels unless the board's channel is NSFW
-too, and doesn't show images their uploader marked NSFW. Messages in board
-channels never go up.
+Messages in board channels never go up.
+
+On a board whose channel isn't NSFW, the bot blurs what would be NSFW there,
+like shinpuru does: every image of a message from an NSFW channel, and images
+their uploader marked NSFW. It posts the blurred copies with the post, up to
+four, and leaves out other files from them. An NSFW board shows everything.
 
 The bot needs View Channel and Read Message History where members react, and
-Send Messages and Embed Links in the board channels. Fluxer doesn't tell the
+Send Messages, Embed Links and Attach Files in the board channels. Fluxer doesn't tell the
 bot about reactions from while it was offline. It counts them the next time
 someone reacts to the message.
 

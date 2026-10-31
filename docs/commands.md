@@ -192,7 +192,9 @@ Boards are set up with `!board create`, `edit` and `delete` below, or in the
 `boards` section of the settings, described in
 [Configuration](configuration.md#boards). Once enough members react to a
 message with a board's emoji, the bot posts it in the board's channel with
-the author, the text, the first image and a link back. The author's own
+the author, the text, the first image and a link back. A link to an image in
+the text counts as an image. On a board that isn't NSFW, NSFW images come
+blurred, as [Configuration](configuration.md#boards) describes. The author's own
 reaction doesn't count, and neither do bots.
 
 The post shows how many reacted and changes as that does. When the message is

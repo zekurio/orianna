@@ -1,18 +1,19 @@
-import { and, count, desc, eq, isNotNull, or, sql } from "drizzle-orm";
-import { Context, Effect, Semaphore } from "effect";
-import { refuse } from "../commands/command.ts";
+import { and, count, desc, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { Context, Effect, Result, Semaphore } from "effect";
+import { refuse, type UserError } from "../commands/command.ts";
 import type { BoardConfig } from "../config.ts";
 import { Database } from "../db/index.ts";
-import { boardEntries, boardOptOuts } from "../db/schema.ts";
+import { type BoardMedia, boardEntries, boardOptOuts } from "../db/schema.ts";
 import { type ParsedEmoji, parseEmoji, type ReactionEmoji, reactionKey } from "../emoji.ts";
+import { ImageMagick } from "../expressions/process.ts";
 import { type FluxerError, logFailure } from "../fluxer.ts";
-import { ACCENT, type MessageBody } from "../messages/body.ts";
+import { ACCENT, type MessageBody, type MessageFile } from "../messages/body.ts";
 
 /** A file on a message. */
 export interface BoardAttachment {
   name: string;
   url: string;
-  image: boolean;
+  kind: BoardMedia["kind"];
   /** The uploader marked it NSFW. */
   nsfw: boolean;
 }
@@ -59,8 +60,13 @@ export class BoardGuild extends Context.Service<
     readonly nsfw: (channelId: string) => Effect.Effect<boolean, FluxerError>;
     /** Null when the guild has no such channel. */
     readonly channel: (channelId: string) => Effect.Effect<BoardChannel | null, FluxerError>;
-    /** Posts a message and returns its ID. */
-    readonly post: (channelId: string, body: MessageBody) => Effect.Effect<string, FluxerError>;
+    /** Downloads an image from a message, to blur it. */
+    readonly downloadImage: (url: string) => Effect.Effect<Uint8Array, UserError>;
+    /** Posts a message. Returns its ID, and the URLs of its files by name. */
+    readonly post: (
+      channelId: string,
+      body: MessageBody,
+    ) => Effect.Effect<{ id: string; files: ReadonlyMap<string, string> }, FluxerError>;
     /** False when the message is gone. */
     readonly edit: (channelId: string, messageId: string, body: MessageBody) => Effect.Effect<boolean, FluxerError>;
     /** Also succeeds when the message is already gone. */
@@ -84,6 +90,20 @@ const MAX_TEXT = 3500;
 /** The last ID in a message link, or a bare ID. */
 const MESSAGE_ID = /(\d+)\/?$/;
 
+/** A link to an image in the text, shown when a message has no other image. */
+const IMAGE_LINK = /https?:\/\/\S+?\.(?:jpe?g|png|webp|gif)(?:[?#]\S*)?(?=\s|$)/i;
+
+/** How many images of one message the bot blurs, at most. */
+const MAX_BLURRED = 4;
+
+/** What a board that isn't NSFW hides. Both are false on an NSFW board. */
+interface Censor {
+  /** The message is from an NSFW channel, so all its images and files. */
+  channel: boolean;
+  /** Attachments their uploader marked NSFW. */
+  marked: boolean;
+}
+
 export type Boards = Effect.Success<ReturnType<typeof makeBoards>>;
 
 /**
@@ -95,6 +115,7 @@ export type Boards = Effect.Success<ReturnType<typeof makeBoards>>;
 export const makeBoards = Effect.fnUntraced(function* (config: readonly BoardConfig[], guildId: string) {
   const db = yield* Database;
   const guild = yield* BoardGuild;
+  const magick = yield* ImageMagick;
   const lock = yield* Semaphore.make(1);
 
   // The config check already rejected emoji that don't parse.
@@ -140,11 +161,14 @@ export const makeBoards = Effect.fnUntraced(function* (config: readonly BoardCon
       return;
     }
 
-    const body = renderPost(board, message, reacted, guild.messageLink(channelId, messageId));
+    const link = guild.messageLink(channelId, messageId);
+    const censor = yield* censorFor(board, channelId);
     if (row?.postChannelId && row.postId) {
-      if (yield* guild.edit(row.postChannelId, row.postId, body)) {
+      // Edits leave the post's files alone, so its blurred images stay.
+      const media = [...visibleMedia(message, censor), ...(row.media ?? []).filter((m) => m.blurred)];
+      if (yield* guild.edit(row.postChannelId, row.postId, renderPost(board, message, reacted, link, media))) {
         db.update(boardEntries)
-          .set({ count: reacted })
+          .set({ count: reacted, ...snapshot(message, media) })
           .where(and(eq(boardEntries.messageId, messageId), eq(boardEntries.board, board.name)))
           .run();
       } else {
@@ -154,28 +178,60 @@ export const makeBoards = Effect.fnUntraced(function* (config: readonly BoardCon
       return;
     }
 
-    if ((yield* guild.nsfw(channelId)) && !(yield* guild.nsfw(board.channelId))) return;
+    const media = visibleMedia(message, censor);
+    const files = yield* blurImages(message, censor);
+    const body = { ...renderPost(board, message, reacted, link, media), files };
     // A change to the settings interrupts updates; one that came between
     // posting and recording would leave the post behind, and post it again.
     yield* Effect.uninterruptible(
       guild.post(board.channelId, body).pipe(
-        Effect.map((postId) =>
-          db
-            .insert(boardEntries)
+        Effect.map((post) => {
+          const blurred = files.flatMap((f): BoardMedia[] => {
+            const url = post.files.get(f.name);
+            return url ? [{ url, name: f.name, kind: "image", blurred: true }] : [];
+          });
+          db.insert(boardEntries)
             .values({
               messageId,
               board: board.name,
               channelId,
               authorId: message.authorId,
               postChannelId: board.channelId,
-              postId,
+              postId: post.id,
               count: reacted,
               postedAt: new Date(),
+              ...snapshot(message, [...media, ...blurred]),
             })
-            .run(),
-        ),
+            .run();
+        }),
       ),
     );
+  });
+
+  const censorFor = Effect.fnUntraced(function* (board: Board, channelId: string) {
+    if (yield* guild.nsfw(board.channelId)) return { channel: false, marked: false } satisfies Censor;
+    return { channel: yield* guild.nsfw(channelId), marked: true } satisfies Censor;
+  });
+
+  /**
+   * Blurred copies of the images the board hides, to post with the message,
+   * as shinpuru does. An image that can't be blurred is left out.
+   */
+  const blurImages = Effect.fnUntraced(function* (message: BoardMessage, censor: Censor) {
+    const sources = [
+      ...message.attachments.filter((a) => a.kind === "image" && hidden(a, censor)).map((a) => a.url),
+      ...(censor.channel ? linkedImages(message) : []),
+    ].slice(0, MAX_BLURRED);
+    const files: MessageFile[] = [];
+    for (const url of sources) {
+      const result = yield* Effect.result(guild.downloadImage(url).pipe(Effect.flatMap(magick.blur)));
+      if (Result.isFailure(result)) {
+        yield* Effect.logWarning(`boards: couldn't blur ${url}: ${result.failure.message}`);
+        continue;
+      }
+      files.push({ name: `blurred-${files.length + 1}.webp`, data: result.success.image });
+    }
+    return files;
   });
 
   /** Deletes the post and forgets the entry, so the message can go up again. */
@@ -200,8 +256,39 @@ export const makeBoards = Effect.fnUntraced(function* (config: readonly BoardCon
     return board ? Effect.succeed(board) : noBoard(name, boards);
   }
 
+  /**
+   * Fills in what the posts from before the bot kept it show, for the web
+   * interface, one at a time between other updates. The posts stay as they are.
+   */
+  const catchUp = Effect.gen(function* () {
+    const rows = db
+      .select()
+      .from(boardEntries)
+      .where(and(isNull(boardEntries.content), isNotNull(boardEntries.postId)))
+      .all();
+    for (const { messageId, board: name } of rows) {
+      const board = byName.get(name);
+      if (!board) continue;
+      yield* enqueue(
+        "catching up",
+        Effect.gen(function* () {
+          const row = entry(messageId, name);
+          if (!row?.postId || row.content !== null) return;
+          const message = yield* guild.message(row.channelId, messageId);
+          if (!message) return yield* takeDown(row);
+          const media = visibleMedia(message, yield* censorFor(board, row.channelId));
+          db.update(boardEntries)
+            .set(snapshot(message, media))
+            .where(and(eq(boardEntries.messageId, messageId), eq(boardEntries.board, name)))
+            .run();
+        }),
+      );
+    }
+  });
+
   return {
     boards: boards as readonly Board[],
+    catchUp,
 
     /** Someone reacted, or reactions were cleared, all of them when `emoji` is unset. */
     reacted: (channelId: string, messageId: string, emoji?: ReactionEmoji) => {
@@ -319,12 +406,59 @@ export function noBoard(name: string | undefined, boards: readonly { name: strin
   return refuse(`There is no board called ${name}. Try ${boards.map((b) => b.name).join(", ")}.`);
 }
 
-export function renderPost(board: Board, message: BoardMessage, reacted: number, link: string): MessageBody {
-  const shown = message.attachments.find((a) => a.image && !a.nsfw);
-  const image = shown?.url ?? message.embedImages[0];
-  const files = message.attachments
-    .filter((a) => a !== shown)
-    .map((a) => `📎 [${a.name.replace(/[[\]]/g, "")}](${a.url})`);
+function hidden(attachment: BoardAttachment, censor: Censor): boolean {
+  return censor.channel || (censor.marked && attachment.nsfw);
+}
+
+/** Images from link previews, or else an image link in the text. */
+function linkedImages(message: BoardMessage): string[] {
+  if (message.embedImages.length > 0) return message.embedImages;
+  const link = IMAGE_LINK.exec(message.content)?.[0];
+  return link ? [link] : [];
+}
+
+/** The files and linked images a board shows, besides the ones it blurs. */
+export function visibleMedia(message: BoardMessage, censor: Censor): BoardMedia[] {
+  const media: BoardMedia[] = message.attachments
+    .filter((a) => !hidden(a, censor))
+    .map(({ url, name, kind }) => ({ url, name, kind }));
+  if (censor.channel) return media;
+  const linked = linkedImages(message).map(
+    (url): BoardMedia => ({ url, name: fileName(url), kind: "image", linked: true }),
+  );
+  return [...media, ...linked];
+}
+
+function fileName(url: string): string {
+  return URL.parse(url)?.pathname.split("/").at(-1) || url;
+}
+
+/** What the entry keeps of the message. */
+function snapshot(message: BoardMessage, media: BoardMedia[]) {
+  return {
+    content: message.content,
+    authorName: message.authorName,
+    authorAvatar: message.authorAvatar,
+    media,
+    sentAt: message.createdAt,
+  };
+}
+
+/**
+ * The post: the first image that isn't blurred, links to the other files,
+ * and the text. Blurred images go with the post as files of their own.
+ */
+export function renderPost(
+  board: Board,
+  message: BoardMessage,
+  reacted: number,
+  link: string,
+  media: readonly BoardMedia[],
+): Exclude<MessageBody, string> {
+  const shown = media.find((m) => m.kind === "image" && !m.blurred);
+  const files = media
+    .filter((m) => m !== shown && !m.blurred && !m.linked)
+    .map((m) => `📎 [${m.name.replace(/[[\]]/g, "")}](${m.url})`);
   const text = message.content.length > MAX_TEXT ? `${message.content.slice(0, MAX_TEXT)}…` : message.content;
   return {
     content: `${board.emoji.text} **${reacted}** in <#${message.channelId}>`,
@@ -333,7 +467,7 @@ export function renderPost(board: Board, message: BoardMessage, reacted: number,
         author: { name: message.authorName, iconUrl: message.authorAvatar },
         description: [text, files.join("\n"), `[Jump to message](${link})`].filter(Boolean).join("\n\n"),
         color: ACCENT,
-        image,
+        image: shown?.url,
         timestamp: message.createdAt,
       },
     ],

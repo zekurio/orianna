@@ -74,11 +74,16 @@ const startFeatures = Effect.fnUntraced(function* (
     });
     commands.push(yield* proposalCommands(proposals, settings.pollsChannelId));
   }
-  if (settings.emoji || settings.sticker) {
+  const imageUsers = [
+    ...(settings.emoji || settings.sticker ? ["emoji and sticker images"] : []),
+    ...(settings.boards?.length ? ["blurring NSFW images on boards"] : []),
+  ];
+  if (imageUsers.length > 0) {
     // Polls and role menus work without ImageMagick, so this only warns.
+    const what = imageUsers.join(" and ");
     yield* (yield* ImageMagick).check.pipe(
       Effect.flatMap((problems) =>
-        Effect.forEach(problems, (problem) => Effect.logError(`emoji and sticker images won't work: ${problem}`)),
+        Effect.forEach(problems, (problem) => Effect.logError(`${what} won't work: ${problem}`)),
       ),
       Effect.forkScoped,
     );
@@ -100,6 +105,7 @@ const startFeatures = Effect.fnUntraced(function* (
   // change, and again on every login. 🛑 from while offline waits for the
   // votes, so a poll it ends counts them.
   yield* whenever(milestones.logins, roleMenus.sync);
+  if (boards.boards.length > 0) yield* whenever(milestones.logins, boards.catchUp);
   if (community) {
     const reconcile = community.reconcile().pipe(Effect.catchCause(logFailure("poll reconcile")));
     yield* whenever(milestones.pollCatchUps, reconcile);

@@ -151,6 +151,20 @@ export const roleMenuReactions = sqliteTable(
   ],
 );
 
+/** A file on a board post, as the web interface shows it. */
+export type BoardMedia = {
+  url: string;
+  name: string;
+  kind: "image" | "video" | "file";
+  /**
+   * A blurred copy the bot uploaded with the post, of an NSFW image on a
+   * board that isn't NSFW.
+   */
+  blurred?: boolean;
+  /** An image from a link in the text, not a file on the message. */
+  linked?: boolean;
+};
+
 /**
  * Messages that made it onto a board. A row goes when its post is taken down
  * because reactions dropped, and stays as `removed` when a moderator took it off.
@@ -171,6 +185,16 @@ export const boardEntries = sqliteTable(
     /** A moderator took the message off, so it doesn't go up again. */
     removed: integer({ mode: "boolean" }).notNull().default(false),
     postedAt: integer({ mode: "timestamp_ms" }).notNull(),
+    /**
+     * What the post shows of the message, as of the last update, for the web
+     * interface. Null on entries from before the bot kept it, until it catches up.
+     */
+    content: text(),
+    authorName: text(),
+    authorAvatar: text(),
+    media: text({ mode: "json" }).$type<BoardMedia[]>(),
+    /** When the message was sent. */
+    sentAt: integer({ mode: "timestamp_ms" }),
   },
   (t) => [
     primaryKey({ columns: [t.messageId, t.board] }),
