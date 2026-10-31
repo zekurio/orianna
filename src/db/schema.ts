@@ -150,3 +150,37 @@ export const roleMenuReactions = sqliteTable(
     index("role_menu_reactions_user_id_idx").on(t.userId),
   ],
 );
+
+/**
+ * Messages that made it onto a board. A row goes when its post is taken down
+ * because reactions dropped, and stays as `removed` when a moderator took it off.
+ */
+export const boardEntries = sqliteTable(
+  "board_entries",
+  {
+    messageId: text().notNull(),
+    /** The board's `name` in the config. */
+    board: text().notNull(),
+    channelId: text().notNull(),
+    authorId: text().notNull(),
+    /** The bot's post. Null once a moderator took the message off. */
+    postChannelId: text(),
+    postId: text(),
+    /** Members other than the author who reacted, as of the last update. */
+    count: integer().notNull(),
+    /** A moderator took the message off, so it doesn't go up again. */
+    removed: integer({ mode: "boolean" }).notNull().default(false),
+    postedAt: integer({ mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.messageId, t.board] }),
+    uniqueIndex("board_entries_post_id_idx").on(t.postId),
+    index("board_entries_board_author_id_idx").on(t.board, t.authorId),
+  ],
+);
+
+/** Members whose messages never go on a board. */
+export const boardOptOuts = sqliteTable("board_opt_outs", {
+  userId: text().primaryKey(),
+  optedOutAt: integer({ mode: "timestamp_ms" }).notNull(),
+});

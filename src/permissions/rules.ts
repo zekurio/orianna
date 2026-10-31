@@ -19,12 +19,13 @@ export const PERMISSIONS = [
   "sticker.cancel-any",
   "polls.create",
   "polls.end-any",
+  "boards.remove",
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
 
 /** Named after the config section that turns the feature on. */
-export type PermissionGroup = "emoji" | "sticker" | "polls";
+export type PermissionGroup = "emoji" | "sticker" | "polls" | "boards";
 
 export function groupOf(permission: Permission): PermissionGroup {
   return permission.slice(0, permission.indexOf(".")) as PermissionGroup;

@@ -184,3 +184,27 @@ Role menus have no commands. The bot posts them from the config, as described
 in [Configuration](configuration.md#role-menus). React to get a role, and
 remove the reaction to drop it. In a menu where you pick one, picking another
 swaps the role.
+
+## Boards
+
+Boards turn on with the `boards` section of the config, described in
+[Configuration](configuration.md#boards). Once enough members react to a
+message with a board's emoji, the bot posts it in the board's channel with
+the author, the text, the first image and a link back. The author's own
+reaction doesn't count, and neither do bots.
+
+The post shows how many reacted and changes as that does. When the message is
+edited, so is the post. When it's deleted, the post goes too. When reactions
+drop below the threshold, the bot takes the post down, unless the board has
+`keep` set.
+
+Deleting a post takes the message off that board for good, the same as
+`!board remove`.
+
+| Command | Permission | What it does |
+|---|---|---|
+| `!board top [board]` | | Lists the 10 members with the most messages on a board, the first one in the config by default |
+| `!board optout` | | Keeps your messages off every board and takes down the ones already there |
+| `!board optin` | | Lets your messages go up again |
+| `!board remove <message>` | `boards.remove` | Takes a message off every board it's on, for good. Takes a link to the message or to a post, or either ID. Given a post, it only takes the message off that post's board. |
+

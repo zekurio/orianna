@@ -3,6 +3,9 @@ import * as BunDns from "@effect/platform-bun/BunDns";
 import { Events } from "@fluxerjs/core";
 import { Cause, Console, Deferred, Effect, Exit, Layer, Queue } from "effect";
 import { FetchHttpClient } from "effect/http";
+import { makeBoards } from "./boards/boards.ts";
+import { boardCommands } from "./boards/commands.ts";
+import { attachBoardEvents, FluxerBoardGuild } from "./boards/fluxer.ts";
 import type { CommandEntry } from "./commands/command.ts";
 import { help, ping } from "./commands/general.ts";
 import { makeCommandRouter } from "./commands/router.ts";
@@ -36,6 +39,7 @@ const Adapters = Layer.mergeAll(
   FluxerPollTransport,
   FluxerRoleGuild,
   FluxerExpressionGuild,
+  FluxerBoardGuild,
   ImageMagick.layer,
 ).pipe(Layer.provideMerge(Core));
 
@@ -105,6 +109,8 @@ const run = Effect.fnUntraced(function* (hangups: Queue.Queue<void>) {
   }
   const community = config.polls ? yield* makeCommunityPolls(config.polls, config.guildId) : undefined;
   if (community) commands.push(...pollCommands(community));
+  const boards = config.boards ? yield* makeBoards(config.boards, config.guildId) : undefined;
+  if (boards) commands.push(boardCommands(boards));
 
   const router = yield* makeCommandRouter(commands);
   // Built even without a `roleMenus` section, so removing it takes the menus down.
@@ -133,6 +139,7 @@ const run = Effect.fnUntraced(function* (hangups: Queue.Queue<void>) {
   yield* attachReactions(polls, "poll");
   if (community) yield* attachPollMessageDeletes(community);
   yield* attachRoleMenuEvents(roleMenus);
+  if (boards) yield* attachBoardEvents(boards);
 
   // Reloads wait for the first login, then run in turn.
   yield* Effect.gen(function* () {

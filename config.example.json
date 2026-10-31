@@ -51,5 +51,16 @@
         ]
       }
     ]
-  }
+  },
+  "boards": [
+    { "name": "gems", "emoji": "💎", "channelId": "000000000000000000", "threshold": 5 },
+    {
+      "name": "coal",
+      "emoji": "🪨",
+      "channelId": "000000000000000000",
+      "threshold": 8,
+      "keep": true,
+      "ignoredChannelIds": ["100000000000000020"]
+    }
+  ]
 }
