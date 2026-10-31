@@ -176,9 +176,6 @@ export type SettingsSection = keyof BotSettings;
 /** The top-level keys of the bot settings, in the order the schema lists them. */
 export const SETTINGS_SECTIONS = Object.keys(BotSettingsSchema.fields) as SettingsSection[];
 
-/** A bot settings section in the config file, kept as it is for the import. */
-const Legacy = Schema.optionalKey(Schema.Unknown);
-
 /** An http or https URL with nothing after the host but a slash. */
 const isOrigin = Schema.makeFilter((value: string) => {
   const url = URL.parse(value);
@@ -211,10 +208,6 @@ const WebConfigSchema = Schema.Struct({
  * The config file: how to reach Fluxer, where to keep data, and where to
  * serve the web interface. It's read once at startup, so changing it takes a
  * restart.
- *
- * The file may still hold the bot settings sections from before they moved
- * into the database. On the first start the bot imports them from here, and
- * ignores them after that.
  */
 export const ConfigSchema = Schema.Struct({
   /** Origin of the Fluxer instance. The client reads `/.well-known/fluxer` from here. */
@@ -225,14 +218,6 @@ export const ConfigSchema = Schema.Struct({
   database: Schema.String.check(Schema.isMinLength(1)).pipe(orDefault("./data/orianna.db")),
   /** The web interface is off when this section is missing. */
   web: Schema.optionalKey(WebConfigSchema),
-  prefix: Legacy,
-  permissions: Legacy,
-  pollsChannelId: Legacy,
-  emoji: Legacy,
-  sticker: Legacy,
-  polls: Legacy,
-  roleMenus: Legacy,
-  boards: Legacy,
 });
 
 /** The deployment keys of the config file. */
@@ -267,23 +252,16 @@ const indent = (problems: readonly string[]) => problems.map((p) => `  ${p}`).jo
 
 const decodeOptions = { errors: "all", onExcessProperty: "error" } as const;
 
-/** The config file, and the bot settings sections it still holds, if any. */
-export interface ConfigFile {
-  config: Config;
-  legacySettings: Record<string, unknown> | undefined;
-}
-
-export function parseConfig(raw: unknown): Effect.Effect<ConfigFile, ConfigError> {
+export function parseConfig(raw: unknown): Effect.Effect<Config, ConfigError> {
   return Schema.decodeUnknownEffect(ConfigSchema)(raw, decodeOptions).pipe(
     Effect.mapError((err) => new ConfigError({ message: `invalid config:\n${indent(schemaProblems(err.issue))}` })),
-    Effect.map(({ instance, guildId, database, web, ...rest }) => {
-      const legacy = Object.entries(rest).filter(([, value]) => value !== undefined);
-      return {
-        // Without the trailing slash, so paths can go straight after it.
-        config: { instance, guildId, database, web: web && { ...web, publicUrl: new URL(web.publicUrl).origin } },
-        legacySettings: legacy.length > 0 ? Object.fromEntries(legacy) : undefined,
-      };
-    }),
+    Effect.map(({ instance, guildId, database, web }) => ({
+      instance,
+      guildId,
+      database,
+      // Without the trailing slash, so paths can go straight after it.
+      web: web && { ...web, publicUrl: new URL(web.publicUrl).origin },
+    })),
   );
 }
 
@@ -434,7 +412,7 @@ export const loadConfig = Effect.fn("loadConfig")(function* (path: string) {
 });
 
 /** The config file, read once at startup. */
-export class AppConfig extends Context.Service<AppConfig, ConfigFile>()("orianna/AppConfig") {
+export class AppConfig extends Context.Service<AppConfig, Config>()("orianna/AppConfig") {
   /** Reads ORIANNA_CONFIG, or `config.json` in the working directory. */
   static readonly layer = Layer.effect(
     AppConfig,
@@ -446,7 +424,7 @@ export class AppConfig extends Context.Service<AppConfig, ConfigFile>()("orianna
 
   /** The deployment keys. Bot settings come from the Settings service. */
   static readonly current: Effect.Effect<Config, never, AppConfig> = Effect.gen(function* () {
-    return (yield* AppConfig).config;
+    return yield* AppConfig;
   });
 }
 

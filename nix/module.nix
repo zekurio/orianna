@@ -49,9 +49,7 @@ in
         starts, and any change restarts it.
 
         Bot settings like `permissions`, `emoji` or `boards` live in the bot's
-        database and are edited with `!settings`. On its first start the bot
-        imports them from here, so the sections from before they moved still
-        work for that; remove them afterwards.
+        database and are edited with `!settings`, not here.
       '';
       example = lib.literalExpression ''
         {

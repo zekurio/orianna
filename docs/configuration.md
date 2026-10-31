@@ -66,17 +66,6 @@ for 30 days, and the guild owner and members with Administrator see the
 server's settings too. When `publicUrl` starts with `https://`, the session
 cookie is only sent over HTTPS.
 
-### Bot settings in the config file
-
-Before the bot settings moved into the database, they were sections of the
-config file, and the file still takes them. When the database has no settings
-yet, on the first start, the bot imports these sections from the file and
-logs that it did. Without any, it starts with the defaults. A section that
-doesn't validate stops the bot, with the same kind of error as above.
-
-From then on the database wins. The bot ignores the sections in the file and
-logs a warning on each start until you remove them.
-
 ## Bot settings
 
 The bot settings are one JSON document in the database. The guild owner and
