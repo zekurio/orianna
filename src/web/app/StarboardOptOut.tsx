@@ -2,6 +2,7 @@ import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { Exit } from "effect";
 import { AsyncResult } from "effect/reactivity";
 import { useId, useState } from "react";
+import { toast } from "sonner";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,7 +29,6 @@ export function StarboardOptOut() {
   const { prefix } = useSession();
   const id = useId();
   const optedOut = useAtomValue(Api.query("starboardOptOut", undefined, { reactivityKeys: KEYS }));
-  const [message, setMessage] = useState<Message>();
   return (
     <Card>
       <CardHeader>
@@ -41,35 +41,19 @@ export function StarboardOptOut() {
           Same as <code>{prefix}starboard optout</code> and <code>{prefix}starboard optin</code> in chat.
         </CardDescription>
       </CardHeader>
-      <CardContent className="flex flex-col gap-3">
+      <CardContent>
         {AsyncResult.matchWithError(optedOut, {
           onInitial: () => <Spinner />,
           onError: () => <span className="text-sm text-destructive">Couldn't load this.</span>,
           onDefect: () => <span className="text-sm text-destructive">Couldn't load this.</span>,
-          onSuccess: ({ value }) => <OptOutSwitch optedOut={value} id={id} say={setMessage} />,
+          onSuccess: ({ value }) => <OptOutSwitch optedOut={value} id={id} />,
         })}
-        {message && (
-          <p role="status" className={message.error ? "text-sm text-destructive" : "text-sm text-muted-foreground"}>
-            {message.text}
-          </p>
-        )}
       </CardContent>
     </Card>
   );
 }
 
-/** What the last change did. */
-type Message = { text: string; error?: boolean };
-
-function OptOutSwitch({
-  optedOut,
-  id,
-  say,
-}: {
-  optedOut: boolean;
-  id: string;
-  say: (message: Message | undefined) => void;
-}) {
+function OptOutSwitch({ optedOut, id }: { optedOut: boolean; id: string }) {
   const set = useAtomSet(Api.mutation("setStarboardOptOut"), { mode: "promiseExit" });
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -79,14 +63,11 @@ function OptOutSwitch({
     const exit = await set({ payload: { optedOut: next }, reactivityKeys: [...KEYS, ...STARBOARD_KEYS] });
     setBusy(false);
     setConfirming(false);
-    if (Exit.isFailure(exit)) return say({ text: failureMessage(exit.cause), error: true });
+    if (Exit.isFailure(exit)) return toast.error(failureMessage(exit.cause));
     const removed = exit.value;
-    say({
-      text: !next
-        ? "Your messages can get into the starboard again."
-        : removed > 0
-          ? `Done. Took down ${removed} ${removed === 1 ? "post" : "posts"}.`
-          : "Done. Your messages stay out of the starboard now.",
+    if (!next) return toast.success("Your messages can get into the starboard again.");
+    toast.success("Your messages stay out of the starboard now.", {
+      description: removed > 0 ? `Took down ${removed} ${removed === 1 ? "post" : "posts"}.` : undefined,
     });
   };
 
@@ -98,7 +79,6 @@ function OptOutSwitch({
           checked={optedOut}
           disabled={busy}
           onCheckedChange={(checked) => {
-            say(undefined);
             if (checked) setConfirming(true);
             else change(false);
           }}

@@ -48,6 +48,12 @@ points at its docs and examples.
   CLI isn't a dependency; refresh it when updating components.
 - Put a feature's settings and actions on the page they're about. The Admin
   tab is only for settings of the whole server.
+- Say how an action went with a toast, `toast` from `sonner`; the
+  `Toaster` is mounted once in `src/web/app/main.tsx`. Keep inline messages
+  for problems with a form's fields and for data that didn't load.
+- State the bot doesn't hold, like how a page is sorted or whether a dialog
+  is open, goes in a zustand store when more than one component needs it or
+  it should survive leaving the page; local state stays in `useState`.
 - The app calls the bot with Effect RPC. Each call is defined once, with
   schemas, in `src/web/rpc.ts`; `src/web/handlers.ts` implements it, and the
   app reads it as an atom from `src/web/app/api.ts` with the hooks in

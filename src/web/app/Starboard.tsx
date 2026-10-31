@@ -1,15 +1,15 @@
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
-import { ArrowClockwise, CheckCircle, EyeSlash, File, GearSix, SortDescending, Star } from "@phosphor-icons/react";
+import { ArrowClockwise, EyeSlash, File, GearSix, SortDescending, Star } from "@phosphor-icons/react";
 import { AsyncResult } from "effect/reactivity";
-import { type MouseEvent, type ReactNode, useState } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import { PageHeader } from "@/components/page";
 import { Problem } from "@/components/Problem";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { Spinner } from "@/components/ui/spinner";
 import {
   type Names,
@@ -22,6 +22,7 @@ import { Api, STARBOARD_KEYS } from "./api.ts";
 import { useSession } from "./App.tsx";
 import { inlineEmoji, MessageText } from "./MessageText.tsx";
 import { StarboardSettings } from "./StarboardForm.tsx";
+import { useStarboardView } from "./starboardView.ts";
 
 // The starboard, as shinpuru's web interface shows it: the entries, latest
 // or top posts first, and more on request. Members with `starboard.config`
@@ -35,12 +36,8 @@ const entriesQuery = (sort: StarboardSort, offset: number) =>
 export function StarboardPage() {
   const { configStarboard } = useSession();
   const starboard = useAtomValue(Api.query("starboard", undefined, { reactivityKeys: STARBOARD_KEYS }));
-  const [sort, setSort] = useState<StarboardSort>("latest");
-  // Each page is a query of its own; "Load more ..." adds the next one.
-  const [pages, setPages] = useState(1);
+  const { sort, pages, toggleSort, loadMore, firstPage, setSettingsOpen } = useStarboardView();
   const refresh = useAtomRefresh(entriesQuery(sort, 0));
-  const [editing, setEditing] = useState(false);
-  const [notice, setNotice] = useState<string>();
 
   const info = AsyncResult.isSuccess(starboard) ? starboard.value : null;
 
@@ -50,13 +47,7 @@ export function StarboardPage() {
         title="Starboard"
         actions={
           <>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setSort(sort === "latest" ? "top" : "latest");
-                setPages(1);
-              }}
-            >
+            <Button variant="outline" onClick={toggleSort}>
               <SortDescending />
               {SORT_LABELS[sort]}
             </Button>
@@ -65,21 +56,14 @@ export function StarboardPage() {
               size="icon"
               aria-label="Refresh"
               onClick={() => {
-                setPages(1);
+                firstPage();
                 refresh();
               }}
             >
               <ArrowClockwise />
             </Button>
             {configStarboard && (
-              <Button
-                variant={editing ? "secondary" : "outline"}
-                aria-pressed={editing}
-                onClick={() => {
-                  setNotice(undefined);
-                  setEditing(!editing);
-                }}
-              >
+              <Button variant="outline" onClick={() => setSettingsOpen(true)}>
                 <GearSix />
                 Settings
               </Button>
@@ -87,21 +71,7 @@ export function StarboardPage() {
           </>
         }
       />
-      {notice && (
-        <Alert role="status">
-          <CheckCircle />
-          <AlertDescription>{notice}</AlertDescription>
-        </Alert>
-      )}
-      {editing && (
-        <StarboardSettings
-          onCancel={() => setEditing(false)}
-          onDone={(message) => {
-            setEditing(false);
-            setNotice(message);
-          }}
-        />
-      )}
+      {configStarboard && <SettingsDialog />}
       {AsyncResult.matchWithError(starboard, {
         onInitial: () => <Loading />,
         onError: () => <Problem />,
@@ -116,15 +86,35 @@ export function StarboardPage() {
                   sort={sort}
                   offset={i * STARBOARD_PAGE_SIZE}
                   last={i === pages - 1}
-                  onMore={() => setPages(pages + 1)}
+                  onMore={loadMore}
                 />
               ))}
             </div>
           ) : (
-            <NothingHere />
+            <NothingHere off />
           ),
       })}
     </>
+  );
+}
+
+/** The starboard settings, over the page. */
+function SettingsDialog() {
+  const { prefix } = useSession();
+  const { settingsOpen, setSettingsOpen } = useStarboardView();
+  return (
+    <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+      <DialogContent className="sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>Starboard settings</DialogTitle>
+          <DialogDescription>
+            Same as <code>{prefix}starboard set</code>. Changes apply right away and show up in{" "}
+            <code>{prefix}settings log</code>.
+          </DialogDescription>
+        </DialogHeader>
+        <StarboardSettings onCancel={() => setSettingsOpen(false)} onDone={() => setSettingsOpen(false)} />
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -137,9 +127,10 @@ function Loading() {
   );
 }
 
-/** shinpuru's empty starboard. */
-function NothingHere() {
-  const { prefix } = useSession();
+/** shinpuru's empty starboard; while it's `off`, with a way to set it up for members who may. */
+function NothingHere({ off = false }: { off?: boolean }) {
+  const { prefix, configStarboard } = useSession();
+  const setSettingsOpen = useStarboardView((view) => view.setSettingsOpen);
   return (
     <Empty>
       <EmptyHeader>
@@ -151,6 +142,14 @@ function NothingHere() {
           Did you already set up the starboard? If not, use the <code>{prefix}starboard</code> command to do so.
         </EmptyDescription>
       </EmptyHeader>
+      {off && configStarboard && (
+        <EmptyContent>
+          <Button onClick={() => setSettingsOpen(true)}>
+            <GearSix />
+            Set up the starboard
+          </Button>
+        </EmptyContent>
+      )}
     </Empty>
   );
 }
