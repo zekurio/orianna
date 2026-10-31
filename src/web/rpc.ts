@@ -43,6 +43,11 @@ export const Session = Schema.Struct({
   manageBoards: Schema.Boolean,
   /** What commands start with. */
   prefix: Schema.String,
+  /**
+   * Where the instance serves its pictures of Unicode emoji, as
+   * `<emojiImages>/<codepoints>.svg`, the way Fluxer's own client draws them.
+   */
+  emojiImages: Schema.String,
 });
 export type Session = typeof Session.Type;
 
@@ -166,6 +171,20 @@ export const BoardSetup = Schema.Struct({
 });
 export type BoardSetup = typeof BoardSetup.Type;
 
+/** A Unicode emoji for the picker, named the way Fluxer names it. */
+export const UnicodeEmoji = Schema.Struct({
+  unicode: Schema.String,
+  /** Without the colons, like `star`. */
+  name: Schema.String,
+  /** Every name and keyword it can be found by, in lowercase. */
+  terms: Schema.Array(Schema.String),
+});
+export type UnicodeEmoji = typeof UnicodeEmoji.Type;
+
+/** One of Fluxer's emoji categories, like People or Food. */
+export const EmojiCategory = Schema.Struct({ label: Schema.String, emojis: Schema.Array(UnicodeEmoji) });
+export type EmojiCategory = typeof EmojiCategory.Type;
+
 export const WebRpcs = RpcGroup.make(
   /** Who is signed in, and what the app needs to show them. */
   Rpc.make("session", { success: Session }),
@@ -194,6 +213,8 @@ export const WebRpcs = RpcGroup.make(
    * `!board optout` and `optin`. Answers how many posts came down.
    */
   Rpc.make("setBoardOptOut", { payload: { optedOut: Schema.Boolean }, success: Schema.Number }),
+  /** The Unicode emoji, in Fluxer's categories, for the emoji picker. */
+  Rpc.make("unicodeEmoji", { success: Schema.Array(EmojiCategory) }),
   /** Every board as it's set up, for members with `boards.manage`. */
   Rpc.make("boardSetup", { success: BoardSetup, error: Refused }),
   /** Adds a board, like `!board create`. */

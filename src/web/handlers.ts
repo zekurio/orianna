@@ -4,6 +4,7 @@ import { Headers } from "effect/http";
 import { BoardGuild, LiveBoards, noBoard } from "../boards/boards.ts";
 import { createBoard, deleteBoard, editBoard } from "../boards/manage.ts";
 import { parseEmoji } from "../emoji.ts";
+import { unicodeEmoji } from "./emoji.ts";
 import type { UserError } from "../commands/command.ts";
 import { Fluxer, type FluxerError, logFailure, request } from "../fluxer.ts";
 import { GuildAccess } from "../permissions/rules.ts";
@@ -176,6 +177,7 @@ export const HandlersLive = WebRpcs.toLayer(
             admin,
             manageBoards: yield* access.can(userId, "boards.manage"),
             prefix,
+            emojiImages: `${client.instance.endpoints.static_cdn.replace(/\/+$/, "")}/emoji`,
           };
         }).pipe(hide("loading the session")),
 
@@ -259,6 +261,8 @@ export const HandlersLive = WebRpcs.toLayer(
           yield* visibleBoard(board);
           yield* (yield* boardsNow).remove(postId);
         }).pipe(answer("taking a message off a board")),
+
+      unicodeEmoji: () => Effect.sync(unicodeEmoji).pipe(hide("listing the emoji")),
 
       boardOptOut: () =>
         Effect.gen(function* () {

@@ -1,9 +1,8 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
-import { FloppyDiskIcon, PlusIcon, SmileyIcon, TrashIcon, WarningCircleIcon, XIcon } from "@phosphor-icons/react";
+import { FloppyDiskIcon, PlusIcon, TrashIcon, WarningCircleIcon, XIcon } from "@phosphor-icons/react";
 import { Exit, Result, Schema, SchemaIssue } from "effect";
 import { AsyncResult } from "effect/reactivity";
 import { type FormEvent, useId, useMemo, useState } from "react";
-import { parseEmoji } from "../../emoji.ts";
 import { BoardInput, type BoardSetup } from "../rpc.ts";
 import { Api, BOARD_KEYS, failureMessage } from "./api.ts";
 import { useSession } from "./App.tsx";
@@ -18,6 +17,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { EmojiPicker } from "@/components/EmojiPicker";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -34,7 +34,6 @@ import {
   FieldSet,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
@@ -70,9 +69,6 @@ function check(draft: BoardInput): Result.Result<BoardInput, Problems> {
     return problems;
   });
 }
-
-/** Whatever font the system draws colour emoji with. */
-const emojiFont = { fontFamily: '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif' };
 
 function Problem({ children }: { children: string }) {
   return (
@@ -245,7 +241,7 @@ function BoardForm({
                 emojis={setup.emojis}
                 originalUrl={original?.emoji === board.emoji ? original.emojiUrl : null}
                 onChange={(emoji) => set("emoji", emoji)}
-                onBlur={() => touch("emoji")}
+                onClose={() => touch("emoji")}
               />
 
               <Field data-invalid={problem("channelId") ? true : undefined}>
@@ -374,7 +370,7 @@ function EmojiField({
   emojis,
   originalUrl,
   onChange,
-  onBlur,
+  onClose,
 }: {
   control: { id: string; "aria-invalid"?: boolean; "aria-describedby": string };
   problem: string | undefined;
@@ -382,44 +378,20 @@ function EmojiField({
   emojis: readonly Emoji[];
   originalUrl: string | null;
   onChange: (emoji: string) => void;
-  onBlur: () => void;
+  onClose: () => void;
 }) {
-  const custom = emojis.find((e) => e.text === value);
-  const url = custom?.url ?? originalUrl;
-  const parsed = parseEmoji(value);
-  // A custom emoji's text is `<:name:id>`, which only its picture shows.
-  const unicode = parsed && !parsed.text.startsWith("<") ? parsed.text : undefined;
   return (
     <Field data-invalid={problem ? true : undefined}>
       <FieldLabel htmlFor={control.id}>Emoji</FieldLabel>
-      <InputGroup>
-        <InputGroupAddon aria-hidden="true">
-          {url ? (
-            <img src={url} alt="" className="size-5 object-contain" />
-          ) : unicode ? (
-            <span className="text-lg leading-none" style={emojiFont}>
-              {unicode}
-            </span>
-          ) : (
-            <SmileyIcon />
-          )}
-        </InputGroupAddon>
-        <InputGroupInput
-          {...control}
-          value={custom ? `:${custom.name}:` : value}
-          onChange={(e) => {
-            // `:name:` of a server emoji counts as that emoji.
-            const typed = e.target.value.trim();
-            onChange(emojis.find((emoji) => `:${emoji.name}:` === typed)?.text ?? typed);
-          }}
-          onBlur={onBlur}
-          placeholder="⭐"
-          autoComplete="off"
-          spellCheck={false}
-          required
-        />
-      </InputGroup>
-      <FieldDescription id={`${control.id}-hint`}>Type or paste one, or :name: of a server emoji.</FieldDescription>
+      <EmojiPicker
+        {...control}
+        value={value}
+        server={emojis}
+        fallbackImage={originalUrl}
+        onChange={onChange}
+        onClose={onClose}
+      />
+      <FieldDescription id={`${control.id}-hint`}>What members react with.</FieldDescription>
       <FieldError id={`${control.id}-problem`}>{problem}</FieldError>
     </Field>
   );
