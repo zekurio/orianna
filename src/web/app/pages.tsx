@@ -1,6 +1,7 @@
 import { Star, UsersThree } from "@phosphor-icons/react";
 import { type ReactNode, useEffect } from "react";
 import { useSession } from "./App.tsx";
+import { BoardOptOut } from "./BoardOptOut.tsx";
 import { BoardSettings } from "./BoardSettings.tsx";
 import { Link } from "./router.tsx";
 
@@ -46,7 +47,7 @@ export function ProfilePage() {
       </section>
       <h2 className="section-title">Your settings</h2>
       <p className="lead">Settings that only change things for you.</p>
-      <Unbuilt />
+      <BoardOptOut />
     </>
   );
 }

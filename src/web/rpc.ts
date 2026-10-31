@@ -167,6 +167,13 @@ export const WebRpcs = RpcGroup.make(
   Rpc.make("boardTop", { payload: { board: Schema.String }, success: Schema.Array(Leader), error: Refused }),
   /** Takes a message off a board for good, like `!board remove` with a link to its post. */
   Rpc.make("removeFromBoard", { payload: { board: Schema.String, postId: Schema.String }, error: Refused }),
+  /** Whether the member keeps their messages off the boards, like `!board optout`. */
+  Rpc.make("boardOptOut", { success: Schema.Boolean }),
+  /**
+   * Keeps the member's messages off the boards, or lets them go up again, like
+   * `!board optout` and `optin`. Answers how many posts came down.
+   */
+  Rpc.make("setBoardOptOut", { payload: { optedOut: Schema.Boolean }, success: Schema.Number }),
   /** Every board as it's set up, for members with `boards.manage`. */
   Rpc.make("boardSetup", { success: BoardSetup, error: Refused }),
   /** Adds a board, like `!board create`. */

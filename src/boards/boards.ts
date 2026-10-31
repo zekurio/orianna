@@ -388,6 +388,9 @@ export const makeBoards = Effect.fnUntraced(function* (config: readonly BoardCon
         }),
       ),
 
+    /** Whether the member keeps their messages off the boards. */
+    optedOut: (userId: string) => Effect.sync(() => optedOut(userId)),
+
     /** Returns false when the member hadn't opted out. */
     optIn: (userId: string) =>
       Effect.sync(() => db.delete(boardOptOuts).where(eq(boardOptOuts.userId, userId)).returning().all().length > 0),

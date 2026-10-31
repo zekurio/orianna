@@ -38,7 +38,7 @@ leaderboard. A member only sees the boards whose channels they can see, and
 members with `boards.remove` can take a message off a board from there.
 
 Each member has a profile page, under their name in the top corner, for
-their own settings. Members who manage something get an Admin tab: those
+their own settings, like keeping their messages off the boards. Members who manage something get an Admin tab: those
 with `boards.manage` set up boards under Admin → Boards, and the guild
 owner and members with Administrator get Admin → Server for the bot
 settings. The commands page and Admin → Server are still empty.

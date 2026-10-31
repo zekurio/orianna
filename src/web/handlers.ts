@@ -260,6 +260,21 @@ export const HandlersLive = WebRpcs.toLayer(
           yield* (yield* boardsNow).remove(postId);
         }).pipe(answer("taking a message off a board")),
 
+      boardOptOut: () =>
+        Effect.gen(function* () {
+          const { userId } = yield* CurrentMember;
+          return yield* (yield* boardsNow).optedOut(userId);
+        }).pipe(hide("loading the board opt-out")),
+
+      setBoardOptOut: ({ optedOut }) =>
+        Effect.gen(function* () {
+          const { userId } = yield* CurrentMember;
+          const boards = yield* boardsNow;
+          if (optedOut) return yield* boards.optOut(userId);
+          yield* boards.optIn(userId);
+          return 0;
+        }).pipe(hide("changing the board opt-out")),
+
       boardSetup: () =>
         Effect.gen(function* () {
           const userId = yield* mayManage;
