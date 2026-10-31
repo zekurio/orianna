@@ -1,6 +1,5 @@
 import { BookOpenText, CaretDown, type Icon, ShieldStar, SignOut, Star, UserCircle } from "@phosphor-icons/react";
 import { cn } from "cn";
-import { container } from "@/components/page";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,12 +27,8 @@ export function Header({ path }: { path: string }) {
   const tabs = admin ? [...TABS, ADMIN_TAB] : TABS;
   return (
     <header className="sticky top-0 z-10 border-b bg-background">
-      <div
-        className={cn(
-          container,
-          "flex h-16 items-center gap-x-4 sm:gap-x-10 max-sm:h-auto max-sm:flex-wrap max-sm:gap-y-1 max-sm:pt-3",
-        )}
-      >
+      {/* The full width, unlike the pages, so the tabs have room to grow. */}
+      <div className="flex h-16 w-full items-center gap-x-4 px-4 sm:gap-x-10 sm:px-6 max-sm:h-auto max-sm:flex-wrap max-sm:gap-y-1 max-sm:pt-3">
         <Link
           to="/starboard"
           className="flex items-center gap-2 font-heading text-[1.375rem] leading-none font-semibold text-foreground no-underline"

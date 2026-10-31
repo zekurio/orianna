@@ -2,7 +2,7 @@ import { type ReactNode, useEffect } from "react";
 
 // How a page is laid out. The primitives inside a page are in components/ui.
 
-/** The width of the header's contents and of every page, with the same gutters. */
+/** The width of every page, with its gutters. The header spans the whole window instead. */
 export const container = "mx-auto w-full max-w-page px-4 sm:px-6 lg:px-10";
 
 /** Pages without the header, like signing in, centred on the screen. */
