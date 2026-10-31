@@ -4,26 +4,34 @@ import { AsyncResult } from "effect/reactivity";
 import { useState } from "react";
 import { Api, failureMessage } from "./api.ts";
 import { useSession } from "./App.tsx";
+import { Confirm, cx, Hint, Loading, panel } from "./ui.tsx";
 
 // Keeping your messages off the boards, like `!board optout` and `optin`.
 
 const KEYS = ["board-opt-out"];
 
+/** A checkbox drawn as a switch: a track, brass when on, with a knob that slides. */
+const switchClass =
+  "relative h-6 w-11 flex-none cursor-pointer appearance-none rounded-full bg-line transition-colors " +
+  "after:absolute after:top-0.75 after:left-0.75 after:size-4.5 after:rounded-full after:bg-porcelain " +
+  "after:transition-transform checked:bg-brass checked:after:translate-x-5 checked:after:bg-charcoal " +
+  "disabled:cursor-progress disabled:opacity-60 motion-reduce:transition-none motion-reduce:after:transition-none";
+
 export function BoardOptOut() {
   const optedOut = useAtomValue(Api.query("boardOptOut", undefined, { reactivityKeys: KEYS }));
   return (
-    <section className="setting">
-      <div className="setting-text">
-        <h3>Keep my messages off the boards</h3>
-        <p className="hint">
+    <section className={cx(panel, "flex flex-wrap items-start gap-x-8 gap-y-4 px-5 py-4.5")}>
+      <div className="flex flex-[1_1_20rem] flex-col gap-1">
+        <h3 className="text-lg leading-snug">Keep my messages off the boards</h3>
+        <Hint>
           Your messages never go up on a board, however many react to them, and the ones already there come down.
           Turn it off again any time; messages go up again once someone reacts to them.
-        </p>
+        </Hint>
       </div>
       {AsyncResult.matchWithError(optedOut, {
-        onInitial: () => <span className="quiet">Loading…</span>,
-        onError: () => <span className="form-error">Couldn't load this.</span>,
-        onDefect: () => <span className="form-error">Couldn't load this.</span>,
+        onInitial: () => <Loading />,
+        onError: () => <Hint problem>Couldn't load this.</Hint>,
+        onDefect: () => <Hint problem>Couldn't load this.</Hint>,
         onSuccess: ({ value }) => <OptOutSwitch optedOut={value} />,
       })}
     </section>
@@ -54,22 +62,17 @@ function OptOutSwitch({ optedOut }: { optedOut: boolean }) {
   };
 
   return (
-    <div className="setting-control">
+    <div className="flex flex-[1_1_14rem] flex-col items-end gap-2 text-right">
       {confirming ? (
-        <span className="confirm">
+        <Confirm confirm="Opt out" busy={busy} onConfirm={() => change(true)} onCancel={() => setConfirming(false)}>
           Your posts on the boards come down, and they don't keep their reactions.
-          <button type="button" className="text-button danger" disabled={busy} onClick={() => change(true)}>
-            Opt out
-          </button>
-          <button type="button" className="text-button" disabled={busy} onClick={() => setConfirming(false)}>
-            Cancel
-          </button>
-        </span>
+        </Confirm>
       ) : (
-        <label className="switch">
+        <label className="inline-flex cursor-pointer items-center gap-2.5 font-display font-medium">
           <input
             type="checkbox"
             role="switch"
+            className={switchClass}
             checked={optedOut}
             disabled={busy}
             onChange={(e) => {
@@ -82,13 +85,13 @@ function OptOutSwitch({ optedOut }: { optedOut: boolean }) {
         </label>
       )}
       {message && (
-        <p className={message.error ? "form-error" : "hint"} role="status">
-          {message.text}
-        </p>
+        <Hint problem={message.error}>
+          <span role="status">{message.text}</span>
+        </Hint>
       )}
-      <p className="hint">
+      <Hint>
         Same as <code>{prefix}board optout</code> and <code>{prefix}board optin</code> in chat.
-      </p>
+      </Hint>
     </div>
   );
 }

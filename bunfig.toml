@@ -1,0 +1,10 @@
+# Bun.serve bundles the web interface with Tailwind; scripts/build.ts does
+# the same for the compiled bot.
+[serve.static]
+plugins = ["bun-plugin-tailwind"]
+
+[install]
+# bun-plugin-tailwind asks for the `bun` package as a peer. The bot runs on
+# the Bun it's built with, so that package would only add every platform's
+# Bun binary to node_modules.
+peer = false

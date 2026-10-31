@@ -21,6 +21,8 @@ let
       fileset = fs.unions [
         ../package.json
         ../bun.lock
+        # Keeps bun-plugin-tailwind's `bun` peer, every platform's Bun, out.
+        ../bunfig.toml
       ];
     };
 
@@ -47,7 +49,7 @@ let
     impureEnvVars = lib.fetchers.proxyImpureEnvVars;
     outputHashMode = "recursive";
     outputHashAlgo = "sha256";
-    outputHash = "sha256-L1rH+Bn3udSYpWPdGAhCO2uB0yH6otI8pgTxwq7Uolc=";
+    outputHash = "sha256-Odiy5DZPEHB0GAAW4yEFvDF4PfWLSIWdJlbZEJhc+r4=";
   };
 in
 stdenvNoCC.mkDerivation {
@@ -58,7 +60,9 @@ stdenvNoCC.mkDerivation {
     root = ../.;
     fileset = fs.unions [
       ../package.json
+      ../bunfig.toml
       ../tsconfig.json
+      ../scripts
       ../src
       ../drizzle
     ];
@@ -70,7 +74,8 @@ stdenvNoCC.mkDerivation {
   ];
 
   # `bun run build` compiles the bot, the web interface and the migrations into
-  # one executable, with the Bun runtime inside.
+  # one executable, with the Bun runtime inside. scripts/build.ts runs Tailwind
+  # over the web interface's styles on the way.
   dontConfigure = true;
   buildPhase = ''
     runHook preBuild

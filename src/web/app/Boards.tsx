@@ -22,8 +22,23 @@ import { Api, BOARD_KEYS, failureMessage } from "./api.ts";
 import { useSession } from "./App.tsx";
 import { BoardEditor } from "./BoardForm.tsx";
 import { Empty } from "./Empty.tsx";
-import { MessageText } from "./MessageText.tsx";
+import { inlineEmoji, MessageText, mention } from "./MessageText.tsx";
 import { Link, navigate } from "./router.tsx";
+import {
+  Avatar,
+  buttonClass,
+  chipClass,
+  Confirm,
+  cx,
+  Hint,
+  Lead,
+  Loading,
+  Notice,
+  PageHeader,
+  panel,
+  Saved,
+  Tabs,
+} from "./ui.tsx";
 
 // The boards page: each board's posts, newest or most reacted first, and its
 // leaderboard, like `!board top`. Members with `boards.remove` can take a
@@ -50,12 +65,6 @@ const boardPath = (board: string, view: BoardView) =>
 /** Refreshes everything shown of a board once a message comes off it. */
 const keysOf = (board: string) => [`board:${board}`];
 
-function useTitle(title: string) {
-  useEffect(() => {
-    document.title = `${title} – Orianna`;
-  }, [title]);
-}
-
 export function BoardsPage({ board, view }: { board?: string; view: BoardView }) {
   const boards = useAtomValue(Api.query("boards", undefined, { reactivityKeys: BOARD_KEYS }));
   return AsyncResult.matchWithError(boards, {
@@ -78,9 +87,8 @@ export function BoardsPage({ board, view }: { board?: string; view: BoardView })
   });
 }
 
-function Heading({ board }: { board?: Board }) {
-  useTitle(board ? `${board.name} – Boards` : "Boards");
-  return <h1>Boards</h1>;
+function Heading() {
+  return <PageHeader title="Boards" />;
 }
 
 /** The board form that's open: a new board, or the board shown. */
@@ -134,7 +142,7 @@ function BoardList({
             title="No boards yet"
             action={
               manageBoards && (
-                <button type="button" className="button" onClick={() => open("new")}>
+                <button type="button" className={buttonClass()} onClick={() => open("new")}>
                   <Plus />
                   New board
                 </button>
@@ -157,13 +165,13 @@ function BoardList({
 
   return (
     <>
-      <Heading board={board} />
-      <nav className="board-picker" aria-label="Boards">
+      <Heading />
+      <nav className="-mb-1 flex gap-2 overflow-x-auto pb-1" aria-label="Boards">
         {boards.map((b) => (
           <Link
             key={b.name}
             to={boardPath(b.name, view)}
-            className="board-chip"
+            className={chipClass(b === board && editing !== "new")}
             aria-current={b === board && editing !== "new" ? "page" : undefined}
             onClick={() => {
               setEditing(null);
@@ -177,7 +185,7 @@ function BoardList({
         {manageBoards && (
           <button
             type="button"
-            className="board-chip new-chip"
+            className={chipClass(editing === "new", true)}
             aria-pressed={editing === "new"}
             onClick={() => open("new")}
           >
@@ -197,7 +205,7 @@ function BoardList({
               icon={MagnifyingGlass}
               title={`No board called ${name}`}
               action={
-                <Link to={boardPath(first.name, "latest")} className="button quiet-button">
+                <Link to={boardPath(first.name, "latest")} className={buttonClass("secondary")}>
                   Go to {first.name}
                 </Link>
               }
@@ -207,14 +215,6 @@ function BoardList({
           )
         ))}
     </>
-  );
-}
-
-function Saved({ children }: { children: string }) {
-  return (
-    <p className="saved" role="status">
-      {children}
-    </p>
   );
 }
 
@@ -232,53 +232,47 @@ function BoardPage({
 }) {
   return (
     <>
-      <div className="board-summary">
-        <p className="lead">
+      <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+        <Lead>
           When {board.threshold} {board.threshold === 1 ? "member reacts" : "members react"} with{" "}
-          <BoardEmoji board={board} />, a message goes up in <span className="mention">#{board.channelName}</span>.
+          <BoardEmoji board={board} />, a message goes up in <span className={mention}>#{board.channelName}</span>.
           {board.keep && " Posts stay up when reactions drop again."}
-        </p>
+        </Lead>
         {onEdit && (
-          <button type="button" className="button quiet-button" onClick={onEdit}>
+          <button type="button" className={buttonClass("secondary")} onClick={onEdit}>
             <PencilSimple />
             Edit board
           </button>
         )}
       </div>
-      <nav className="sections" aria-label="Views">
-        {VIEWS.map(({ view: v, label, icon: ViewIcon }) => (
-          <Link
-            key={v}
-            to={boardPath(board.name, v)}
-            className="section"
-            aria-current={v === view ? "page" : undefined}
-          >
-            <ViewIcon />
-            {label}
-          </Link>
-        ))}
-      </nav>
-      <div className="board-view">
-        {view === "leaderboard" ? (
-          <Leaderboard board={board} />
-        ) : (
-          <Posts key={`${board.name}/${view}`} board={board} sort={view} canRemove={canRemove} />
-        )}
-      </div>
+      <Tabs
+        label="Views"
+        items={VIEWS.map(({ view: v, label, icon }) => ({
+          to: boardPath(board.name, v),
+          label,
+          icon,
+          current: v === view,
+        }))}
+      />
+      {view === "leaderboard" ? (
+        <Leaderboard board={board} />
+      ) : (
+        <Posts key={`${board.name}/${view}`} board={board} sort={view} canRemove={canRemove} />
+      )}
     </>
   );
 }
 
 export function BoardEmoji({ board }: { board: Pick<Board, "emoji" | "emojiUrl"> }) {
-  if (board.emojiUrl) return <img className="inline-emoji" src={board.emojiUrl} alt={board.emoji} />;
-  return <span className="unicode-emoji">{board.emoji}</span>;
+  if (board.emojiUrl) return <img className={inlineEmoji} src={board.emojiUrl} alt={board.emoji} />;
+  return <span className="text-[1.1em] leading-none">{board.emoji}</span>;
 }
 
 function Posts({ board, sort, canRemove }: { board: Board; sort: PostSort; canRemove: boolean }) {
   // Each page is a query of its own; "Show more" adds the next one.
   const [pages, setPages] = useState(1);
   return (
-    <div className="posts">
+    <div className="flex flex-col gap-4">
       {Array.from({ length: pages }, (_, i) => (
         <PostPage
           key={i}
@@ -313,7 +307,7 @@ function PostPage({
     Api.query("boardPosts", { board: board.name, sort, offset }, { reactivityKeys: keysOf(board.name) }),
   );
   return AsyncResult.matchWithError(page, {
-    onInitial: () => <p className="quiet">Loading posts…</p>,
+    onInitial: () => <Loading>Loading posts…</Loading>,
     onError: (error) => <Problem message={error._tag === "Refused" ? error.message : undefined} />,
     onDefect: () => <Problem />,
     onSuccess: ({ value: { posts, total, names } }) => {
@@ -331,7 +325,7 @@ function PostPage({
             <PostCard key={post.postId} post={post} board={board} names={names} canRemove={canRemove} />
           ))}
           {last && offset + posts.length < total && (
-            <button type="button" className="button quiet-button" onClick={onMore}>
+            <button type="button" className={cx(buttonClass("secondary"), "self-center")} onClick={onMore}>
               <CaretDown />
               Show more
             </button>
@@ -360,12 +354,12 @@ function PostCard({
   const videos = post.media.filter((m) => m.kind === "video");
   const files = post.media.filter((m) => m.kind === "file");
   return (
-    <article className="post">
-      <header className="post-head">
+    <article className={cx(panel, "flex flex-col gap-3.5 px-5 py-4.5")}>
+      <header className="flex items-center gap-3">
         <Avatar url={post.authorAvatar} size={40} />
-        <div className="post-who">
-          <strong>{post.authorName ?? "A member"}</strong>
-          <span>
+        <div className="grid min-w-0">
+          <strong className="truncate">{post.authorName ?? "A member"}</strong>
+          <span className="text-sm text-rose">
             {channel ? `in #${channel}` : "in a private channel"}
             {post.sentAt !== null && (
               <>
@@ -375,23 +369,29 @@ function PostCard({
             )}
           </span>
         </div>
-        <span className="post-count" title={`${post.count} reacted`}>
+        <span className={cx(count, "ml-auto")} title={`${post.count} reacted`}>
           <BoardEmoji board={board} />
           {post.count}
         </span>
       </header>
       {post.content === null ? (
-        <p className="quiet">The bot hasn't caught up on this post yet. Open it in Fluxer to read it.</p>
+        <Hint>The bot hasn't caught up on this post yet. Open it in Fluxer to read it.</Hint>
       ) : (
         post.content && <MessageText text={post.content} names={names} />
       )}
       {images.length > 0 && (
-        <div className="post-media">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(12rem,1fr))] gap-2">
           {images.map((m) => (
-            <a key={m.url} href={m.url} target="_blank" rel="noreferrer noopener" className="post-image">
-              <img src={m.url} alt={m.name} loading="lazy" />
+            <a
+              key={m.url}
+              href={m.url}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="relative overflow-hidden rounded-xl bg-charcoal"
+            >
+              <img src={m.url} alt={m.name} loading="lazy" className="max-h-112 w-full object-contain" />
               {m.blurred && (
-                <span className="blur-badge">
+                <span className="absolute bottom-2 left-2 inline-flex items-center gap-1.5 rounded-full bg-charcoal/85 px-2.5 py-1 text-[0.8125rem] text-porcelain">
                   <EyeSlash />
                   NSFW, blurred
                 </span>
@@ -401,13 +401,24 @@ function PostCard({
         </div>
       )}
       {videos.map((m) => (
-        <video key={m.url} className="post-video" src={m.url} controls preload="metadata" />
+        <video
+          key={m.url}
+          className="max-h-112 w-full rounded-xl bg-charcoal object-contain"
+          src={m.url}
+          controls
+          preload="metadata"
+        />
       ))}
       {files.length > 0 && (
-        <ul className="post-files">
+        <ul className="flex flex-wrap gap-2">
           {files.map((m) => (
             <li key={m.url}>
-              <a href={m.url} target="_blank" rel="noreferrer noopener">
+              <a
+                href={m.url}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="inline-flex items-center gap-1.5 rounded-[10px] border border-line px-3 py-1.5 hover:border-rose hover:no-underline"
+              >
                 <File />
                 {m.name}
               </a>
@@ -415,12 +426,12 @@ function PostCard({
           ))}
         </ul>
       )}
-      <footer className="post-actions">
-        <a href={post.messageUrl} target="_blank" rel="noreferrer noopener">
+      <footer className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-line pt-3 text-[0.9375rem]">
+        <a href={post.messageUrl} target="_blank" rel="noreferrer noopener" className={buttonClass("text")}>
           <ChatCircleText />
           Jump to message
         </a>
-        <a href={post.postUrl} target="_blank" rel="noreferrer noopener">
+        <a href={post.postUrl} target="_blank" rel="noreferrer noopener" className={buttonClass("text")}>
           <ArrowSquareOut />
           Open post
         </a>
@@ -445,30 +456,29 @@ function RemoveButton({ board, post }: { board: Board; post: BoardPost }) {
     }
   };
 
-  if (state === "idle") {
-    return (
-      <>
-        <button type="button" className="text-button danger" onClick={() => setState("confirm")}>
+  return (
+    <span className="ml-auto inline-flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-right">
+      {state === "idle" ? (
+        <button type="button" className={buttonClass("danger")} onClick={() => setState("confirm")}>
           <Trash />
           Take off {board.name}
         </button>
-        {error && (
-          <span className="post-error" role="alert">
-            {error}
-          </span>
-        )}
-      </>
-    );
-  }
-  return (
-    <span className="confirm">
-      Take it off for good? It won't go up again.
-      <button type="button" className="text-button danger" disabled={state === "busy"} onClick={confirm}>
-        Take it off
-      </button>
-      <button type="button" className="text-button" disabled={state === "busy"} onClick={() => setState("idle")}>
-        Keep it
-      </button>
+      ) : (
+        <Confirm
+          confirm="Take it off"
+          cancel="Keep it"
+          busy={state === "busy"}
+          onConfirm={confirm}
+          onCancel={() => setState("idle")}
+        >
+          Take it off for good? It won't go up again.
+        </Confirm>
+      )}
+      {error && (
+        <Hint problem>
+          <span role="alert">{error}</span>
+        </Hint>
+      )}
     </span>
   );
 }
@@ -476,7 +486,7 @@ function RemoveButton({ board, post }: { board: Board; post: BoardPost }) {
 function Leaderboard({ board }: { board: Board }) {
   const leaders = useAtomValue(Api.query("boardTop", { board: board.name }, { reactivityKeys: keysOf(board.name) }));
   return AsyncResult.matchWithError(leaders, {
-    onInitial: () => <p className="quiet">Loading the leaderboard…</p>,
+    onInitial: () => <Loading>Loading the leaderboard…</Loading>,
     onError: (error) => <Problem message={error._tag === "Refused" ? error.message : undefined} />,
     onDefect: () => <Problem />,
     onSuccess: ({ value }) =>
@@ -485,7 +495,7 @@ function Leaderboard({ board }: { board: Board }) {
           Members show up here once their messages go up on {board.name}.
         </Empty>
       ) : (
-        <ol className="leaders">
+        <ol className="flex flex-col gap-2">
           {value.map((leader, i) => (
             <LeaderRow key={leader.userId} leader={leader} rank={i + 1} board={board} />
           ))}
@@ -496,15 +506,20 @@ function Leaderboard({ board }: { board: Board }) {
 
 function LeaderRow({ leader, rank, board }: { leader: Leader; rank: number; board: Board }) {
   return (
-    <li className="leader">
-      <span className="rank" data-podium={rank <= 3 ? rank : undefined}>
+    <li className={cx(panel, "flex items-center gap-3.5 px-4 py-2.5")}>
+      <span
+        className={cx(
+          "w-8 text-center font-display text-xl leading-none font-semibold",
+          rank === 1 ? "text-brass" : rank === 2 ? "text-porcelain" : "text-rose",
+        )}
+      >
         {rank}
       </span>
       <Avatar url={leader.avatarUrl} size={36} />
-      <strong className="leader-name">{leader.name ?? "A member"}</strong>
-      <span className="leader-stats">
+      <strong className="min-w-0 truncate">{leader.name ?? "A member"}</strong>
+      <span className="ml-auto inline-flex items-center gap-3.5 whitespace-nowrap text-rose">
         {leader.posts} {leader.posts === 1 ? "post" : "posts"}
-        <span className="post-count">
+        <span className={count}>
           <BoardEmoji board={board} />
           {leader.reactions}
         </span>
@@ -513,16 +528,10 @@ function LeaderRow({ leader, rank, board }: { leader: Leader; rank: number; boar
   );
 }
 
-function Avatar({ url, size }: { url: string | null; size: number }) {
-  const [broken, setBroken] = useState(false);
-  if (!url || broken) return <span className="avatar avatar-blank" style={{ width: size, height: size }} />;
-  return <img className="avatar" src={url} alt="" width={size} height={size} onError={() => setBroken(true)} />;
-}
+/** How many reacted: a brass pill with the board's emoji. */
+const count =
+  "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-brass/14 px-3 py-1 font-display font-semibold text-brass";
 
 function Problem({ message }: { message?: string }) {
-  return (
-    <p className="notice" role="alert">
-      {message ?? "The bot ran into a problem. Its log says what happened."}
-    </p>
-  );
+  return <Notice>{message ?? "The bot ran into a problem. Its log says what happened."}</Notice>;
 }

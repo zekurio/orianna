@@ -8,8 +8,14 @@ const TOKEN =
   /<@!?(\d+)>|<#(\d+)>|<(a?):(\w+):(\d+)>|`([^`\n]+)`|\*\*([^*\n]+)\*\*|\|\|([^|]+)\|\||(https?:\/\/[^\s<>]+)/g;
 
 export function MessageText({ text, names }: { text: string; names: Names }) {
-  return <div className="message-text">{render(text, names)}</div>;
+  return <div className="wrap-anywhere whitespace-pre-wrap">{render(text, names)}</div>;
 }
+
+/** A mention of a member or channel, like Fluxer shows it. */
+export const mention = "rounded bg-eye/14 px-1 font-medium text-eye";
+
+/** A custom emoji in a line of text. */
+export const inlineEmoji = "inline-block size-[1.25em] object-contain align-[-0.25em]";
 
 function render(text: string, names: Names): ReactNode[] {
   const out: ReactNode[] = [];
@@ -21,13 +27,13 @@ function render(text: string, names: Names): ReactNode[] {
     const key = match.index;
     if (user) {
       out.push(
-        <span key={key} className="mention">
+        <span key={key} className={mention}>
           @{names.users[user] ?? "unknown member"}
         </span>,
       );
     } else if (channel) {
       out.push(
-        <span key={key} className="mention">
+        <span key={key} className={mention}>
           #{names.channels[channel] ?? "private channel"}
         </span>,
       );
@@ -35,7 +41,7 @@ function render(text: string, names: Names): ReactNode[] {
       const url = names.emojis[emojiId];
       out.push(
         url ? (
-          <img key={key} className="inline-emoji" src={url} alt={`:${emojiName}:`} title={`:${emojiName}:`} />
+          <img key={key} className={inlineEmoji} src={url} alt={`:${emojiName}:`} title={`:${emojiName}:`} />
         ) : (
           `:${emojiName}:`
         ),
@@ -60,9 +66,14 @@ function render(text: string, names: Names): ReactNode[] {
 
 function Spoiler({ children }: { children: ReactNode }) {
   const [shown, setShown] = useState(false);
-  if (shown) return <span className="spoiler shown">{children}</span>;
+  if (shown) return <span className="rounded bg-line/50 px-1">{children}</span>;
   return (
-    <button type="button" className="spoiler" onClick={() => setShown(true)} aria-label="Show spoiler">
+    <button
+      type="button"
+      className="rounded bg-line px-1 text-transparent"
+      onClick={() => setShown(true)}
+      aria-label="Show spoiler"
+    >
       <span aria-hidden="true">{children}</span>
     </button>
   );
