@@ -36,8 +36,12 @@ their Fluxer account. Its boards page lists each board's posts, newest or
 most reacted first, with their images and files, and the board's
 leaderboard. A member only sees the boards whose channels they can see, and
 members with `boards.remove` can take a message off a board from there.
-Members with `boards.manage` set up boards under Settings → Boards. The
-other settings pages and the commands page are still empty.
+
+Each member has a profile page, under their name in the top corner, for
+their own settings. Members who manage something get an Admin tab: those
+with `boards.manage` set up boards under Admin → Boards, and the guild
+owner and members with Administrator get Admin → Server for the bot
+settings. The commands page and Admin → Server are still empty.
 
 To turn it on:
 
@@ -202,7 +206,7 @@ A board is a channel where the bot reposts messages that got enough
 reactions with one emoji, like a starboard. You can have as many as you like,
 say 💎 for gems and 🪨 for a hall of shame. Members with `boards.manage` set
 them up in chat with `!board create`, `edit` and `delete`, described in
-[Commands](commands.md#boards), or under Settings → Boards in the
+[Commands](commands.md#boards), or under Admin → Boards in the
 [web interface](#the-web-interface). Both change this section. It looks like this:
 
 ```json

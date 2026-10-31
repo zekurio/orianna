@@ -99,7 +99,7 @@ function BoardList({
         <Heading />
         {manageBoards ? (
           <p className="lead">
-            There are no boards yet. <Link to="/settings/boards">Set up the first one</Link>, or use{" "}
+            There are no boards yet. <Link to="/admin/boards">Set up the first one</Link>, or use{" "}
             <code>{prefix}board create</code> in chat.
           </p>
         ) : (
@@ -126,7 +126,7 @@ function BoardList({
           </Link>
         ))}
         {manageBoards && (
-          <Link to="/settings/boards" className="board-chip manage-chip">
+          <Link to="/admin/boards" className="board-chip manage-chip">
             <GearSix />
             Manage
           </Link>

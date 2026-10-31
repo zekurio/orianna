@@ -1,16 +1,20 @@
-import { BookOpenText, CaretDown, GearSix, type Icon, SignOut, Star } from "@phosphor-icons/react";
+import { BookOpenText, CaretDown, type Icon, ShieldStar, SignOut, Star, UserCircle } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { useSession } from "./App.tsx";
 import portrait from "./orianna.png";
-import { Link } from "./router.tsx";
+import { useAdminSections } from "./pages.tsx";
+import { Link, usePath } from "./router.tsx";
 
 const TABS: { to: string; label: string; icon: Icon }[] = [
   { to: "/boards", label: "Boards", icon: Star },
   { to: "/commands", label: "Commands", icon: BookOpenText },
-  { to: "/settings", label: "Settings", icon: GearSix },
 ];
 
+/** For members who manage something in the server. */
+const ADMIN_TAB = { to: "/admin", label: "Admin", icon: ShieldStar };
+
 export function Header({ path }: { path: string }) {
+  const tabs = useAdminSections().length > 0 ? [...TABS, ADMIN_TAB] : TABS;
   return (
     <header className="header">
       <Link to="/boards" className="wordmark">
@@ -18,7 +22,7 @@ export function Header({ path }: { path: string }) {
         Orianna
       </Link>
       <nav className="tabs" aria-label="Pages">
-        {TABS.map(({ to, label, icon: TabIcon }) => {
+        {tabs.map(({ to, label, icon: TabIcon }) => {
           const current = path === to || path.startsWith(`${to}/`);
           return (
             <Link key={to} to={to} className="tab" aria-current={current ? "page" : undefined}>
@@ -35,6 +39,7 @@ export function Header({ path }: { path: string }) {
 
 function UserMenu() {
   const { user } = useSession();
+  const path = usePath();
   const [open, setOpen] = useState(false);
   const menu = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
@@ -78,6 +83,15 @@ function UserMenu() {
             <strong>{user.name}</strong>
             {user.tag !== user.name && <span>{user.tag}</span>}
           </div>
+          <Link
+            to="/profile"
+            className="menu-item"
+            aria-current={path === "/profile" ? "page" : undefined}
+            onClick={() => setOpen(false)}
+          >
+            <UserCircle />
+            Profile
+          </Link>
           <button type="button" className="menu-item danger" onClick={signOut}>
             <SignOut />
             Sign out

@@ -636,6 +636,49 @@ code {
   color: var(--rose);
 }
 
+/* Profile */
+
+.profile-card {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  max-width: 46rem;
+  margin: 1rem 0 2rem;
+  padding: 1.125rem 1.25rem;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--raised);
+}
+
+.profile-who {
+  display: grid;
+  justify-items: start;
+  gap: 0.125rem;
+}
+
+.profile-who strong {
+  font: 600 1.375rem/1.2 var(--display);
+}
+
+.profile-who span:not(.tag) {
+  color: var(--rose);
+}
+
+.owner-tag {
+  margin-top: 0.25rem;
+  background: rgb(247 192 82 / 0.14);
+  color: var(--brass);
+}
+
+.section-title {
+  margin: 0 0 0.25rem;
+  font: 600 1.5rem/1.2 var(--display);
+}
+
+.menu-item[aria-current="page"] {
+  color: var(--brass);
+}
+
 /* Setting up boards */
 
 .button:disabled {
