@@ -1,7 +1,7 @@
 import { useAtomMount, useAtomRefresh, useAtomValue } from "@effect/atom-react";
 import { ArrowClockwise, EyeSlash, File, GearSix, SortDescending, Star } from "@phosphor-icons/react";
 import { AsyncResult } from "effect/reactivity";
-import type { MouseEvent, ReactNode } from "react";
+import { type MouseEvent, type ReactNode, useRef } from "react";
 import { PageHeader } from "@/components/page";
 import { Problem } from "@/components/Problem";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -81,7 +81,9 @@ export function StarboardPage() {
             <div className="flex flex-col gap-4">
               {Array.from({ length: pages }, (_, i) => (
                 <EntryPage
-                  key={`${sort}/${i}`}
+                  // By position alone, so the first page stays and shows what it had
+                  // while another sort loads.
+                  key={i}
                   starboard={info}
                   sort={sort}
                   offset={i * STARBOARD_PAGE_SIZE}
@@ -170,7 +172,10 @@ function EntryPage({
   onMore: () => void;
 }) {
   const page = useAtomValue(entriesQuery(sort, offset));
-  return AsyncResult.matchWithError(page, {
+  // The last page that came in, to show until the next one does instead of a spinner.
+  const shown = useRef<typeof page>(undefined);
+  if (!AsyncResult.isInitial(page)) shown.current = page;
+  return AsyncResult.matchWithError(shown.current ?? page, {
     onInitial: () => <Loading />,
     onError: () => <Problem />,
     onDefect: () => <Problem />,
