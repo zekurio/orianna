@@ -13,6 +13,8 @@ instance.
 - Permission rules decide who may do what.
 - Settings live in the bot's database. The server's admins change them in chat
   while the bot runs, and every change is recorded.
+- Members sign in to a web interface with their Fluxer account. Its pages are
+  still empty.
 
 Fluxer has no slash commands or buttons yet, so commands start with a prefix,
 `!` by default, and every vote is a reaction.
@@ -64,7 +66,10 @@ The flake exports a NixOS module:
 
 The module writes `settings` to `/etc/orianna/config.json`, keeps the database
 in `/var/lib/orianna`, and hands the token to the service as a systemd
-credential, so the file can stay readable by root only. After a
+credential, so the file can stay readable by root only. For the web
+interface, add `web` to `settings` and point `clientSecretFile` at the
+application's client secret, which the service gets the same way.
+[Configuration](docs/configuration.md#the-web-interface) has the steps. After a
 `nixos-rebuild switch`, the bot restarts when the config file changed.
 
 An older `settings` may still have bot settings like `permissions` or
@@ -74,20 +79,30 @@ warns on each start until you do.
 
 ### Anywhere else
 
-Install [Bun](https://bun.sh) and ImageMagick 7, then:
+Build the bot with [Bun](https://bun.sh):
 
 ```sh
 bun install --production
-cp config.example.json config.json
-echo 'FLUXER_BOT_TOKEN=...' > .env
-bun run start
+bun run build
 ```
 
-Fill in the instance and guild ID in `config.json` first. The bot reads the
-config from `ORIANNA_CONFIG`, or from `./config.json` when that's unset. Bun
-loads `.env` on its own. The bot creates the database and applies migrations
-when it starts. [`settings.example.json`](settings.example.json) shows every
-bot setting, ready to edit and send to `!settings import`.
+That writes `dist/orianna`, one executable with the bot, the web interface
+and the Bun runtime inside. It runs on the kind of machine that built it,
+which needs nothing else but ImageMagick 7. Then, where it runs:
+
+```sh
+cp config.example.json config.json
+echo 'FLUXER_BOT_TOKEN=...' > .env
+./dist/orianna
+```
+
+Fill in the instance and guild ID in `config.json` first. Fill in `web` and
+add `FLUXER_CLIENT_SECRET` to `.env` for the web interface, or remove `web`
+to run without it. The bot reads the config from `ORIANNA_CONFIG`, or from
+`./config.json` when that's unset, and loads `.env` from the working
+directory. It creates the database and applies migrations when it starts.
+[`settings.example.json`](settings.example.json) shows every bot setting,
+ready to edit and send to `!settings import`.
 
 ### What the bot needs in Fluxer
 
@@ -124,10 +139,14 @@ echo 'FLUXER_BOT_TOKEN=...' > .env
 bun run dev
 ```
 
+For the web interface on your machine, set `web.publicUrl` to
+`http://localhost:8080`, add `http://localhost:8080/auth/callback` as a
+redirect URI of the application, and put `FLUXER_CLIENT_SECRET` in `.env`.
+
 | Command | What it does |
 |---|---|
-| `bun run dev` | Runs the bot and restarts it when a file changes |
-| `bun run start` | Runs the bot |
+| `bun run dev` | Runs the bot and restarts it when a file changes. Changes to the web interface's app in `src/web/app` reload open pages instead. |
+| `bun run build` | Compiles the bot into `dist/orianna`, the executable the Nix package ships |
 | `bun run typecheck` | Runs `tsc --noEmit` |
 | `bun run db:generate` | Writes a migration for changes to `src/db/schema.ts` |
 

@@ -31,6 +31,17 @@ in
       '';
     };
 
+    clientSecretFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      default = null;
+      example = "/run/secrets/orianna-client-secret";
+      description = ''
+        File containing the client secret of the bot's application, which the web
+        interface needs to sign members in. Required when `settings.web` is set.
+        It is passed to the service like `tokenFile`.
+      '';
+    };
+
     settings = lib.mkOption {
       description = ''
         Deployment configuration, written to /etc/orianna/config.json. See
@@ -46,6 +57,10 @@ in
         {
           instance = "https://chat.example.org";
           guildId = "1234567890";
+          web = {
+            publicUrl = "https://orianna.example.org";
+            clientId = "1234567890";
+          };
         }
       '';
       type = lib.types.submodule {
@@ -71,6 +86,13 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    assertions = [
+      {
+        assertion = cfg.settings ? web -> cfg.clientSecretFile != null;
+        message = "services.orianna.clientSecretFile must be set for the web interface in services.orianna.settings.web.";
+      }
+    ];
+
     environment.etc."orianna/config.json".source = configFile;
 
     systemd.services.orianna = {
@@ -84,7 +106,10 @@ in
 
       serviceConfig = {
         ExecStart = lib.getExe cfg.package;
-        LoadCredential = "token:${cfg.tokenFile}";
+        LoadCredential = [
+          "token:${cfg.tokenFile}"
+        ]
+        ++ lib.optional (cfg.clientSecretFile != null) "client-secret:${cfg.clientSecretFile}";
         DynamicUser = true;
         StateDirectory = "orianna";
         WorkingDirectory = "/var/lib/orianna";

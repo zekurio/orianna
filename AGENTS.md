@@ -32,6 +32,15 @@ points at its docs and examples.
 - Read bot settings through the `Settings` service in
   `src/settings/settings.ts`, not `AppConfig`; they change while the bot
   runs. `AppConfig` holds only the deployment keys from the config file.
+- The web interface is a React app in `src/web/app`. `src/web/server.ts`
+  imports its `index.html`; run from source, Bun bundles the app on demand and
+  reloads open pages, and `bun run build` bundles it into the executable.
+- The app calls the bot with Effect RPC. Each call is defined once, with
+  schemas, in `src/web/rpc.ts`; `src/web/handlers.ts` implements it, and the
+  app reads it as an atom from `src/web/app/api.ts` with the hooks in
+  `@effect/atom-react`. A failure a member should read is an error in the
+  call's schema. Wrap anything else in `hide`, which logs it and tells the
+  app only that something went wrong.
 
 ## Nix
 
@@ -39,14 +48,17 @@ points at its docs and examples.
 from `nix/module.nix`, for x86_64-linux and aarch64-linux.
 
 - `nix build` builds the package. Run it after touching anything under `nix/`,
-  `package.json` or `bun.lock`.
+  `package.json` or `bun.lock`. The flake only sees files git knows about, so
+  `git add` new files first.
 - `node_modules` is a fixed-output derivation pinned to `bun.lock`. When the
   lockfile changes, set `outputHash` in `nix/package.nix` to `lib.fakeHash`,
   run `nix build`, copy the hash from the error, and commit it with the
   lockfile.
-- The package copies only `package.json`, `src/` and `drizzle/`. A new
-  top-level file the bot needs at runtime has to be added to the fileset in
-  `nix/package.nix`.
+- The package runs `bun run build`, which compiles `src/main.ts` and what it
+  imports into one executable, and embeds `drizzle/` with `--asset`. A file
+  the bot reads at runtime has to be embedded the same way, added to the
+  fileset in `nix/package.nix`, and found like the migrations in
+  `src/db/index.ts`.
 - `nix fmt -- flake.nix nix/*.nix` formats with nixfmt. Pass files, not
   directories; nixfmt has deprecated directory arguments.
 

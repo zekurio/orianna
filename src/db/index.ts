@@ -10,7 +10,9 @@ import * as schema from "./schema.ts";
 // bun:sqlite answers synchronously, so queries run inline in effects. A query
 // that throws is a bug or a broken disk, and ends up as a defect.
 
-const migrationsFolder = join(import.meta.dir, "../../drizzle");
+// From source, the migrations are at the top of the repository. The compiled
+// bot carries them inside, where every module's directory is the root.
+const migrationsFolder = join(import.meta.dir, Bun.isStandaloneExecutable ? "drizzle" : "../../drizzle");
 
 /** Opens (or creates) the database and applies pending migrations. */
 export function openDatabase(path: string) {

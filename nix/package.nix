@@ -47,7 +47,7 @@ let
     impureEnvVars = lib.fetchers.proxyImpureEnvVars;
     outputHashMode = "recursive";
     outputHashAlgo = "sha256";
-    outputHash = "sha256-LCCXDXlsFtGeAhvCilRGp8X01P0oTrTH/V8t437+wnQ=";
+    outputHash = "sha256-L1rH+Bn3udSYpWPdGAhCO2uB0yH6otI8pgTxwq7Uolc=";
   };
 in
 stdenvNoCC.mkDerivation {
@@ -58,30 +58,40 @@ stdenvNoCC.mkDerivation {
     root = ../.;
     fileset = fs.unions [
       ../package.json
+      ../tsconfig.json
       ../src
       ../drizzle
     ];
   };
 
-  nativeBuildInputs = [ makeWrapper ];
+  nativeBuildInputs = [
+    bun
+    makeWrapper
+  ];
 
+  # `bun run build` compiles the bot, the web interface and the migrations into
+  # one executable, with the Bun runtime inside.
   dontConfigure = true;
-  dontBuild = true;
+  buildPhase = ''
+    runHook preBuild
+    # A copy, not a symlink: the sourcemap in the executable names each package
+    # by where Bun found it, and a store path there would keep node_modules
+    # in the closure.
+    cp -r ${nodeModules}/node_modules node_modules
+    export HOME=$TMPDIR
+    bun run build
+    runHook postBuild
+  '';
   installPhase = ''
     runHook preInstall
-    mkdir -p $out/lib/orianna
-    cp -r package.json src drizzle $out/lib/orianna/
-    ln -s ${nodeModules}/node_modules $out/lib/orianna/node_modules
-
-    # Bun runs the TypeScript directly. Its transpiler cache would try to write
-    # under $HOME, which a DynamicUser service doesn't have. Emoji and sticker
-    # images are processed with ImageMagick's `magick`.
-    makeWrapper ${lib.getExe bun} $out/bin/orianna \
-      --add-flags "$out/lib/orianna/src/main.ts" \
-      --set-default BUN_RUNTIME_TRANSPILER_CACHE_PATH 0 \
-      --prefix PATH : ${lib.makeBinPath [ imagemagick ]}
+    # Emoji and sticker images are processed with ImageMagick's `magick`.
+    install -Dm755 dist/orianna $out/bin/orianna
+    wrapProgram $out/bin/orianna --prefix PATH : ${lib.makeBinPath [ imagemagick ]}
     runHook postInstall
   '';
+  # Bun keeps the program in the executable's `.bun` section. Stripping drops
+  # it, and what's left is the plain Bun CLI.
+  dontStrip = true;
 
   passthru = { inherit nodeModules; };
 

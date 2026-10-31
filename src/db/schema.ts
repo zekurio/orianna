@@ -217,3 +217,16 @@ export const settingsChanges = sqliteTable("settings_changes", {
   before: text({ mode: "json" }).$type<Record<string, unknown>>(),
   after: text({ mode: "json" }).$type<Record<string, unknown>>().notNull(),
 });
+
+/** Members signed in to the web interface. */
+export const webSessions = sqliteTable(
+  "web_sessions",
+  {
+    /** SHA-256 of the session cookie, in hex, so the table alone can't sign anyone in. */
+    tokenHash: text().primaryKey(),
+    userId: text().notNull(),
+    createdAt: integer({ mode: "timestamp_ms" }).notNull(),
+    expiresAt: integer({ mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [index("web_sessions_expires_at_idx").on(t.expiresAt)],
+);

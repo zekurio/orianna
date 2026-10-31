@@ -179,9 +179,38 @@ export const SETTINGS_SECTIONS = Object.keys(BotSettingsSchema.fields) as Settin
 /** A bot settings section in the config file, kept as it is for the import. */
 const Legacy = Schema.optionalKey(Schema.Unknown);
 
+/** An http or https URL with nothing after the host but a slash. */
+const isOrigin = Schema.makeFilter((value: string) => {
+  const url = URL.parse(value);
+  if (!url || (url.protocol !== "https:" && url.protocol !== "http:")) return "Expected an http or https URL";
+  if (url.pathname !== "/" || url.search || url.hash) {
+    return "Expected a URL without a path, like https://orianna.example.org";
+  }
+  return undefined;
+});
+
 /**
- * The config file: how to reach Fluxer and where to keep data. It's read
- * once at startup, so changing it takes a restart.
+ * The web interface. Members sign in with their Fluxer account through the
+ * bot's application, which takes its client secret too; see readClientSecret.
+ */
+const WebConfigSchema = Schema.Struct({
+  /**
+   * Where people open the web interface. Fluxer sends them back to
+   * `<publicUrl>/auth/callback` after they sign in, so the application needs
+   * that as a redirect URI.
+   */
+  publicUrl: Schema.String.check(isOrigin),
+  /** The ID of the bot's application. */
+  clientId: Snowflake,
+  /** Where the bot listens. A reverse proxy with TLS goes in front. */
+  host: Schema.String.check(Schema.isMinLength(1)).pipe(orDefault("127.0.0.1")),
+  port: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 })).pipe(orDefault(8080)),
+});
+
+/**
+ * The config file: how to reach Fluxer, where to keep data, and where to
+ * serve the web interface. It's read once at startup, so changing it takes a
+ * restart.
  *
  * The file may still hold the bot settings sections from before they moved
  * into the database. On the first start the bot imports them from here, and
@@ -194,6 +223,8 @@ export const ConfigSchema = Schema.Struct({
   guildId: Snowflake,
   /** SQLite file. Relative paths resolve against the working directory. */
   database: Schema.String.check(Schema.isMinLength(1)).pipe(orDefault("./data/orianna.db")),
+  /** The web interface is off when this section is missing. */
+  web: Schema.optionalKey(WebConfigSchema),
   prefix: Legacy,
   permissions: Legacy,
   pollsChannelId: Legacy,
@@ -209,7 +240,10 @@ export interface Config {
   readonly instance: string;
   readonly guildId: string;
   readonly database: string;
+  readonly web: WebConfig | undefined;
 }
+
+export type WebConfig = typeof WebConfigSchema.Type;
 
 export type ProposalConfig = typeof ProposalConfigSchema.Type;
 export type PollsConfig = typeof PollsConfigSchema.Type;
@@ -242,10 +276,11 @@ export interface ConfigFile {
 export function parseConfig(raw: unknown): Effect.Effect<ConfigFile, ConfigError> {
   return Schema.decodeUnknownEffect(ConfigSchema)(raw, decodeOptions).pipe(
     Effect.mapError((err) => new ConfigError({ message: `invalid config:\n${indent(schemaProblems(err.issue))}` })),
-    Effect.map(({ instance, guildId, database, ...rest }) => {
+    Effect.map(({ instance, guildId, database, web, ...rest }) => {
       const legacy = Object.entries(rest).filter(([, value]) => value !== undefined);
       return {
-        config: { instance, guildId, database },
+        // Without the trailing slash, so paths can go straight after it.
+        config: { instance, guildId, database, web: web && { ...web, publicUrl: new URL(web.publicUrl).origin } },
         legacySettings: legacy.length > 0 ? Object.fromEntries(legacy) : undefined,
       };
     }),
@@ -416,29 +451,39 @@ export class AppConfig extends Context.Service<AppConfig, ConfigFile>()("orianna
 }
 
 /**
- * Reads the bot token from the systemd credential `token` when running as a
- * service, falling back to FLUXER_BOT_TOKEN for local development.
+ * Reads a secret from the systemd credential `credential` when running as a
+ * service, falling back to the environment variable for local development.
  */
-export const readToken = Effect.gen(function* () {
-  const fs = yield* FileSystem.FileSystem;
-  const credentials = yield* Env.option(Env.String("CREDENTIALS_DIRECTORY"));
-  if (Option.isSome(credentials) && credentials.value) {
-    const file = `${credentials.value}/token`;
-    if (yield* fs.exists(file)) {
-      const token = (yield* fs.readFileString(file)).trim();
-      if (token) return Redacted.make(token);
+const readSecret = (credential: string, variable: string, noun: string) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const credentials = yield* Env.option(Env.String("CREDENTIALS_DIRECTORY"));
+    if (Option.isSome(credentials) && credentials.value) {
+      const file = `${credentials.value}/${credential}`;
+      if (yield* fs.exists(file)) {
+        const secret = (yield* fs.readFileString(file)).trim();
+        if (secret) return Redacted.make(secret);
+      }
     }
-  }
 
-  const token = Option.getOrUndefined(yield* Env.option(Env.String("FLUXER_BOT_TOKEN")))?.trim();
-  if (token) return Redacted.make(token);
+    const secret = Option.getOrUndefined(yield* Env.option(Env.String(variable)))?.trim();
+    if (secret) return Redacted.make(secret);
 
-  return yield* new ConfigError({
-    message: "no bot token: set FLUXER_BOT_TOKEN or provide a `token` systemd credential",
-  });
-}).pipe(
-  Effect.catchTags({
-    PlatformError: (err) => Effect.fail(new ConfigError({ message: `couldn't read the token: ${err.message}` })),
-    ConfigError: (err) => Effect.fail(new ConfigError({ message: err.message })),
-  }),
-);
+    return yield* new ConfigError({
+      message: `no ${noun}: set ${variable} or provide a \`${credential}\` systemd credential`,
+    });
+  }).pipe(
+    Effect.catchTags({
+      PlatformError: (err) => Effect.fail(new ConfigError({ message: `couldn't read the ${noun}: ${err.message}` })),
+      ConfigError: (err) => Effect.fail(new ConfigError({ message: err.message })),
+    }),
+  );
+
+/** The bot token, from the systemd credential `token` or FLUXER_BOT_TOKEN. */
+export const readToken = readSecret("token", "FLUXER_BOT_TOKEN", "bot token");
+
+/**
+ * The client secret of the bot's application, for signing in to the web
+ * interface, from the systemd credential `client-secret` or FLUXER_CLIENT_SECRET.
+ */
+export const readClientSecret = readSecret("client-secret", "FLUXER_CLIENT_SECRET", "client secret");
