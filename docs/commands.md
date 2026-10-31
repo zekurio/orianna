@@ -188,7 +188,8 @@ swaps the role.
 
 ## Boards
 
-Boards turn on with the `boards` section of the settings, described in
+Boards are set up with `!board create`, `edit` and `delete` below, or in the
+`boards` section of the settings, described in
 [Configuration](configuration.md#boards). Once enough members react to a
 message with a board's emoji, the bot posts it in the board's channel with
 the author, the text, the first image and a link back. The author's own
@@ -204,10 +205,37 @@ Deleting a post takes the message off that board for good, the same as
 
 | Command | Permission | What it does |
 |---|---|---|
+| `!board list` | | Lists the boards with their emoji, channel and threshold |
 | `!board top [board]` | | Lists the 10 members with the most messages on a board, the first one in the settings by default |
 | `!board optout` | | Keeps your messages off every board and takes down the ones already there |
 | `!board optin` | | Lets your messages go up again |
 | `!board remove <message>` | `boards.remove` | Takes a message off every board it's on, for good. Takes a link to the message or to a post, or either ID. Given a post, it only takes the message off that post's board. |
+| `!board create <name> <emoji> <channel> [--threshold n] [--keep yes\|no] [--ignore channels]` | `boards.manage` | Adds a board |
+| `!board edit <board> [--name name] [--emoji emoji] [--channel channel] [--threshold n] [--keep yes\|no] [--ignore channels]` | `boards.manage` | Changes a board. What you leave out stays as it is. |
+| `!board delete <board>` | `boards.manage` | Deletes a board. Its posts stay in its channel, but the bot forgets them, so they no longer follow their messages or count for `!board top`. |
+
+The options are the board's keys in the settings:
+
+- `name`: lowercase letters, digits and hyphens, up to 32. Renaming a board
+  keeps its posts and leaderboard.
+- `emoji`: a Unicode emoji, or a custom one as `<:name:id>` or `name:id`.
+- `channel`: where the bot posts. Mention it, like `#gems`, or give its ID.
+- `--threshold`: how many members other than the author have to react, 5 by
+  default.
+- `--keep yes`: leaves a post up when reactions drop below the threshold
+  again.
+- `--ignore`: channels whose messages never go up on this board, mentioned or
+  as IDs, separated by spaces or commas. `--ignore none` clears the list.
+
+```
+!board create gems 💎 #gems --threshold 5
+!board edit gems --threshold 8 --ignore #staff #mod-log
+!board delete coal
+```
+
+A change is a settings change, so `!settings log` lists it and the boards
+start over, as [Configuration](configuration.md#changes-while-the-bot-runs)
+describes.
 
 ## Settings
 

@@ -125,6 +125,7 @@ export const BotSettingsSchema = Schema.Struct({
    * - `polls.create`: start a poll with `!poll`
    * - `polls.end-any`: end anyone's poll early with 🛑, not just one's own
    * - `boards.remove`: take a message off a board for good with `!board remove`
+   * - `boards.manage`: create, change and delete boards with `!board create`, `edit` and `delete`
    *
    * The most specific rule that names a permission decides it, so
    * `-emoji.decide` beats `+emoji.*`, which beats `+*`. Between rules that

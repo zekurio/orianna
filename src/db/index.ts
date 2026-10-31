@@ -28,6 +28,7 @@ export function openDatabase(path: string) {
 }
 
 export type DB = ReturnType<typeof openDatabase>;
+export type Transaction = Parameters<Parameters<DB["transaction"]>[0]>[0];
 
 export class Database extends Context.Service<Database, DB>()("orianna/Database") {
   /** The database at the config's `database` path, closed when the layer is released. */

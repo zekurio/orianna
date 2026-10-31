@@ -97,7 +97,7 @@ turns it on with the defaults below.
 | `sticker` | Off | Sticker proposals |
 | `polls` | Off | `!poll` |
 | `roleMenus` | Off | Role menus |
-| `boards` | Off | Starboards |
+| `boards` | None | Starboards. `!board create` adds them too. |
 
 ### `permissions`
 
@@ -196,7 +196,9 @@ a member leaves the guild, the bot removes their reactions.
 
 A board is a channel where the bot reposts messages that got enough
 reactions with one emoji, like a starboard. You can have as many as you like,
-say 💎 for gems and 🪨 for a hall of shame:
+say 💎 for gems and 🪨 for a hall of shame. Members with `boards.manage` set
+them up in chat with `!board create`, `edit` and `delete`, described in
+[Commands](commands.md#boards), which change this section. It looks like this:
 
 ```json
 "boards": [
@@ -216,7 +218,7 @@ Each board:
 
 | Key | Default | What it does |
 |---|---|---|
-| `name` | Required | Lowercase letters, digits and hyphens, up to 32, starting with a letter or digit. Members type it in `!board top`. Renaming a board starts its leaderboard over. |
+| `name` | Required | Lowercase letters, digits and hyphens, up to 32, starting with a letter or digit. Members type it in `!board top`. Renaming a board here starts its leaderboard over; `!board edit --name` keeps it. |
 | `emoji` | Required | A Unicode emoji, `name:id` or `<:name:id>` |
 | `channelId` | Required | Where the bot posts |
 | `threshold` | `5` | How many members other than the author have to react before a message goes up |

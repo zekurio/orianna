@@ -30,10 +30,11 @@ Roles are keyed by role ID. Edit the section with `!settings export` and
 | `polls.create` | Starting a poll with `!poll` |
 | `polls.end-any` | Ending anyone's poll early with 🛑. Everyone can end their own. |
 | `boards.remove` | Taking a message off the boards for good with `!board remove` |
+| `boards.manage` | Creating, changing and deleting boards with `!board create`, `edit` and `delete` |
 
 Every member can run the other commands: `!help`, `!ping`, `!perms`, `!polls`,
-`list` under `!emoji` and `!sticker`, and `top`, `optout` and `optin` under
-`!board`. The exception is `!settings`, below.
+`list` under `!emoji` and `!sticker`, and `list`, `top`, `optout` and `optin`
+under `!board`. The exception is `!settings`, below.
 
 ## Who may change the settings
 

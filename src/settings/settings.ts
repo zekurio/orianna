@@ -9,7 +9,7 @@ import {
   SETTINGS_SECTIONS,
   type SettingsSection,
 } from "../config.ts";
-import { Database, type DB } from "../db/index.ts";
+import { Database, type DB, type Transaction } from "../db/index.ts";
 import { settings, settingsChanges } from "../db/schema.ts";
 
 // The bot settings live in the database so they can change while the bot
@@ -33,6 +33,17 @@ export class Settings extends Context.Service<
      * is stored or recorded.
      */
     readonly replace: (raw: unknown, userId: string) => Effect.Effect<SettingsSection[], InvalidSettings>;
+    /**
+     * Like {@link replace}, with the new settings worked out from the current
+     * ones while no other change can come between. `alongside` runs in the
+     * transaction that stores them, for rows that have to change with them;
+     * it doesn't run when nothing changed.
+     */
+    readonly update: <E>(
+      change: (current: BotSettings) => Effect.Effect<unknown, E>,
+      userId: string,
+      alongside?: (tx: Transaction) => void,
+    ) => Effect.Effect<SettingsSection[], InvalidSettings | E>;
     /** The latest changes, newest first. */
     readonly history: (limit: number) => Effect.Effect<SettingsChange[]>;
   }
@@ -66,14 +77,18 @@ export class Settings extends Context.Service<
       // One change at a time, so each is compared with the one before it.
       const lock = yield* Semaphore.make(1);
 
-      const replace = (raw: unknown, userId: string) =>
+      const update = <E>(
+        change: (current: BotSettings) => Effect.Effect<unknown, E>,
+        userId: string,
+        alongside?: (tx: Transaction) => void,
+      ) =>
         lock.withPermits(1)(
           Effect.gen(function* () {
-            const next = yield* parseSettings(raw, config.guildId);
             const before = yield* SubscriptionRef.get(ref);
+            const next = yield* parseSettings(yield* change(before), config.guildId);
             const sections = SETTINGS_SECTIONS.filter((key) => !Bun.deepEquals(before[key], next[key]));
             if (sections.length === 0) return sections;
-            store(db, next, { at: yield* now, by: userId, source: "command", before, sections });
+            store(db, next, { at: yield* now, by: userId, source: "command", before, sections }, alongside);
             yield* SubscriptionRef.set(ref, next);
             return sections;
           }),
@@ -82,7 +97,8 @@ export class Settings extends Context.Service<
       return {
         get: SubscriptionRef.get(ref),
         changes: SubscriptionRef.changes(ref),
-        replace,
+        replace: (raw, userId) => update(() => Effect.succeed(raw), userId),
+        update,
         history: (limit) =>
           Effect.sync(() => db.select().from(settingsChanges).orderBy(desc(settingsChanges.id)).limit(limit).all()),
       };
@@ -103,8 +119,8 @@ interface Change {
   sections: readonly SettingsSection[];
 }
 
-/** Writes the settings and records the change, together. */
-function store(db: DB, next: BotSettings, change: Change) {
+/** Writes the settings and records the change, together with `alongside`. */
+function store(db: DB, next: BotSettings, change: Change, alongside?: (tx: Transaction) => void) {
   const pick = (from: BotSettings) => Object.fromEntries(change.sections.map((key) => [key, from[key] ?? null]));
   db.transaction((tx) => {
     tx.insert(settings)
@@ -121,5 +137,6 @@ function store(db: DB, next: BotSettings, change: Change) {
         after: pick(next),
       })
       .run();
+    alongside?.(tx);
   });
 }

@@ -85,15 +85,16 @@ const startFeatures = Effect.fnUntraced(function* (
   }
   const community = settings.polls ? yield* makeCommunityPolls(settings.polls, guildId) : undefined;
   if (community) commands.push(...pollCommands(community));
-  const boards = settings.boards ? yield* makeBoards(settings.boards, guildId) : undefined;
-  if (boards) commands.push(boardCommands(boards));
+  // Built without boards too, so `!board create` can add the first one.
+  const boards = yield* makeBoards(settings.boards ?? [], guildId);
+  commands.push(yield* boardCommands(boards));
   // Built even without a `roleMenus` section, so removing it takes the menus down.
   const roleMenus = yield* makeRoleMenus(settings.roleMenus);
 
   yield* Effect.acquireRelease(router.setCommands(commands), () => router.setCommands(base));
   if (community) yield* attachPollMessageDeletes(community);
   yield* attachRoleMenuEvents(roleMenus);
-  if (boards) yield* attachBoardEvents(boards);
+  if (boards.boards.length > 0) yield* attachBoardEvents(boards);
 
   // Right away when the bot is already logged in, which is the case after a
   // change, and again on every login. 🛑 from while offline waits for the

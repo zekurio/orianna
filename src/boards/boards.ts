@@ -35,6 +35,15 @@ export interface BoardMessage {
   reactionCounts: Map<string, number>;
 }
 
+/** A channel in the guild, as boards see it. */
+export interface BoardChannel {
+  id: string;
+  name: string;
+  nsfw: boolean;
+  /** Takes messages, so a board can post there. */
+  text: boolean;
+}
+
 /** What boards need from the guild. */
 export class BoardGuild extends Context.Service<
   BoardGuild,
@@ -48,6 +57,8 @@ export class BoardGuild extends Context.Service<
       emoji: string,
     ) => Effect.Effect<string[], FluxerError>;
     readonly nsfw: (channelId: string) => Effect.Effect<boolean, FluxerError>;
+    /** Null when the guild has no such channel. */
+    readonly channel: (channelId: string) => Effect.Effect<BoardChannel | null, FluxerError>;
     /** Posts a message and returns its ID. */
     readonly post: (channelId: string, body: MessageBody) => Effect.Effect<string, FluxerError>;
     /** False when the message is gone. */
@@ -184,11 +195,9 @@ export const makeBoards = Effect.fnUntraced(function* (config: readonly BoardCon
   }
 
   function boardOf(name: string | undefined) {
-    if (boards.length === 0) return refuse("There are no boards.");
-    if (name === undefined) return Effect.succeed(boards[0]!);
-    const board = byName.get(name.toLowerCase());
-    if (board) return Effect.succeed(board);
-    return refuse(`There is no board called ${name}. Try ${boards.map((b) => b.name).join(", ")}.`);
+    if (name === undefined && boards.length > 0) return Effect.succeed(boards[0]!);
+    const board = name === undefined ? undefined : byName.get(name.toLowerCase());
+    return board ? Effect.succeed(board) : noBoard(name, boards);
   }
 
   return {
@@ -303,6 +312,12 @@ export const makeBoards = Effect.fnUntraced(function* (config: readonly BoardCon
       }),
   };
 });
+
+/** Refuses a board name that isn't one of `boards`, or any name when there are none. */
+export function noBoard(name: string | undefined, boards: readonly { name: string }[]) {
+  if (boards.length === 0) return refuse("There are no boards.");
+  return refuse(`There is no board called ${name}. Try ${boards.map((b) => b.name).join(", ")}.`);
+}
 
 export function renderPost(board: Board, message: BoardMessage, reacted: number, link: string): MessageBody {
   const shown = message.attachments.find((a) => a.image && !a.nsfw);

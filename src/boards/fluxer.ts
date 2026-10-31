@@ -3,7 +3,7 @@ import { Effect, Layer } from "effect";
 import { reactionKey } from "../emoji.ts";
 import { Fluxer, listen, orNotFound, reactionUsers, request } from "../fluxer.ts";
 import { editOptions, NO_MENTIONS, sendOptions } from "../messages/fluxer.ts";
-import { type BoardMessage, BoardGuild, type Boards } from "./boards.ts";
+import { type BoardChannel, type BoardMessage, BoardGuild, type Boards } from "./boards.ts";
 
 /** Boards through fluxer.js. */
 export const FluxerBoardGuild = Layer.effect(
@@ -36,6 +36,17 @@ export const FluxerBoardGuild = Layer.effect(
       nsfw: (channelId) =>
         request("fetching a channel", () => client.channels.resolve(channelId)).pipe(
           Effect.map((channel) => "nsfw" in channel && channel.nsfw === true),
+        ),
+
+      channel: (channelId) =>
+        request("fetching a channel", () => client.channels.resolve(channelId)).pipe(
+          Effect.map((c): BoardChannel | null =>
+            c.isGuild() && c.guildId === guildId
+              ? { id: c.id, name: c.name ?? c.id, nsfw: "nsfw" in c && c.nsfw === true, text: c.isTextBased() }
+              : null,
+          ),
+          // A channel the bot can't see, or an ID that isn't one, is as good as missing.
+          Effect.catchIf((err) => err.notFound || err.refused, () => Effect.succeed(null)),
         ),
 
       post: (channelId, body) =>

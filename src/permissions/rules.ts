@@ -20,6 +20,7 @@ export const PERMISSIONS = [
   "polls.create",
   "polls.end-any",
   "boards.remove",
+  "boards.manage",
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
