@@ -42,9 +42,12 @@ function check(draft: StarboardInput): Result.Result<StarboardInput, Problems> {
   });
 }
 
+/** What the form offers. Mount it ahead with `useAtomMount`, so the form is ready when it opens. */
+export const setupQuery = Api.query("starboardSetup", undefined, { reactivityKeys: STARBOARD_KEYS });
+
 /** The form, once the channels and emoji it offers are in. */
 export function StarboardSettings({ onCancel, onDone }: { onCancel: () => void; onDone: () => void }) {
-  const setup = useAtomValue(Api.query("starboardSetup", undefined, { reactivityKeys: STARBOARD_KEYS }));
+  const setup = useAtomValue(setupQuery);
   return AsyncResult.matchWithError(setup, {
     // About as tall as the form, so the dialog doesn't jump when it comes in.
     onInitial: () => (

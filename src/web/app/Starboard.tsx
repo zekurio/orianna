@@ -1,4 +1,4 @@
-import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
+import { useAtomMount, useAtomRefresh, useAtomValue } from "@effect/atom-react";
 import { ArrowClockwise, EyeSlash, File, GearSix, SortDescending, Star } from "@phosphor-icons/react";
 import { AsyncResult } from "effect/reactivity";
 import type { MouseEvent, ReactNode } from "react";
@@ -21,7 +21,7 @@ import {
 import { Api, STARBOARD_KEYS } from "./api.ts";
 import { useSession } from "./App.tsx";
 import { inlineEmoji, MessageText } from "./MessageText.tsx";
-import { StarboardSettings } from "./StarboardForm.tsx";
+import { StarboardSettings, setupQuery } from "./StarboardForm.tsx";
 import { useStarboardView } from "./starboardView.ts";
 
 // The starboard, as shinpuru's web interface shows it: the entries, latest
@@ -102,6 +102,8 @@ export function StarboardPage() {
 function SettingsDialog() {
   const { prefix } = useSession();
   const { settingsOpen, setSettingsOpen } = useStarboardView();
+  // Loaded with the page, so the form is there as soon as the dialog opens.
+  useAtomMount(setupQuery);
   return (
     <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
       <DialogContent className="sm:max-w-xl">
