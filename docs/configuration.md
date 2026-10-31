@@ -42,6 +42,12 @@ their own settings, like opting out from the starboard. The guild
 owner and members with Administrator get an Admin tab for the settings of
 the whole server. The commands page and the Admin tab are still empty.
 
+Like shinpuru, the web interface also has an image store: images the bot
+makes for its embeds, like blurred NSFW images on the starboard, are kept in
+the database and served at `<publicUrl>/imagestore/<id>.webp`, to anyone with
+the link. Fluxer fetches them from there to show them, so `publicUrl` has to
+be reachable from the Fluxer instance for them to load.
+
 To turn it on:
 
 1. Open the bot's application on your Fluxer instance and add
@@ -224,8 +230,10 @@ Messages in the starboard channel never go up.
 On a starboard whose channel isn't NSFW, the bot blurs what would be NSFW
 there, like shinpuru does: the images of a message from an NSFW channel, and
 images their uploader marked NSFW. When the post's image is one of them, the
-post shows a blurred copy instead, and the web interface leaves out the rest.
-An NSFW starboard shows everything.
+post shows a blurred copy instead, from the web interface's
+[image store](#the-web-interface), and the starboard page leaves out the rest.
+Without a web interface, the blurred copy is sent with the post. It's deleted
+when the post comes down. An NSFW starboard shows everything.
 
 The bot needs View Channel and Read Message History where members react, and
 Send Messages, Embed Links and Attach Files in the starboard channel. Fluxer

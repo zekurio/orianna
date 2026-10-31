@@ -7,6 +7,7 @@ import { type StarboardMedia, starboardEntries, starboardOptOuts } from "../db/s
 import { type ParsedEmoji, parseEmoji, type ReactionEmoji, reactionKey } from "../emoji.ts";
 import { ImageMagick } from "../expressions/process.ts";
 import { type FluxerError, logFailure } from "../fluxer.ts";
+import { ImageStore } from "../imagestore.ts";
 import type { MessageBody } from "../messages/body.ts";
 import { Settings } from "../settings/settings.ts";
 
@@ -97,7 +98,7 @@ const IMAGE_LINK = /https?:\/\/\S+?\.(?:jpe?g|png|webp|gif)(?:[?#]\S*)?(?=\s|$)/
 /** shinpuru's embed colour. */
 const COLOR = 0xffc107;
 
-/** The blurred copy of the post's image, sent with the post. */
+/** The blurred copy of the post's image, when it's sent with the post. */
 const BLURRED = "blurred.webp";
 
 /** What a starboard that isn't NSFW hides. Both are false on an NSFW one. */
@@ -122,6 +123,7 @@ export const makeStarboard = Effect.fnUntraced(function* (config: StarboardConfi
   const db = yield* Database;
   const guild = yield* StarboardGuild;
   const magick = yield* ImageMagick;
+  const store = yield* ImageStore;
   const lock = yield* Semaphore.make(1);
 
   // The settings check already rejected emoji that don't parse.
@@ -175,25 +177,30 @@ export const makeStarboard = Effect.fnUntraced(function* (config: StarboardConfi
           .run();
       } else {
         // Someone deleted the post while the bot was offline.
-        markRemoved(row);
+        yield* markRemoved(row);
       }
       return;
     }
 
-    // Like shinpuru, an image the starboard hides goes up blurred instead.
+    // Like shinpuru, an image the starboard hides goes up blurred instead,
+    // from the image store. Without a web interface to serve it, the blurred
+    // copy is sent with the post.
     const blurred = image?.hidden ? yield* blur(image.url) : undefined;
-    const shown = image?.hidden ? (blurred && `attachment://${BLURRED}`) : image?.url;
+    const stored = blurred ? yield* store.put(blurred.image, blurred.type) : null;
+    const attached = blurred && !stored;
+    const shown = image?.hidden ? (stored ?? (attached ? `attachment://${BLURRED}` : undefined)) : image?.url;
     const body = {
       ...renderPost(message, votes, link, text, shown),
-      files: blurred ? [{ name: BLURRED, data: blurred }] : [],
+      files: attached ? [{ name: BLURRED, data: blurred.image }] : [],
     };
     // A change to the settings interrupts updates; one that came between
     // posting and recording would leave the post behind, and post it again.
     yield* Effect.uninterruptible(
       guild.post(board.channelId, body).pipe(
+        Effect.tapError(() => (stored ? store.remove(stored) : Effect.void)),
         Effect.map((post) => {
-          const copy: StarboardMedia[] =
-            blurred && post.image ? [{ url: post.image, name: BLURRED, kind: "image", blurred: true }] : [];
+          const url = stored ?? (attached ? post.image : null);
+          const copy: StarboardMedia[] = url ? [{ url, name: fileName(url), kind: "image", blurred: true }] : [];
           db.insert(starboardEntries)
             .values({
               messageId,
@@ -219,7 +226,7 @@ export const makeStarboard = Effect.fnUntraced(function* (config: StarboardConfi
   /** A blurred copy of an image, or nothing when it can't be blurred. */
   const blur = Effect.fnUntraced(function* (url: string) {
     const result = yield* Effect.result(guild.downloadImage(url).pipe(Effect.flatMap(magick.blur)));
-    if (Result.isSuccess(result)) return result.success.image;
+    if (Result.isSuccess(result)) return result.success;
     yield* Effect.logWarning(`starboard: couldn't blur ${url}: ${result.failure.message}`);
     return undefined;
   });
@@ -228,15 +235,21 @@ export const makeStarboard = Effect.fnUntraced(function* (config: StarboardConfi
   const takeDown = Effect.fnUntraced(function* (row: Entry) {
     if (row.postChannelId && row.postId) yield* guild.delete(row.postChannelId, row.postId);
     db.delete(starboardEntries).where(eq(starboardEntries.messageId, row.messageId)).run();
+    yield* forgetBlurred(row);
   });
 
   /** Keeps the entry, so the message doesn't go up again. */
-  function markRemoved(row: Entry) {
+  const markRemoved = Effect.fnUntraced(function* (row: Entry) {
     db.update(starboardEntries)
-      .set({ removed: true, postChannelId: null, postId: null })
+      .set({ removed: true, postChannelId: null, postId: null, media: [] })
       .where(eq(starboardEntries.messageId, row.messageId))
       .run();
-  }
+    yield* forgetBlurred(row);
+  });
+
+  /** Deletes the blurred copy from the image store, once no post shows it. */
+  const forgetBlurred = (row: Entry) =>
+    Effect.forEach(row.media?.filter((m) => m.blurred) ?? [], (m) => store.remove(m.url), { discard: true });
 
   /**
    * Fills in what the posts from before the bot kept it show, for the web
@@ -302,7 +315,7 @@ export const makeStarboard = Effect.fnUntraced(function* (config: StarboardConfi
           const source = entry(messageId);
           if (source) yield* takeDown(source);
           const post = db.select().from(starboardEntries).where(eq(starboardEntries.postId, messageId)).get();
-          if (post) markRemoved(post);
+          if (post) yield* markRemoved(post);
         }),
       ),
 

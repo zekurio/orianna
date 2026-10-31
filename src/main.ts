@@ -12,6 +12,7 @@ import { FluxerExpressionGuild } from "./expressions/fluxer.ts";
 import { ImageMagick } from "./expressions/process.ts";
 import { applySettings, type Milestones, warnUnknownRoles } from "./features.ts";
 import { Fluxer, listen, logFailure, login } from "./fluxer.ts";
+import { ImageStore } from "./imagestore.ts";
 import { perms } from "./permissions/commands.ts";
 import { FluxerGuildAccess } from "./permissions/fluxer.ts";
 import { FluxerPollTransport } from "./polls/fluxer.ts";
@@ -42,6 +43,7 @@ const Adapters = Layer.mergeAll(
   FluxerExpressionGuild,
   FluxerStarboardGuild,
   ImageMagick.layer,
+  ImageStore.layer,
 ).pipe(Layer.provideMerge(Core));
 
 const App = Layer.mergeAll(PollService.layer, WebServer).pipe(Layer.provideMerge(Adapters));

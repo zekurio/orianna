@@ -252,3 +252,15 @@ export const webSessions = sqliteTable(
   },
   (t) => [index("web_sessions_expires_at_idx").on(t.expiresAt)],
 );
+
+/**
+ * Images the web interface serves at `/imagestore/<id>.<ext>`, for embeds
+ * to link to, like shinpuru's image store. src/imagestore.ts keeps them.
+ */
+export const storedImages = sqliteTable("stored_images", {
+  /** Random, so nobody can guess the URL of an image they weren't shown. */
+  id: text().primaryKey(),
+  image: blob({ mode: "buffer" }).notNull(),
+  contentType: text().notNull(),
+  storedAt: integer({ mode: "timestamp_ms" }).notNull(),
+});
