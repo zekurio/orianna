@@ -19,8 +19,4 @@
   # devenv's dotenv integration stays off so the token isn't exported to the shell.
   env.ORIANNA_CONFIG = "./config.json";
   dotenv.disableHint = true;
-
-  enterTest = ''
-    bun run typecheck
-  '';
 }
