@@ -92,7 +92,7 @@ export interface PollInput {
 
 export type CommunityPolls = Effect.Success<ReturnType<typeof makeCommunityPolls>>;
 
-/** Polls members start themselves, like Discord's. Registers itself with the poll service. */
+/** Polls members start themselves, like Discord's. Handles their poll kind until the scope closes. */
 export const makeCommunityPolls = Effect.fnUntraced(function* (config: PollsConfig, guildId: string) {
   const db = yield* Database;
   const service = yield* PollService;
@@ -226,7 +226,7 @@ export const makeCommunityPolls = Effect.fnUntraced(function* (config: PollsConf
           .pipe(Effect.catch(warn(poll, "could not announce the result")));
       }),
   };
-  service.register(COMMUNITY_POLL, handler);
+  yield* service.register(COMMUNITY_POLL, handler);
 
   return { open, start, messageDeleted, reconcile, describe };
 });
