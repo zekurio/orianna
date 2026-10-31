@@ -144,19 +144,27 @@ export const makeBoards = Effect.fnUntraced(function* (config: readonly BoardCon
     }
 
     if ((yield* guild.nsfw(channelId)) && !(yield* guild.nsfw(board.channelId))) return;
-    const postId = yield* guild.post(board.channelId, body);
-    db.insert(boardEntries)
-      .values({
-        messageId,
-        board: board.name,
-        channelId,
-        authorId: message.authorId,
-        postChannelId: board.channelId,
-        postId,
-        count: reacted,
-        postedAt: new Date(),
-      })
-      .run();
+    // A change to the settings interrupts updates; one that came between
+    // posting and recording would leave the post behind, and post it again.
+    yield* Effect.uninterruptible(
+      guild.post(board.channelId, body).pipe(
+        Effect.map((postId) =>
+          db
+            .insert(boardEntries)
+            .values({
+              messageId,
+              board: board.name,
+              channelId,
+              authorId: message.authorId,
+              postChannelId: board.channelId,
+              postId,
+              count: reacted,
+              postedAt: new Date(),
+            })
+            .run(),
+        ),
+      ),
+    );
   });
 
   /** Deletes the post and forgets the entry, so the message can go up again. */

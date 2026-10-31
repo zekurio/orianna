@@ -181,12 +181,19 @@ export const makeRoleMenus = Effect.fnUntraced(function* (config: RoleMenusConfi
       }
     }
     if (!row) {
-      const messageId = yield* guild.post(menu.channelId, body);
-      row = db
-        .insert(roleMenus)
-        .values({ name: menu.name, channelId: menu.channelId, messageId, rendered })
-        .returning()
-        .get();
+      // A change to the settings interrupts a sync; one that came between
+      // posting and recording the message would leave it behind for good.
+      row = yield* Effect.uninterruptible(
+        guild.post(menu.channelId, body).pipe(
+          Effect.map((messageId) =>
+            db
+              .insert(roleMenus)
+              .values({ name: menu.name, channelId: menu.channelId, messageId, rendered })
+              .returning()
+              .get(),
+          ),
+        ),
+      );
       reactions = [];
     } else if (row.rendered !== rendered) {
       yield* guild.edit(row.channelId, row.messageId, body);

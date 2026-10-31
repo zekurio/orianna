@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { defineCommand, refuse } from "../commands/command.ts";
-import { AppConfig } from "../config.ts";
 import { ACCENT } from "../messages/body.ts";
+import { Settings } from "../settings/settings.ts";
 import { type Decision, GuildAccess, groupOf, PERMISSIONS, type Permission } from "./rules.ts";
 
 /** `<@id>`, `<@!id>` or a bare ID. */
@@ -22,7 +22,7 @@ export const perms = defineCommand({
     Effect.gen(function* () {
       const userId = ctx.options.member === undefined ? ctx.userId : yield* memberId(ctx.options.member);
       const permissions = yield* (yield* GuildAccess).permissionsOf(userId);
-      const config = yield* AppConfig.current;
+      const settings = yield* Settings.current;
 
       let description: string;
       if (permissions.bypass) {
@@ -30,7 +30,7 @@ export const perms = defineCommand({
         description = `<@${userId}> ${why}, so the rules don't apply and they may do everything.`;
       } else {
         // Permissions of features that are turned off would only add noise.
-        const lines = PERMISSIONS.filter((p) => config[groupOf(p)] !== undefined).map((p) =>
+        const lines = PERMISSIONS.filter((p) => settings[groupOf(p)] !== undefined).map((p) =>
           describe(p, permissions.decide(p)),
         );
         description = [`What <@${userId}> may do:`, ...lines].join("\n");

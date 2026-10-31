@@ -5,6 +5,7 @@ import { type Fluxer, type FluxerError, logFailure, request } from "../fluxer.ts
 import { appendFooter, type MessageBody } from "../messages/body.ts";
 import { editOptions, REPLY_MENTION, sendOptions } from "../messages/fluxer.ts";
 import { GuildAccess } from "../permissions/rules.ts";
+import { Settings } from "../settings/settings.ts";
 import {
   type Attachment,
   type Command,
@@ -28,31 +29,42 @@ const PAGE_IDLE = Duration.minutes(2);
 export class CommandRouter extends Context.Service<
   CommandRouter,
   {
-    readonly entries: ReadonlyMap<string, CommandEntry>;
+    /** The commands as they are now; they change with the settings. */
+    readonly entries: Effect.Effect<ReadonlyMap<string, CommandEntry>>;
+    /** Replaces the commands. Commands already running carry on. */
+    readonly setCommands: (list: readonly CommandEntry[]) => Effect.Effect<void>;
     /** Prefix adapter: `!name [subcommand] args...` from a chat message. */
     readonly handleMessage: (message: Message) => Effect.Effect<void, FluxerError>;
   }
 >()("orianna/CommandRouter") {}
 
 /**
- * Builds the router for `list`. Paginated replies keep listening for page
- * turns until they go idle or the scope closes.
+ * Builds the router for `list`, until {@link CommandRouter.setCommands}
+ * replaces it. Paginated replies keep listening for page turns until they go
+ * idle or the scope closes.
  */
 export const makeCommandRouter = Effect.fnUntraced(function* (list: readonly CommandEntry[]) {
-  const entries = new Map<string, CommandEntry>();
-  for (const entry of list) {
-    if (entries.has(entry.name)) return yield* Effect.die(new Error(`duplicate command: ${entry.name}`));
-    entries.set(entry.name, entry);
-  }
-  const context = yield* Effect.context<AppConfig | GuildAccess | Fluxer>();
+  let entries: ReadonlyMap<string, CommandEntry> = new Map();
+  const setCommands = (list: readonly CommandEntry[]) =>
+    Effect.suspend(() => {
+      const next = new Map<string, CommandEntry>();
+      for (const entry of list) {
+        if (next.has(entry.name)) return Effect.die(new Error(`duplicate command: ${entry.name}`));
+        next.set(entry.name, entry);
+      }
+      entries = next;
+      return Effect.void;
+    });
+  yield* setCommands(list);
+  const context = yield* Effect.context<AppConfig | Settings | GuildAccess | Fluxer>();
   const scope = yield* Effect.scope;
 
   const handleMessage = Effect.fnUntraced(function* (message: Message) {
-    const config = yield* AppConfig.current;
+    const { guildId } = yield* AppConfig.current;
     if (message.author.bot) return;
-    if (message.guildId !== config.guildId) return;
+    if (message.guildId !== guildId) return;
 
-    const { prefix } = config;
+    const { prefix } = yield* Settings.current;
     if (!message.content.startsWith(prefix)) return;
 
     const first = nextWord(message.content.slice(prefix.length));
@@ -101,7 +113,11 @@ export const makeCommandRouter = Effect.fnUntraced(function* (list: readonly Com
   ) =>
     Effect.gen(function* () {
       const { permission } = command;
-      if (permission && !(yield* (yield* GuildAccess).can(ctx.userId, permission))) {
+      const access = yield* GuildAccess;
+      if (command.adminOnly && !(yield* access.permissionsOf(ctx.userId)).bypass) {
+        return yield* ctx.error("Only the server owner and members with Administrator may do that.");
+      }
+      if (permission && !(yield* access.can(ctx.userId, permission))) {
         return yield* ctx.error(`You need the \`${permission}\` permission for that.`);
       }
       yield* command.run(ctx);
@@ -120,7 +136,8 @@ export const makeCommandRouter = Effect.fnUntraced(function* (list: readonly Com
     );
 
   const router: CommandRouter["Service"] = {
-    entries,
+    entries: Effect.sync(() => entries),
+    setCommands,
     handleMessage: (message) => handleMessage(message).pipe(Effect.provideContext(context)),
   };
   return router;

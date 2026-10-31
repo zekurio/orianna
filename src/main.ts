@@ -1,35 +1,33 @@
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import * as BunDns from "@effect/platform-bun/BunDns";
 import { Events } from "@fluxerjs/core";
-import { Cause, Console, Deferred, Effect, Exit, Layer, Queue } from "effect";
+import { Cause, Console, Deferred, Effect, Exit, Layer, Queue, SubscriptionRef } from "effect";
 import { FetchHttpClient } from "effect/http";
-import { makeBoards } from "./boards/boards.ts";
-import { boardCommands } from "./boards/commands.ts";
-import { attachBoardEvents, FluxerBoardGuild } from "./boards/fluxer.ts";
+import { FluxerBoardGuild } from "./boards/fluxer.ts";
 import type { CommandEntry } from "./commands/command.ts";
 import { help, ping } from "./commands/general.ts";
 import { makeCommandRouter } from "./commands/router.ts";
 import { AppConfig, ConfigError } from "./config.ts";
 import { Database } from "./db/index.ts";
-import { proposalCommands } from "./expressions/commands.ts";
 import { FluxerExpressionGuild } from "./expressions/fluxer.ts";
 import { ImageMagick } from "./expressions/process.ts";
-import { EMOJI, makeExpressionProposals, STICKER } from "./expressions/proposals.ts";
+import { applySettings, type Milestones, warnUnknownRoles } from "./features.ts";
 import { Fluxer, listen, logFailure, login } from "./fluxer.ts";
 import { perms } from "./permissions/commands.ts";
 import { FluxerGuildAccess } from "./permissions/fluxer.ts";
-import { GuildAccess } from "./permissions/rules.ts";
-import { pollCommands } from "./polls/commands.ts";
-import { makeCommunityPolls } from "./polls/community.ts";
-import { attachPollMessageDeletes, FluxerPollTransport } from "./polls/fluxer.ts";
+import { FluxerPollTransport } from "./polls/fluxer.ts";
 import { PollService } from "./polls/service.ts";
 import { attachReactions } from "./reactions.ts";
-import { attachRoleMenuEvents, FluxerRoleGuild } from "./roles/fluxer.ts";
-import { makeRoleMenus } from "./roles/menus.ts";
+import { FluxerRoleGuild } from "./roles/fluxer.ts";
+import { settingsCommands } from "./settings/commands.ts";
+import { Settings } from "./settings/settings.ts";
 
 const Platform = Layer.mergeAll(BunServices.layer, BunDns.layer, FetchHttpClient.layer);
 
-const Core = Layer.mergeAll(Database.layer, Fluxer.layer).pipe(
+// The settings load, and a bad import stops the bot, before it reaches out to Fluxer.
+const Core = Fluxer.layer.pipe(
+  Layer.provideMerge(Settings.layer),
+  Layer.provideMerge(Database.layer),
   Layer.provideMerge(AppConfig.layer),
   Layer.provideMerge(Platform),
 );
@@ -59,94 +57,50 @@ const hangups = Effect.gen(function* () {
   return queue;
 });
 
-const warnUnknownRoles = Effect.gen(function* () {
-  const ids = yield* (yield* GuildAccess).unknownRoles;
-  for (const id of ids) {
-    yield* Effect.logWarning(`permissions.roles: there is no role ${id}, so its rules do nothing`);
-  }
-}).pipe(Effect.catch((err) => Effect.logError(`checking permission roles failed: ${err.message}`)));
-
-const reload = Effect.gen(function* () {
-  const needRestart = yield* (yield* AppConfig).reload;
-  yield* Effect.logInfo("config reloaded");
-  if (needRestart.length > 0) {
-    yield* Effect.logWarning(`restart to apply the changes to ${needRestart.join(", ")}`);
-  }
-  // In a fiber of its own, so a slow Fluxer can't hold up the next reload.
-  yield* Effect.forkScoped(warnUnknownRoles);
-}).pipe(
-  Effect.catchTag("ConfigError", (err) =>
-    Effect.logError(`config not reloaded, keeping the old one: ${err.message}`),
-  ),
-);
-
 const run = Effect.fnUntraced(function* (hangups: Queue.Queue<void>) {
-  const config = yield* AppConfig.current;
+  const { instance } = yield* AppConfig.current;
   const polls = yield* PollService;
+  const milestones: Milestones = {
+    logins: yield* SubscriptionRef.make(0),
+    pollCatchUps: yield* SubscriptionRef.make(0),
+  };
 
-  const commands: CommandEntry[] = [ping, help, perms];
-  for (const [kind, section] of [
-    [EMOJI, config.emoji],
-    [STICKER, config.sticker],
-  ] as const) {
-    // parseConfig refuses a proposal section without pollsChannelId.
-    if (!section || config.pollsChannelId === undefined) continue;
-    const proposals = yield* makeExpressionProposals(kind, {
-      config: section,
-      guildId: config.guildId,
-      channelId: config.pollsChannelId,
-    });
-    commands.push(yield* proposalCommands(proposals, config.pollsChannelId));
-  }
-  if (config.emoji || config.sticker) {
-    // Polls and role menus work without ImageMagick, so this only warns.
-    yield* (yield* ImageMagick).check.pipe(
-      Effect.flatMap((problems) =>
-        Effect.forEach(problems, (problem) => Effect.logError(`emoji and sticker images won't work: ${problem}`)),
-      ),
-      Effect.forkScoped,
-    );
-  }
-  const community = config.polls ? yield* makeCommunityPolls(config.polls, config.guildId) : undefined;
-  if (community) commands.push(...pollCommands(community));
-  const boards = config.boards ? yield* makeBoards(config.boards, config.guildId) : undefined;
-  if (boards) commands.push(boardCommands(boards));
+  // The router, the poll service and its reactions outlive changes to the
+  // settings; the features come and go with them.
+  const base: CommandEntry[] = [ping, help, perms, yield* settingsCommands()];
+  const router = yield* makeCommandRouter(base);
 
-  const router = yield* makeCommandRouter(commands);
-  // Built even without a `roleMenus` section, so removing it takes the menus down.
-  const roleMenus = yield* makeRoleMenus(config.roleMenus);
-
-  // Catch up on votes and 🛑 reactions from while offline before deadlines are processed.
+  // Catch up on votes from while offline before deadlines are processed.
   const catchUpPolls = polls.reconcile().pipe(
-    Effect.andThen(community ? community.reconcile() : Effect.void),
     Effect.catchCause(logFailure("poll reconcile")),
+    Effect.andThen(SubscriptionRef.update(milestones.pollCatchUps, (n) => n + 1)),
     Effect.andThen(polls.start),
   );
 
-  const ready = yield* Deferred.make<void>();
   yield* listen(Events.Ready, "startup", () =>
     Effect.gen(function* () {
       const { client } = yield* Fluxer;
-      yield* Effect.logInfo(`logged in as ${client.user?.username} on ${config.instance}`);
-      yield* Deferred.succeed(ready, undefined);
-      yield* Effect.all([catchUpPolls, roleMenus.sync, warnUnknownRoles], {
-        concurrency: "unbounded",
-        discard: true,
-      });
+      yield* Effect.logInfo(`logged in as ${client.user?.username} on ${instance}`);
+      yield* SubscriptionRef.update(milestones.logins, (n) => n + 1);
+      yield* Effect.all([catchUpPolls, warnUnknownRoles], { concurrency: "unbounded", discard: true });
     }),
   );
   yield* listen(Events.MessageCreate, "handling a message", router.handleMessage);
   yield* attachReactions(polls, "poll");
-  if (community) yield* attachPollMessageDeletes(community);
-  yield* attachRoleMenuEvents(roleMenus);
-  if (boards) yield* attachBoardEvents(boards);
 
-  // Reloads wait for the first login, then run in turn.
+  // The first features attach their listeners before the bot logs in.
+  const started = yield* Deferred.make<void>();
+  yield* applySettings(router, base, milestones, started).pipe(Effect.forkScoped);
+  yield* Deferred.await(started);
+
+  // Bot settings apply as soon as they change, and the config file only has
+  // what takes a restart, so there's nothing left to reload.
   yield* Effect.gen(function* () {
-    yield* Deferred.await(ready);
     for (;;) {
       yield* Queue.take(hangups);
-      yield* reload;
+      yield* Effect.logInfo(
+        "got SIGHUP, but nothing reloads: bot settings apply when they change, and the config file needs a restart",
+      );
     }
   }).pipe(Effect.forkScoped);
 

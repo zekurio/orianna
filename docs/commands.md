@@ -109,7 +109,8 @@ The bot posts the proposal in the polls channel with the image and pings
 with the other emoji moves it.
 
 A proposal passes once enough members vote ✅ and there are more ✅ than ❌.
-`threshold` in the `emoji` or `sticker` section sets what enough means: a
+`threshold` in the `emoji` or `sticker` section of the
+[settings](configuration.md#bot-settings) sets what enough means: a
 share of the members who could see the polls channel when the proposal went
 up. The bot rounds up, so with 10 members `0.5` asks for 5 and `0.75` for 8.
 The default, `1`, asks for every one of them.
@@ -180,14 +181,14 @@ section changes that.
 
 ## Role menus
 
-Role menus have no commands. The bot posts them from the config, as described
+Role menus have no commands. The bot posts them from the settings, as described
 in [Configuration](configuration.md#role-menus). React to get a role, and
 remove the reaction to drop it. In a menu where you pick one, picking another
 swaps the role.
 
 ## Boards
 
-Boards turn on with the `boards` section of the config, described in
+Boards turn on with the `boards` section of the settings, described in
 [Configuration](configuration.md#boards). Once enough members react to a
 message with a board's emoji, the bot posts it in the board's channel with
 the author, the text, the first image and a link back. The author's own
@@ -203,8 +204,43 @@ Deleting a post takes the message off that board for good, the same as
 
 | Command | Permission | What it does |
 |---|---|---|
-| `!board top [board]` | | Lists the 10 members with the most messages on a board, the first one in the config by default |
+| `!board top [board]` | | Lists the 10 members with the most messages on a board, the first one in the settings by default |
 | `!board optout` | | Keeps your messages off every board and takes down the ones already there |
 | `!board optin` | | Lets your messages go up again |
 | `!board remove <message>` | `boards.remove` | Takes a message off every board it's on, for good. Takes a link to the message or to a post, or either ID. Given a post, it only takes the message off that post's board. |
 
+## Settings
+
+Only the guild owner and members with Administrator may run these, and
+`!help` doesn't show them to anyone else. No permission rule can hand them
+out. [Configuration](configuration.md#bot-settings) explains the settings.
+
+| Command | Permission | What it does |
+|---|---|---|
+| `!settings export` | Owner or Administrator | Replies with the bot settings as `settings.json` |
+| `!settings import <file>` | Owner or Administrator | Replaces all bot settings with the attached JSON file |
+| `!settings log` | Owner or Administrator | Shows the last 30 changes to the settings: when, who, and which sections |
+
+To change a setting, export the settings, edit the file, and import it again.
+The file has to be attached to the `!settings import` message; the bot doesn't
+take a link. It takes files up to 1 MiB.
+
+The import replaces everything, so a section missing from the file turns its
+feature off, and a key missing from a section goes back to its default. The
+bot checks the whole file before it changes anything. If something is wrong,
+the reply lists each problem with its path, and the settings stay as they
+were:
+
+```
+/boards/1/threshold: Expected a value greater than or equal to 1
+/pollsChannelId: emoji proposals need a channel to vote in; set it, or remove /emoji
+```
+
+Otherwise the reply names the sections that changed, and they apply right
+away. A change to the prefix or the permissions applies to the next command.
+Any other section starts its features over, as
+[Configuration](configuration.md#changes-while-the-bot-runs) describes.
+
+The bot records every change in the database: who made it, when, and each
+changed section before and after. `!settings log` shows who, when and which
+sections.

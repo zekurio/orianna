@@ -1,6 +1,7 @@
 # Permissions
 
-The `permissions` section of the config decides who may run which commands.
+The `permissions` section of the [bot settings](configuration.md#bot-settings)
+decides who may run which commands.
 It has one list of rules for every member and one list per role:
 
 ```json
@@ -14,9 +15,8 @@ It has one list of rules for every member and one list per role:
 }
 ```
 
-Roles are keyed by role ID. When you send the bot SIGHUP, it reads the
-section again and applies it without a restart. See
-[Configuration](configuration.md#reloading).
+Roles are keyed by role ID. Edit the section with `!settings export` and
+`!settings import`, and the bot applies the new rules to the next command.
 
 ## What can be allowed
 
@@ -33,7 +33,15 @@ section again and applies it without a restart. See
 
 Every member can run the other commands: `!help`, `!ping`, `!perms`, `!polls`,
 `list` under `!emoji` and `!sticker`, and `top`, `optout` and `optin` under
-`!board`.
+`!board`. The exception is `!settings`, below.
+
+## Who may change the settings
+
+Only the guild owner and members with Administrator may run `!settings`,
+which reads and changes the bot settings, these rules included. No rule can
+hand that out, not even `+*`, so nobody can use it to give themselves more
+than they have. The bot records every change with who made it, and
+`!settings log` shows them.
 
 ## Writing rules
 
@@ -49,7 +57,7 @@ the default, so `"everyone": []` leaves members without a role unable to do
 anything.
 
 A list can name each permission or group only once. With both `+emoji.add`
-and `-emoji.add` in one list, the bot refuses the config.
+and `-emoji.add` in one list, the bot refuses the settings.
 
 ## Who wins
 
@@ -122,5 +130,5 @@ that decided:
 
 Permissions of features that are turned off don't show up.
 
-When the bot starts, and again on each reload, it logs a warning for every
-role ID in `permissions.roles` that the guild doesn't have.
+When the bot logs in, and again whenever the permissions change, it logs a
+warning for every role ID in `permissions.roles` that the guild doesn't have.

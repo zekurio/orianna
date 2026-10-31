@@ -61,6 +61,7 @@ export function parseOptions(
 
       if (spec.type === "attachment") {
         const file = attachments[nextAttachment++] ?? links[nextLink++];
+        if (file?.linked && spec.attachedOnly) yield* wrong(`attach ${spec.name} to the message; links aren't taken`);
         if (file) options[spec.name] = file;
         else yield* missing(spec);
         continue;

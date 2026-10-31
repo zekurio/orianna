@@ -3,6 +3,7 @@ import type { AppConfig } from "../config.ts";
 import type { Fluxer, FluxerError } from "../fluxer.ts";
 import type { MessageBody } from "../messages/body.ts";
 import type { GuildAccess, MemberPermissions, Permission } from "../permissions/rules.ts";
+import type { Settings } from "../settings/settings.ts";
 import type { CommandRouter } from "./router.ts";
 
 // Commands are written against this module only. The prefix adapter in
@@ -27,6 +28,11 @@ export interface OptionSpec {
    * position. The value runs until the next `--flag`, so it may contain spaces.
    */
   named?: boolean;
+  /**
+   * Attachments only: the file has to come with the message. A pasted link is
+   * refused instead of downloaded.
+   */
+  attachedOnly?: boolean;
 }
 
 /**
@@ -69,7 +75,7 @@ export function refuse(message: string): Effect.Effect<never, UserError> {
 }
 
 /** Services every command may use. */
-export type CommandServices = AppConfig | GuildAccess | Fluxer | CommandRouter;
+export type CommandServices = AppConfig | Settings | GuildAccess | Fluxer | CommandRouter;
 
 /** What a command may fail with. Anything else that goes wrong is a defect. */
 export type CommandError = UserError | FluxerError;
@@ -117,6 +123,11 @@ export interface Command<O extends readonly OptionSpec[] = readonly OptionSpec[]
   options?: O;
   /** Members without it are refused, and `!help` leaves the command out for them. */
   permission?: Permission;
+  /**
+   * Only the guild owner and members with Administrator may run it, and
+   * `!help` leaves it out for everyone else. No rule can grant it.
+   */
+  adminOnly?: boolean;
   run(ctx: CommandContext<Options<O>>): Effect.Effect<void, CommandError, CommandServices>;
 }
 
@@ -133,6 +144,7 @@ export function isGroup(entry: CommandEntry): entry is CommandGroup {
 }
 
 export function mayRun(command: Command, permissions: MemberPermissions): boolean {
+  if (command.adminOnly && !permissions.bypass) return false;
   return command.permission === undefined || permissions.has(command.permission);
 }
 
@@ -149,7 +161,9 @@ export function formatUsage(options: readonly OptionSpec[] = []): string {
     .map((o) => {
       const label =
         o.type === "attachment"
-          ? `${o.name}: attachment or link`
+          ? o.attachedOnly
+            ? `${o.name}: attachment`
+            : `${o.name}: attachment or link`
           : o.named
             ? `--${o.name} ${o.name}`
             : o.rest
