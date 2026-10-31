@@ -11,8 +11,7 @@ Outside direnv, prefix commands with `devenv shell`, for example
 `devenv shell bun run typecheck`. The flake has no `devShells` output, so
 `nix develop` won't work here.
 
-`devenv test` runs the typechecker. There is no test suite, so run it before
-every commit.
+There is no test suite, so run `bun run typecheck` before every commit.
 
 ## Code
 
@@ -84,7 +83,7 @@ hyphens, with no type prefix: `sticker-tag-limits`, not
 - The title follows the commit format.
 - The body says what changed and why, and calls out new or renamed config keys,
   new migrations and `outputHash` bumps.
-- Say how you checked the change. With no tests, that means `devenv test`,
-  `nix build` where it applies, and whether you ran the bot against an
-  instance.
+- Say how you checked the change. With no tests, that means
+  `bun run typecheck`, `nix build` where it applies, and whether you ran the
+  bot against an instance.
 - One change per PR. Open it with `gh pr create`.
