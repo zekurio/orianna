@@ -13,8 +13,8 @@ instance.
 - Permission rules decide who may do what.
 - Settings live in the bot's database. The server's admins change them in chat
   while the bot runs, and every change is recorded.
-- Members sign in to a web interface with their Fluxer account. Its pages are
-  still empty.
+- Members sign in to a web interface with their Fluxer account, where they
+  browse the boards and their leaderboards.
 
 Fluxer has no slash commands or buttons yet, so commands start with a prefix,
 `!` by default, and every vote is a reaction.

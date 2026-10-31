@@ -15,17 +15,6 @@ function Unbuilt({ children }: { children?: ReactNode }) {
   return <p className="unbuilt">{children ?? "This page isn't built yet."}</p>;
 }
 
-export function BoardsPage() {
-  useTitle("Boards");
-  return (
-    <>
-      <h1>Boards</h1>
-      <p className="lead">Messages that got enough reactions, board by board.</p>
-      <Unbuilt />
-    </>
-  );
-}
-
 export function CommandsPage() {
   const { prefix } = useSession();
   useTitle("Commands");

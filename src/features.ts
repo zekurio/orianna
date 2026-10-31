@@ -1,5 +1,5 @@
 import { Deferred, Effect, Exit, Scope, Stream, SubscriptionRef } from "effect";
-import { makeBoards } from "./boards/boards.ts";
+import { LiveBoards, makeBoards } from "./boards/boards.ts";
 import { boardCommands } from "./boards/commands.ts";
 import { attachBoardEvents } from "./boards/fluxer.ts";
 import type { CommandEntry } from "./commands/command.ts";
@@ -93,6 +93,7 @@ const startFeatures = Effect.fnUntraced(function* (
   // Built without boards too, so `!board create` can add the first one.
   const boards = yield* makeBoards(settings.boards ?? [], guildId);
   commands.push(yield* boardCommands(boards));
+  yield* LiveBoards.provide(boards);
   // Built even without a `roleMenus` section, so removing it takes the menus down.
   const roleMenus = yield* makeRoleMenus(settings.roleMenus);
 

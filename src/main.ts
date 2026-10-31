@@ -3,6 +3,7 @@ import * as BunDns from "@effect/platform-bun/BunDns";
 import { Events } from "@fluxerjs/core";
 import { Cause, Console, Deferred, Effect, Exit, Layer, Queue, SubscriptionRef } from "effect";
 import { FetchHttpClient } from "effect/http";
+import { LiveBoards } from "./boards/boards.ts";
 import { FluxerBoardGuild } from "./boards/fluxer.ts";
 import type { CommandEntry } from "./commands/command.ts";
 import { help, ping } from "./commands/general.ts";
@@ -34,6 +35,7 @@ const Core = Fluxer.layer.pipe(
 );
 
 const Adapters = Layer.mergeAll(
+  LiveBoards.layer,
   FluxerGuildAccess,
   FluxerPollTransport,
   FluxerRoleGuild,

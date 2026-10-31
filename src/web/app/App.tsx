@@ -6,7 +6,8 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { type Session, SignInError } from "../rpc.ts";
 import { Api } from "./api.ts";
 import { Header } from "./Header.tsx";
-import { BoardsPage, CommandsPage, NotFoundPage, SettingsPage } from "./pages.tsx";
+import { BoardsPage, parseBoardPath } from "./Boards.tsx";
+import { CommandsPage, NotFoundPage, SettingsPage } from "./pages.tsx";
 import { navigate, usePath } from "./router.tsx";
 import { SignIn } from "./SignIn.tsx";
 
@@ -88,10 +89,11 @@ function Shell() {
 }
 
 function Page({ path }: { path: string }) {
+  const boards = parseBoardPath(path);
+  if (boards) return <BoardsPage board={boards.board} view={boards.view} />;
   switch (path) {
     case "/":
-    case "/boards":
-      return <BoardsPage />;
+      return <BoardsPage view="latest" />;
     case "/commands":
       return <CommandsPage />;
     case "/settings":

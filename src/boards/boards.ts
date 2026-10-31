@@ -1,5 +1,5 @@
-import { and, count, desc, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
-import { Context, Effect, Result, Semaphore } from "effect";
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { Context, Duration, Effect, Layer, Option, Result, Semaphore, Stream, SubscriptionRef } from "effect";
 import { refuse, type UserError } from "../commands/command.ts";
 import type { BoardConfig } from "../config.ts";
 import { Database } from "../db/index.ts";
@@ -395,10 +395,78 @@ export const makeBoards = Effect.fnUntraced(function* (config: readonly BoardCon
           .orderBy(desc(count()), desc(sql`sum(${boardEntries.count})`))
           .limit(TOP_SIZE)
           .all();
-        return { board, rows };
+        // The name and avatar each author had on their latest post, for the web interface.
+        const latest = new Map(
+          db
+            .select({ id: boardEntries.authorId, name: boardEntries.authorName, avatar: boardEntries.authorAvatar })
+            .from(boardEntries)
+            .where(and(inArray(boardEntries.authorId, rows.map((r) => r.authorId)), isNotNull(boardEntries.authorName)))
+            .orderBy(asc(boardEntries.postedAt))
+            .all()
+            .map((r) => [r.id, r]),
+        );
+        return {
+          board,
+          rows: rows.map((r) => ({
+            ...r,
+            authorName: latest.get(r.authorId)?.name ?? null,
+            authorAvatar: latest.get(r.authorId)?.avatar ?? null,
+          })),
+        };
+      }),
+
+    /** A page of the posts on a board, newest or most reacted first, and how many there are. */
+    posts: (name: string, sort: "latest" | "top", offset: number, limit: number) =>
+      Effect.gen(function* () {
+        const board = yield* boardOf(name);
+        const where = and(eq(boardEntries.board, board.name), isNotNull(boardEntries.postId));
+        const order =
+          sort === "top" ? [desc(boardEntries.count), desc(boardEntries.postedAt)] : [desc(boardEntries.postedAt)];
+        const rows = db
+          .select()
+          .from(boardEntries)
+          .where(where)
+          .orderBy(...order)
+          .limit(limit)
+          .offset(offset)
+          .all();
+        const total = db.select({ n: count() }).from(boardEntries).where(where).get()?.n ?? 0;
+        return { board, rows, total };
       }),
   };
 });
+
+/**
+ * The boards as the settings have them now. The features set them when they
+ * start and clear them when they stop, so what outlives a settings change,
+ * like the web interface, finds the current ones.
+ */
+export class LiveBoards extends Context.Service<LiveBoards, SubscriptionRef.SubscriptionRef<Boards | undefined>>()(
+  "orianna/LiveBoards",
+) {
+  static readonly layer = Layer.effect(LiveBoards, SubscriptionRef.make<Boards | undefined>(undefined));
+
+  /** Makes `boards` the current ones until the scope closes. */
+  static readonly provide = (boards: Boards) =>
+    Effect.gen(function* () {
+      const ref = yield* LiveBoards;
+      yield* Effect.acquireRelease(SubscriptionRef.set(ref, boards), () => SubscriptionRef.set(ref, undefined));
+    });
+
+  /** The current boards, once they're up when they're starting over. */
+  static readonly current = Effect.gen(function* () {
+    const ref = yield* LiveBoards;
+    const next = yield* SubscriptionRef.changes(ref).pipe(
+      Stream.filter((boards): boards is Boards => boards !== undefined),
+      Stream.runHead,
+      Effect.timeoutOrElse({
+        duration: Duration.seconds(30),
+        orElse: () => Effect.die(new Error("the boards didn't start; the log says why")),
+      }),
+    );
+    return Option.getOrThrow(next);
+  });
+}
 
 /** Refuses a board name that isn't one of `boards`, or any name when there are none. */
 export function noBoard(name: string | undefined, boards: readonly { name: string }[]) {

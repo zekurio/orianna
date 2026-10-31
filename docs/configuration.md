@@ -32,8 +32,11 @@ The bot token doesn't go in the file; see [Environment](#environment).
 ### The web interface
 
 The bot can serve a web interface, where members of the guild sign in with
-their Fluxer account. It has pages for the boards, the commands and settings,
-which are still empty. For now it handles signing in and out.
+their Fluxer account. Its boards page lists each board's posts, newest or
+most reacted first, with their images and files, and the board's
+leaderboard. A member only sees the boards whose channels they can see, and
+members with `boards.remove` can take a message off a board from there. The
+pages for commands and settings are still empty.
 
 To turn it on:
 

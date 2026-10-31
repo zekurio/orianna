@@ -235,6 +235,9 @@ The options are the board's keys in the settings:
 !board delete coal
 ```
 
+The web interface's boards page shows the same as `!board top`, and has a
+button for `!board remove` on each post for members with `boards.remove`.
+
 A change is a settings change, so `!settings log` lists it and the boards
 start over, as [Configuration](configuration.md#changes-while-the-bot-runs)
 describes.
