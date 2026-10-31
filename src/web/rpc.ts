@@ -145,6 +145,38 @@ export const StarboardSetup = Schema.Struct({
 });
 export type StarboardSetup = typeof StarboardSetup.Type;
 
+/** A command option, as `!help` shows it. */
+const CommandOption = Schema.Struct({
+  name: Schema.String,
+  description: Schema.String,
+  /** Like `<name>`, `[reason...]` or `[--tags tags]`. */
+  usage: Schema.String,
+});
+
+/** A command the member may run. */
+export const CommandInfo = Schema.Struct({
+  /** What goes after the prefix, like `starboard set`. */
+  name: Schema.String,
+  description: Schema.String,
+  /** The options in the order they're given, as `!help` shows them. */
+  usage: Schema.String,
+  options: Schema.Array(CommandOption),
+  /** The permission it takes, null when everyone may run it. */
+  permission: Schema.NullOr(Schema.String),
+  /** Only the guild owner and members with Administrator may run it. */
+  adminOnly: Schema.Boolean,
+});
+export type CommandInfo = typeof CommandInfo.Type;
+
+/** A command group, like `!starboard`, or the commands that stand on their own. */
+export const CommandSection = Schema.Struct({
+  /** The group's name; null for the commands that stand on their own. */
+  group: Schema.NullOr(Schema.String),
+  description: Schema.NullOr(Schema.String),
+  commands: Schema.Array(CommandInfo),
+});
+export type CommandSection = typeof CommandSection.Type;
+
 /** A Unicode emoji for the picker, named the way Fluxer names it. */
 export const UnicodeEmoji = Schema.Struct({
   unicode: Schema.String,
@@ -162,6 +194,8 @@ export type EmojiCategory = typeof EmojiCategory.Type;
 export const WebRpcs = RpcGroup.make(
   /** Who is signed in, and what the app needs to show them. */
   Rpc.make("session", { success: Session }),
+  /** The commands the member may run, like `!help` lists them, in the order the bot has them. */
+  Rpc.make("commands", { success: Schema.Array(CommandSection) }),
   /** The starboard, null while it's off or its channel is hidden from the member. */
   Rpc.make("starboard", { success: Schema.NullOr(StarboardInfo) }),
   /** A page of the starboard's entries, and how many there are. */

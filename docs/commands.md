@@ -1,7 +1,9 @@
 # Commands
 
 Commands start with the prefix, `!` by default. `!help` lists the commands you
-may run. A group name on its own, like `!emoji`, lists its subcommands.
+may run. A group name on its own, like `!emoji`, lists its subcommands. The
+web interface's commands page lists them too, with every option explained,
+and a search.
 
 In the usage lines below, `<angle brackets>` mark what a command needs and
 `[square brackets]` mark what you can leave out. Some commands need a

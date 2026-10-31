@@ -1,5 +1,5 @@
 import type { Message } from "@fluxerjs/core";
-import { Cause, Context, Duration, Effect, Queue, Result, type Scope, Stream } from "effect";
+import { Cause, Context, Duration, Effect, Layer, Queue, Ref, Result, type Scope, Stream } from "effect";
 import { AppConfig } from "../config.ts";
 import { type Fluxer, type FluxerError, logFailure, request } from "../fluxer.ts";
 import { appendFooter, type MessageBody } from "../messages/body.ts";
@@ -39,12 +39,22 @@ export class CommandRouter extends Context.Service<
 >()("orianna/CommandRouter") {}
 
 /**
+ * The commands as they are now, for what starts before the router does, like
+ * the web interface. The router keeps it up to date.
+ */
+export class CommandList extends Context.Service<CommandList, Ref.Ref<ReadonlyMap<string, CommandEntry>>>()(
+  "orianna/CommandList",
+) {
+  static readonly layer = Layer.effect(CommandList, Ref.make<ReadonlyMap<string, CommandEntry>>(new Map()));
+}
+
+/**
  * Builds the router for `list`, until {@link CommandRouter.setCommands}
  * replaces it. Paginated replies keep listening for page turns until they go
  * idle or the scope closes.
  */
 export const makeCommandRouter = Effect.fnUntraced(function* (list: readonly CommandEntry[]) {
-  let entries: ReadonlyMap<string, CommandEntry> = new Map();
+  const current = yield* CommandList;
   const setCommands = (list: readonly CommandEntry[]) =>
     Effect.suspend(() => {
       const next = new Map<string, CommandEntry>();
@@ -52,8 +62,7 @@ export const makeCommandRouter = Effect.fnUntraced(function* (list: readonly Com
         if (next.has(entry.name)) return Effect.die(new Error(`duplicate command: ${entry.name}`));
         next.set(entry.name, entry);
       }
-      entries = next;
-      return Effect.void;
+      return Ref.set(current, next);
     });
   yield* setCommands(list);
   const context = yield* Effect.context<AppConfig | Settings | GuildAccess | Fluxer>();
@@ -69,7 +78,7 @@ export const makeCommandRouter = Effect.fnUntraced(function* (list: readonly Com
 
     const first = nextWord(message.content.slice(prefix.length));
     if (!first) return;
-    const entry = entries.get(first.word.toLowerCase());
+    const entry = (yield* Ref.get(current)).get(first.word.toLowerCase());
     if (!entry) return;
 
     const base = messageContext(message, scope);
@@ -136,7 +145,7 @@ export const makeCommandRouter = Effect.fnUntraced(function* (list: readonly Com
     );
 
   const router: CommandRouter["Service"] = {
-    entries: Effect.sync(() => entries),
+    entries: Ref.get(current),
     setCommands,
     handleMessage: (message) => handleMessage(message).pipe(Effect.provideContext(context)),
   };

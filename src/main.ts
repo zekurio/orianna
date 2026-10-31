@@ -5,7 +5,7 @@ import { Cause, Console, Deferred, Effect, Exit, Layer, Queue, SubscriptionRef }
 import { FetchHttpClient } from "effect/http";
 import type { CommandEntry } from "./commands/command.ts";
 import { help, ping } from "./commands/general.ts";
-import { makeCommandRouter } from "./commands/router.ts";
+import { CommandList, makeCommandRouter } from "./commands/router.ts";
 import { AppConfig, ConfigError } from "./config.ts";
 import { Database } from "./db/index.ts";
 import { FluxerExpressionGuild } from "./expressions/fluxer.ts";
@@ -37,6 +37,7 @@ const Core = Fluxer.layer.pipe(
 
 const Adapters = Layer.mergeAll(
   LiveStarboard.layer,
+  CommandList.layer,
   FluxerGuildAccess,
   FluxerPollTransport,
   FluxerRoleGuild,

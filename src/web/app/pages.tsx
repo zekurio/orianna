@@ -26,23 +26,6 @@ function Unbuilt({ children }: { children?: ReactNode }) {
   );
 }
 
-export function CommandsPage() {
-  const { prefix } = useSession();
-  return (
-    <>
-      <PageHeader
-        title="Commands"
-        lead={
-          <>
-            The commands you can use, and how to use them. They all start with <code>{prefix}</code>.
-          </>
-        }
-      />
-      <Unbuilt />
-    </>
-  );
-}
-
 export function ProfilePage() {
   const { user, admin } = useSession();
   return (

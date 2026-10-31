@@ -1,7 +1,8 @@
 import { cdnEmojiURL } from "@fluxerjs/core";
-import { Effect, Layer, Option, Result } from "effect";
+import { Effect, Layer, Option, Ref, Result } from "effect";
 import { Headers } from "effect/http";
-import type { UserError } from "../commands/command.ts";
+import { type Command, formatUsage, isGroup, mayRun, type UserError } from "../commands/command.ts";
+import { CommandList } from "../commands/router.ts";
 import { type ParsedEmoji, parseEmoji } from "../emoji.ts";
 import { Fluxer, type FluxerError, logFailure, request, tagOf } from "../fluxer.ts";
 import { GuildAccess } from "../permissions/rules.ts";
@@ -12,6 +13,8 @@ import { unicodeEmoji } from "./emoji.ts";
 import {
   Authentication,
   CurrentMember,
+  type CommandInfo,
+  type CommandSection,
   type Names,
   NotMember,
   Refused,
@@ -87,6 +90,7 @@ export const HandlersLive = WebRpcs.toLayer(
     const settings = yield* Settings;
     const access = yield* GuildAccess;
     const guild = yield* StarboardGuild;
+    const commandList = yield* CommandList;
     const live = yield* LiveStarboard;
     const starboardNow = LiveStarboard.current.pipe(
       Effect.provideService(LiveStarboard, live),
@@ -174,6 +178,39 @@ export const HandlersLive = WebRpcs.toLayer(
             emojiImages: `${client.instance.endpoints.static_cdn.replace(/\/+$/, "")}/emoji`,
           };
         }).pipe(hide("loading the session")),
+
+      commands: () =>
+        Effect.gen(function* () {
+          const { userId } = yield* CurrentMember;
+          const permissions = yield* access.permissionsOf(userId);
+          const info = (path: string, c: Command): CommandInfo => ({
+            name: path,
+            description: c.description,
+            usage: formatUsage(c.options),
+            options: (c.options ?? []).map((o) => ({
+              name: o.name,
+              description: o.description,
+              usage: formatUsage([o]),
+            })),
+            permission: c.permission ?? null,
+            adminOnly: c.adminOnly === true,
+          });
+          const standalone: CommandInfo[] = [];
+          const groups: CommandSection[] = [];
+          for (const entry of (yield* Ref.get(commandList)).values()) {
+            if (!isGroup(entry)) {
+              if (mayRun(entry, permissions)) standalone.push(info(entry.name, entry));
+              continue;
+            }
+            const commands = entry.subcommands
+              .filter((c) => mayRun(c, permissions))
+              .map((c) => info(`${entry.name} ${c.name}`, c));
+            if (commands.length > 0) groups.push({ group: entry.name, description: entry.description, commands });
+          }
+          return [{ group: null, description: null, commands: standalone }, ...groups].filter(
+            (s) => s.commands.length > 0,
+          );
+        }).pipe(hide("listing the commands")),
 
       starboard: () =>
         Effect.gen(function* () {

@@ -40,7 +40,8 @@ starboard's settings on that page too.
 Each member has a profile page, under their name in the top corner, for
 their own settings, like opting out from the starboard. The guild
 owner and members with Administrator get an Admin tab for the settings of
-the whole server. The commands page and the Admin tab are still empty.
+the whole server. The commands page lists the commands each member may run,
+like `!help`, with their options and a search. The Admin tab is still empty.
 
 Like shinpuru, the web interface also has an image store: images the bot
 makes for its embeds, like blurred NSFW images on the starboard, are kept in
