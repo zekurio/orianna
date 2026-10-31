@@ -12,7 +12,7 @@ export function MessageText({ text, names }: { text: string; names: Names }) {
 }
 
 /** A mention of a member or channel, like Fluxer shows it. */
-export const mention = "rounded bg-eye/14 px-1 font-medium text-eye";
+export const mention = "rounded bg-link/14 px-1 font-medium text-link";
 
 /** A custom emoji in a line of text. */
 export const inlineEmoji = "inline-block size-[1.25em] object-contain align-[-0.25em]";
@@ -66,11 +66,11 @@ function render(text: string, names: Names): ReactNode[] {
 
 function Spoiler({ children }: { children: ReactNode }) {
   const [shown, setShown] = useState(false);
-  if (shown) return <span className="rounded bg-line/50 px-1">{children}</span>;
+  if (shown) return <span className="rounded bg-border/50 px-1">{children}</span>;
   return (
     <button
       type="button"
-      className="rounded bg-line px-1 text-transparent"
+      className="rounded bg-border px-1 text-transparent"
       onClick={() => setShown(true)}
       aria-label="Show spoiler"
     >

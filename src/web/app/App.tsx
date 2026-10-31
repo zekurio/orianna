@@ -10,7 +10,9 @@ import { BoardsPage, parseBoardPath } from "./Boards.tsx";
 import { AdminPage, CommandsPage, NotFoundPage, ProfilePage } from "./pages.tsx";
 import { navigate, usePath } from "./router.tsx";
 import { SignIn } from "./SignIn.tsx";
-import { buttonClass, container, cx, standalone } from "./ui.tsx";
+import { cn } from "cn";
+import { container, standalone } from "@/components/page";
+import { Button } from "@/components/ui/button";
 
 const SIGN_IN_ERRORS: Record<SignInError, string> = {
   denied: "Signing in was cancelled on Fluxer.",
@@ -61,12 +63,12 @@ export function App() {
 function Unavailable({ message }: { message: string }) {
   return (
     <main className={standalone}>
-      <h1 className="text-3xl text-porcelain">Orianna isn't answering</h1>
+      <h1 className="text-3xl text-foreground">Orianna isn't answering</h1>
       <p className="max-w-[38ch]">{message}</p>
-      <button type="button" className={buttonClass()} onClick={() => window.location.reload()}>
+      <Button size="lg" onClick={() => window.location.reload()}>
         <ArrowClockwise />
         Reload
-      </button>
+      </Button>
     </main>
   );
 }
@@ -89,7 +91,7 @@ function Shell() {
   return (
     <>
       <Header path={path} />
-      <main className={cx(container, "flex flex-col gap-6 py-8 sm:py-12")}>
+      <main className={cn(container, "flex flex-col gap-6 py-8 sm:py-12")}>
         <Page path={path} />
       </main>
     </>

@@ -1,62 +1,115 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "./shadcn.css";
 @import "@fontsource-variable/fredoka/wght.css";
+
+/* The app is dark only; components' `dark:` styles always apply. */
+@custom-variant dark (&:is(.dark *));
 
 /* The colours come from Orianna's portrait: its background, her porcelain
    face, her hair, the brass of her hair band and key, and her eyes. The
    header and page share the portrait's background, so it sits on them
-   without an edge. Brass marks where you are, and the warm red what ends
-   something, like signing out.
+   without an edge. Brass marks where you are and what to do, and the warm
+   red what ends something, like signing out.
 
-   Only these colours exist: the default palette is switched off, so a
-   class like `bg-red-500` doesn't build. Shared pieces, like buttons,
-   fields and the page width, live in ui.tsx; pages use those rather than
-   setting their own. */
-@theme {
+   They're given the names shadcn/ui's components use, by what they're for:
+   `bg-card`, `text-muted-foreground`, `border-border`. Only these exist; the
+   default palette is switched off, so a class like `bg-red-500` doesn't
+   build. The primitives are in components/ui; pages are built from those. */
+
+:root {
+  --background: #232325;
+  --foreground: #fbece5;
+  --card: #2d2a2b;
+  --card-foreground: #fbece5;
+  --popover: #2d2a2b;
+  --popover-foreground: #fbece5;
+  /* Brass */
+  --primary: #f7c052;
+  --primary-foreground: #232325;
+  --secondary: #382f2d;
+  --secondary-foreground: #fbece5;
+  --muted: #2d2a2b;
+  /* Her hair */
+  --muted-foreground: #c49082;
+  --accent: #382f2d;
+  --accent-foreground: #fbece5;
+  --destructive: #f47c71;
+  --border: #463c39;
+  --input: #463c39;
+  /* Her eyes, for focus and links. */
+  --ring: #91d1dc;
+  --link: #91d1dc;
+  --radius: 0.75rem;
+}
+
+@theme inline {
   --color-*: initial;
-  --color-charcoal: #232325;
-  --color-raised: #2d2a2b;
-  --color-line: #463c39;
-  --color-porcelain: #fbece5;
-  --color-rose: #c49082;
-  --color-brass: #f7c052;
-  --color-brass-light: #ffd47a;
-  --color-eye: #91d1dc;
-  --color-danger: #f47c71;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-link: var(--link);
+  /* For shadows and see-through overlays. */
+  --color-black: #000;
+  --color-transparent: transparent;
 
-  --font-display: "Fredoka Variable", ui-rounded, system-ui, sans-serif;
   --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
+  --font-heading: "Fredoka Variable", ui-rounded, system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
 
   /* The header and every page are this wide at most. */
   --container-page: 72rem;
-
-  --animate-menu-open: menu-open 120ms ease-out;
-  @keyframes menu-open {
-    from {
-      opacity: 0;
-      transform: scale(0.96);
-    }
-  }
 }
 
 @layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
   html {
     color-scheme: dark;
-    background: var(--color-charcoal);
-    color: var(--color-porcelain);
-    font: 400 1rem/1.55 var(--font-sans);
+    @apply bg-background font-sans text-foreground;
+    line-height: 1.55;
   }
 
   body {
     min-height: 100vh;
   }
 
+  h1,
+  h2,
+  h3 {
+    @apply font-heading font-semibold;
+  }
+
+  /* Links in running text. Buttons and tabs that are links set their own colour. */
   a {
-    color: var(--color-eye);
+    color: var(--link);
     text-underline-offset: 0.2em;
   }
 
-  a:hover {
+  a:not([data-slot]):hover {
     text-decoration: underline;
   }
 
@@ -65,26 +118,8 @@
     cursor: pointer;
   }
 
-  h1,
-  h2,
-  h3 {
-    font-family: var(--font-display);
-    font-weight: 600;
-  }
-
   /* Inline code in running text. */
-  code {
-    padding: 0.1em 0.35em;
-    border: 1px solid var(--color-line);
-    border-radius: 6px;
-    background: var(--color-raised);
-    font-family: var(--font-mono);
-    font-size: 0.875em;
-  }
-
-  :focus-visible {
-    outline: 3px solid var(--color-eye);
-    outline-offset: 2px;
-    border-radius: 6px;
+  :not(pre) > code {
+    @apply rounded-md border bg-card px-[0.35em] py-[0.1em] font-mono text-[0.875em];
   }
 }

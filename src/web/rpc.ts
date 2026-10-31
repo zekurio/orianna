@@ -1,5 +1,6 @@
 import { Context, Schema } from "effect";
 import { Rpc, RpcGroup, RpcMiddleware } from "effect/rpc";
+import { parseEmoji } from "../emoji.ts";
 
 // The calls the app makes to the bot. handlers.ts implements them and
 // app/api.ts calls them, both from these schemas, so the two sides agree on
@@ -122,15 +123,34 @@ export const Leader = Schema.Struct({
 });
 export type Leader = typeof Leader.Type;
 
-/** A board as members with `boards.manage` set it up. */
+const ChannelId = (message: string) => Schema.String.check(Schema.isPattern(/^[0-9]+$/, { message }));
+
+/**
+ * A board as members with `boards.manage` set it up. The checks are the
+ * settings schema's, worded for the form, which shows them under each field
+ * before it sends anything.
+ */
 export const BoardInput = Schema.Struct({
-  name: Schema.String,
+  name: Schema.String.check(
+    Schema.isNonEmpty({ message: "Give it a name." }),
+    Schema.isPattern(/^[a-z0-9][a-z0-9-]{0,31}$/, {
+      message: "Lowercase letters, digits and hyphens, up to 32, starting with a letter or digit.",
+    }),
+  ),
   /** A Unicode emoji, or a custom one as `<:name:id>`. */
-  emoji: Schema.String,
-  channelId: Schema.String,
-  threshold: Schema.Int,
+  emoji: Schema.String.check(
+    Schema.isNonEmpty({ message: "Pick an emoji." }),
+    Schema.makeFilter((emoji: string) => parseEmoji(emoji) !== undefined, {
+      message: "That isn't an emoji. Type or paste one, or :name: of one of the server's.",
+    }),
+  ),
+  channelId: ChannelId("Pick a channel."),
+  threshold: Schema.Number.check(
+    Schema.isInt({ message: "A whole number, 1 or more." }),
+    Schema.isGreaterThanOrEqualTo(1, { message: "A whole number, 1 or more." }),
+  ),
   keep: Schema.Boolean,
-  ignoredChannelIds: Schema.Array(Schema.String),
+  ignoredChannelIds: Schema.Array(ChannelId("That isn't a channel.")),
 });
 export type BoardInput = typeof BoardInput.Type;
 

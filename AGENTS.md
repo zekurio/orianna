@@ -37,10 +37,15 @@ points at its docs and examples.
   reloads open pages, and `bun run build` bundles it into the executable.
 - The app is styled with Tailwind, through `bun-plugin-tailwind` in
   `bunfig.toml` for `Bun.serve` and in `scripts/build.ts` for the build.
-  `src/web/app/styles.css` holds the theme, and only its colours exist.
-  Buttons, fields, panels, tabs and the page width come from
-  `src/web/app/ui.tsx`; use those instead of setting widths or colours on a
-  page of its own, so pages line up.
+  Its primitives are shadcn/ui components in `src/web/app/components/ui`,
+  added with `bunx --bun shadcn@latest add <name>`; they're our code to
+  adjust. `src/web/app/styles.css` maps Orianna's palette to shadcn's
+  semantic colours (`bg-card`, `text-muted-foreground`, `bg-primary`), and
+  only those exist. Build pages from the components and
+  `src/web/app/components/page.tsx`, which sets the page width, instead of
+  giving a page widths or colours of its own, so pages line up.
+  `src/web/app/shadcn.css` is a copy of the `shadcn` package's CSS, so the
+  CLI isn't a dependency; refresh it when updating components.
 - Put a feature's settings and actions on the page they're about. The Admin
   tab is only for settings of the whole server.
 - The app calls the bot with Effect RPC. Each call is defined once, with

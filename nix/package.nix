@@ -49,7 +49,7 @@ let
     impureEnvVars = lib.fetchers.proxyImpureEnvVars;
     outputHashMode = "recursive";
     outputHashAlgo = "sha256";
-    outputHash = "sha256-Odiy5DZPEHB0GAAW4yEFvDF4PfWLSIWdJlbZEJhc+r4=";
+    outputHash = "sha256-cL4VDuUH4gdjQ3xwpvfUiTDW3UHDtGYWjKOafxu1WFc=";
   };
 in
 stdenvNoCC.mkDerivation {
