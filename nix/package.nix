@@ -33,9 +33,13 @@ let
       bun install --frozen-lockfile --production --ignore-scripts --no-progress
       runHook postBuild
     '';
+    # Bun resolves a package's imports from its real path, past the symlink
+    # into the package. The output has to end in node_modules, or packages
+    # can't find each other and Bun tries to install them at runtime.
     installPhase = ''
       runHook preInstall
-      cp -r node_modules $out
+      mkdir $out
+      cp -r node_modules $out/node_modules
       runHook postInstall
     '';
     dontFixup = true;
@@ -43,7 +47,7 @@ let
     impureEnvVars = lib.fetchers.proxyImpureEnvVars;
     outputHashMode = "recursive";
     outputHashAlgo = "sha256";
-    outputHash = "sha256-jdrIq/Gbp1I/fcVN5e5aejbvbNOayvBBKoLue+lgmkM=";
+    outputHash = "sha256-fjEjBrTzP/5ssw0dNtUetbmnuJzqenvi93NuIpOwWBg=";
   };
 in
 stdenvNoCC.mkDerivation {
@@ -67,7 +71,7 @@ stdenvNoCC.mkDerivation {
     runHook preInstall
     mkdir -p $out/lib/orianna
     cp -r package.json src drizzle $out/lib/orianna/
-    ln -s ${nodeModules} $out/lib/orianna/node_modules
+    ln -s ${nodeModules}/node_modules $out/lib/orianna/node_modules
 
     # Bun runs the TypeScript directly. Its transpiler cache would try to write
     # under $HOME, which a DynamicUser service doesn't have. Emoji and sticker
