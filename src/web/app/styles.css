@@ -20,7 +20,8 @@
   --body: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
-  /* The header lines up with the page, which stays this wide. */
+  /* The header lines up with the page, which stays this wide. Boxes on a
+     page fill its width; only running text is held to a readable length. */
   --gutter: clamp(1rem, 4vw, 2.5rem);
   --measure: 72rem;
   --inset: max(var(--gutter), (100% - var(--measure)) / 2 + var(--gutter));
@@ -393,7 +394,6 @@ code {
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.5rem 1.5rem;
-  max-width: 46rem;
 }
 
 .board-summary .lead {
@@ -436,11 +436,7 @@ code {
   font-weight: 500;
 }
 
-/* Posts and the leaderboard share one column, as wide as the board's summary. */
-.board-view {
-  max-width: 46rem;
-}
-
+/* Under the view tabs, which already leave room. */
 .board-view .empty {
   margin-top: 0;
 }
@@ -713,7 +709,6 @@ code {
   display: flex;
   align-items: center;
   gap: 1rem;
-  max-width: 46rem;
   margin: 1rem 0 2rem;
   padding: 1.125rem 1.25rem;
   border: 1px solid var(--line);
@@ -751,7 +746,6 @@ code {
   flex-wrap: wrap;
   align-items: flex-start;
   gap: 1rem 2rem;
-  max-width: 46rem;
   padding: 1.125rem 1.25rem;
   border: 1px solid var(--line);
   border-radius: 18px;
@@ -842,7 +836,6 @@ code {
 }
 
 .saved {
-  max-width: 46rem;
   padding: 0.625rem 1rem;
   border: 1px solid rgb(145 209 220 / 0.4);
   border-radius: 12px;
@@ -856,10 +849,6 @@ code {
   border: 1px solid var(--brass);
   border-radius: 18px;
   background: var(--raised);
-}
-
-.board-form {
-  max-width: 46rem;
 }
 
 .board-form-head {
@@ -953,6 +942,7 @@ code {
   place-items: center;
   width: 2.75rem;
   height: 2.75rem;
+  border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--charcoal);
   font-size: 1.5rem;
