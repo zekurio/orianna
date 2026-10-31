@@ -5,9 +5,12 @@ import {
   ChatCircleText,
   EyeSlash,
   File,
-  GearSix,
+  MagnifyingGlass,
+  PencilSimple,
+  Plus,
   Ranking,
   Sparkle,
+  Star,
   Trash,
   TrendUp,
 } from "@phosphor-icons/react";
@@ -17,6 +20,8 @@ import { useEffect, useState } from "react";
 import { BOARD_PAGE_SIZE, type Board, type BoardPost, type Leader, type Names, type PostSort } from "../rpc.ts";
 import { Api, BOARD_KEYS, failureMessage } from "./api.ts";
 import { useSession } from "./App.tsx";
+import { BoardEditor } from "./BoardForm.tsx";
+import { Empty } from "./Empty.tsx";
 import { MessageText } from "./MessageText.tsx";
 import { Link, navigate } from "./router.tsx";
 
@@ -67,7 +72,9 @@ export function BoardsPage({ board, view }: { board?: string; view: BoardView })
         <Problem />
       </>
     ),
-    onSuccess: ({ value }) => <BoardList boards={value.boards} canRemove={value.canRemove} name={board} view={view} />,
+    onSuccess: ({ value, waiting }) => (
+      <BoardList boards={value.boards} canRemove={value.canRemove} name={board} view={view} refreshing={waiting} />
+    ),
   });
 }
 
@@ -76,40 +83,78 @@ function Heading({ board }: { board?: Board }) {
   return <h1>Boards</h1>;
 }
 
+/** The board form that's open: a new board, or the board shown. */
+type Editing = "new" | "board" | null;
+
 function BoardList({
   boards,
   canRemove,
   name,
   view,
+  refreshing,
 }: {
   boards: readonly Board[];
   canRemove: boolean;
   name?: string;
   view: BoardView;
+  /** The boards are being loaded again after a change. */
+  refreshing: boolean;
 }) {
   const { prefix, manageBoards } = useSession();
+  const [editing, setEditing] = useState<Editing>(null);
+  const [notice, setNotice] = useState<string>();
   const first = boards[0];
+  const board = boards.find((b) => b.name === name?.toLowerCase());
+
   useEffect(() => {
     if (name === undefined && first) navigate(boardPath(first.name, "latest"), { replace: true });
   }, [name, first]);
+  const open = (next: Editing) => {
+    setNotice(undefined);
+    setEditing(next);
+  };
+  const done = (saved: string | null, message: string) => {
+    setEditing(null);
+    navigate(saved === null ? "/boards" : boardPath(saved, view === "leaderboard" ? view : "latest"));
+    setNotice(message);
+  };
+
+  const editor = editing && (
+    <BoardEditor name={editing === "board" ? board?.name : undefined} onCancel={() => setEditing(null)} onDone={done} />
+  );
 
   if (!first) {
     return (
       <>
         <Heading />
-        {manageBoards ? (
-          <p className="lead">
-            There are no boards yet. <Link to="/admin/boards">Set up the first one</Link>, or use{" "}
-            <code>{prefix}board create</code> in chat.
-          </p>
-        ) : (
-          <p className="lead">There are no boards yet. Members who may set them up add them.</p>
+        {notice && <Saved>{notice}</Saved>}
+        {editor ?? (
+          <Empty
+            icon={Star}
+            title="No boards yet"
+            action={
+              manageBoards && (
+                <button type="button" className="button" onClick={() => open("new")}>
+                  <Plus />
+                  New board
+                </button>
+              )
+            }
+          >
+            {manageBoards ? (
+              <>
+                Create one, and messages that get enough reactions with its emoji go up in its channel. In chat
+                it's <code>{prefix}board create</code>.
+              </>
+            ) : (
+              "Once someone sets one up, messages with enough reactions show up here."
+            )}
+          </Empty>
         )}
       </>
     );
   }
 
-  const board = boards.find((b) => b.name === name?.toLowerCase());
   return (
     <>
       <Heading board={board} />
@@ -119,36 +164,87 @@ function BoardList({
             key={b.name}
             to={boardPath(b.name, view)}
             className="board-chip"
-            aria-current={b === board ? "page" : undefined}
+            aria-current={b === board && editing !== "new" ? "page" : undefined}
+            onClick={() => {
+              setEditing(null);
+              setNotice(undefined);
+            }}
           >
             <BoardEmoji board={b} />
             {b.name}
           </Link>
         ))}
         {manageBoards && (
-          <Link to="/admin/boards" className="board-chip manage-chip">
-            <GearSix />
-            Manage
-          </Link>
+          <button
+            type="button"
+            className="board-chip new-chip"
+            aria-pressed={editing === "new"}
+            onClick={() => open("new")}
+          >
+            <Plus />
+            New board
+          </button>
         )}
       </nav>
-      {board ? (
-        <BoardPage board={board} canRemove={canRemove} view={view} />
-      ) : (
-        name !== undefined && <p className="lead">There's no board called {name} that you can see.</p>
-      )}
+      {notice && <Saved>{notice}</Saved>}
+      {editor ??
+        (board ? (
+          <BoardPage board={board} canRemove={canRemove} view={view} onEdit={manageBoards ? () => open("board") : undefined} />
+        ) : (
+          name !== undefined &&
+          !refreshing && (
+            <Empty
+              icon={MagnifyingGlass}
+              title={`No board called ${name}`}
+              action={
+                <Link to={boardPath(first.name, "latest")} className="button quiet-button">
+                  Go to {first.name}
+                </Link>
+              }
+            >
+              It doesn't exist, or its channel is hidden from you.
+            </Empty>
+          )
+        ))}
     </>
   );
 }
 
-function BoardPage({ board, canRemove, view }: { board: Board; canRemove: boolean; view: BoardView }) {
+function Saved({ children }: { children: string }) {
+  return (
+    <p className="saved" role="status">
+      {children}
+    </p>
+  );
+}
+
+function BoardPage({
+  board,
+  canRemove,
+  view,
+  onEdit,
+}: {
+  board: Board;
+  canRemove: boolean;
+  view: BoardView;
+  /** Opens the board's form, for members who may set up boards. */
+  onEdit?: () => void;
+}) {
   return (
     <>
-      <p className="lead board-summary">
-        When {board.threshold} {board.threshold === 1 ? "member reacts" : "members react"} with{" "}
-        <BoardEmoji board={board} />, a message goes up in <span className="mention">#{board.channelName}</span>.
-        {board.keep && " Posts stay up when reactions drop again."}
-      </p>
+      <div className="board-summary">
+        <p className="lead">
+          When {board.threshold} {board.threshold === 1 ? "member reacts" : "members react"} with{" "}
+          <BoardEmoji board={board} />, a message goes up in <span className="mention">#{board.channelName}</span>.
+          {board.keep && " Posts stay up when reactions drop again."}
+        </p>
+        {onEdit && (
+          <button type="button" className="button quiet-button" onClick={onEdit}>
+            <PencilSimple />
+            Edit board
+          </button>
+        )}
+      </div>
       <nav className="sections" aria-label="Views">
         {VIEWS.map(({ view: v, label, icon: ViewIcon }) => (
           <Link
@@ -221,10 +317,10 @@ function PostPage({
     onSuccess: ({ value: { posts, total, names } }) => {
       if (total === 0) {
         return (
-          <p className="empty">
-            Nothing has made it onto {board.name} yet. React with <BoardEmoji board={board} /> to messages you
-            like, and they go up once enough of you do.
-          </p>
+          <Empty icon={Sparkle} title={`Nothing on ${board.name} yet`}>
+            React with <BoardEmoji board={board} /> to messages you like. Once{" "}
+            {board.threshold === 1 ? "someone does" : `${board.threshold} of you do`}, they go up here.
+          </Empty>
         );
       }
       return (
@@ -383,7 +479,9 @@ function Leaderboard({ board }: { board: Board }) {
     onDefect: () => <Problem />,
     onSuccess: ({ value }) =>
       value.length === 0 ? (
-        <p className="empty">Nobody is on the leaderboard of {board.name} yet.</p>
+        <Empty icon={Ranking} title="Nobody on the leaderboard yet">
+          Members show up here once their messages go up on {board.name}.
+        </Empty>
       ) : (
         <ol className="leaders">
           {value.map((leader, i) => (

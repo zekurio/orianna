@@ -1,8 +1,6 @@
-import { Star, UsersThree } from "@phosphor-icons/react";
 import { type ReactNode, useEffect } from "react";
 import { useSession } from "./App.tsx";
 import { BoardOptOut } from "./BoardOptOut.tsx";
-import { BoardSettings } from "./BoardSettings.tsx";
 import { Link } from "./router.tsx";
 
 // The pages behind the tabs and the user menu. Some only say what they're for so far.
@@ -52,50 +50,14 @@ export function ProfilePage() {
   );
 }
 
-/** The sections of the admin pages, and who gets each. */
-const ADMIN_SECTIONS = [
-  { key: "boards", label: "Boards", path: "/admin/boards", icon: Star, for: "manageBoards" },
-  { key: "server", label: "Server", path: "/admin/server", icon: UsersThree, for: "admin" },
-] as const;
-
-export type AdminSection = (typeof ADMIN_SECTIONS)[number]["key"];
-
-/** The admin sections the member gets, in the order the tabs show them. */
-export function useAdminSections() {
-  const session = useSession();
-  return ADMIN_SECTIONS.filter((s) => session[s.for]);
-}
-
-export function AdminPage({ section }: { section: AdminSection }) {
-  const { prefix } = useSession();
-  const sections = useAdminSections();
-  const current = ADMIN_SECTIONS.find((s) => s.key === section)!;
-  useTitle(`${current.label} – Admin`);
-  const allowed = sections.some((s) => s.key === section);
-
+/** Settings for the whole server, for the guild owner and members with Administrator. */
+export function AdminPage() {
+  const { admin, prefix } = useSession();
+  useTitle("Admin");
   return (
     <>
       <h1>Admin</h1>
-      {/* A lone tab isn't worth showing. */}
-      {sections.length > 1 && (
-        <nav className="sections" aria-label="Admin">
-          {sections.map(({ path, label, icon: SectionIcon }) => (
-            <Link key={path} to={path} className="section" aria-current={path === current.path ? "page" : undefined}>
-              <SectionIcon />
-              {label}
-            </Link>
-          ))}
-        </nav>
-      )}
-      {!allowed ? (
-        <p className="lead">
-          {section === "boards"
-            ? "Setting up boards takes the boards.manage permission."
-            : "Only the server owner and members with Administrator can change the bot settings."}
-        </p>
-      ) : section === "boards" ? (
-        <BoardSettings />
-      ) : (
+      {admin ? (
         <>
           <p className="lead">What the bot does in the server: the prefix, permissions and every feature.</p>
           <Unbuilt>
@@ -103,6 +65,8 @@ export function AdminPage({ section }: { section: AdminSection }) {
             <code>{prefix}settings import</code> in chat.
           </Unbuilt>
         </>
+      ) : (
+        <p className="lead">Only the server owner and members with Administrator can change the bot settings.</p>
       )}
     </>
   );

@@ -188,8 +188,8 @@ swaps the role.
 
 ## Boards
 
-Boards are set up with `!board create`, `edit` and `delete` below, under
-Admin → Boards in the web interface, or in the `boards` section of the
+Boards are set up with `!board create`, `edit` and `delete` below, on the
+boards page of the web interface, or in the `boards` section of the
 settings, described in
 [Configuration](configuration.md#boards). Once enough members react to a
 message with a board's emoji, the bot posts it in the board's channel with

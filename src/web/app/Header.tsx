@@ -2,7 +2,6 @@ import { BookOpenText, CaretDown, type Icon, ShieldStar, SignOut, Star, UserCirc
 import { useEffect, useRef, useState } from "react";
 import { useSession } from "./App.tsx";
 import portrait from "./orianna.png";
-import { useAdminSections } from "./pages.tsx";
 import { Link, usePath } from "./router.tsx";
 
 const TABS: { to: string; label: string; icon: Icon }[] = [
@@ -10,11 +9,12 @@ const TABS: { to: string; label: string; icon: Icon }[] = [
   { to: "/commands", label: "Commands", icon: BookOpenText },
 ];
 
-/** For members who manage something in the server. */
+/** Settings for the whole server, for the guild owner and members with Administrator. */
 const ADMIN_TAB = { to: "/admin", label: "Admin", icon: ShieldStar };
 
 export function Header({ path }: { path: string }) {
-  const tabs = useAdminSections().length > 0 ? [...TABS, ADMIN_TAB] : TABS;
+  const { admin } = useSession();
+  const tabs = admin ? [...TABS, ADMIN_TAB] : TABS;
   return (
     <header className="header">
       <Link to="/boards" className="wordmark">

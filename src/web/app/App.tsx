@@ -7,7 +7,7 @@ import { type Session, SignInError } from "../rpc.ts";
 import { Api } from "./api.ts";
 import { Header } from "./Header.tsx";
 import { BoardsPage, parseBoardPath } from "./Boards.tsx";
-import { AdminPage, CommandsPage, NotFoundPage, ProfilePage, useAdminSections } from "./pages.tsx";
+import { AdminPage, CommandsPage, NotFoundPage, ProfilePage } from "./pages.tsx";
 import { navigate, usePath } from "./router.tsx";
 import { SignIn } from "./SignIn.tsx";
 
@@ -74,18 +74,16 @@ function Unavailable({ message }: { message: string }) {
 const MOVED: Record<string, string> = {
   "/settings": "/profile",
   "/settings/personal": "/profile",
-  "/settings/server": "/admin/server",
-  "/settings/boards": "/admin/boards",
+  "/settings/server": "/admin",
 };
 
 function Shell() {
   const path = usePath();
-  const firstAdmin = useAdminSections()[0]?.path;
 
   useEffect(() => {
-    const to = path === "/" ? "/boards" : path === "/admin" ? firstAdmin : MOVED[path];
+    const to = path === "/" ? "/boards" : MOVED[path];
     if (to) navigate(to, { replace: true });
-  }, [path, firstAdmin]);
+  }, [path]);
 
   return (
     <>
@@ -107,13 +105,8 @@ function Page({ path }: { path: string }) {
       return <CommandsPage />;
     case "/profile":
       return <ProfilePage />;
-    case "/admin/boards":
-      return <AdminPage section="boards" />;
     case "/admin":
-      // Shell sends the member on to their first section.
-      return null;
-    case "/admin/server":
-      return <AdminPage section="server" />;
+      return <AdminPage />;
     default:
       return <NotFoundPage path={path} />;
   }
