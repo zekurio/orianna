@@ -264,7 +264,7 @@ export interface ProposalSettings {
 
 export type ExpressionProposals = Effect.Success<ReturnType<typeof makeExpressionProposals>>;
 
-/** Proposals for one kind of expression. Registers its poll kind with the poll service. */
+/** Proposals for one kind of expression. Handles its poll kind until the scope closes. */
 export const makeExpressionProposals = Effect.fnUntraced(function* (
   kind: ExpressionKind,
   { config, guildId, channelId }: ProposalSettings,
@@ -747,7 +747,7 @@ export const makeExpressionProposals = Effect.fnUntraced(function* (
       return proposal?.status === "pending" && passes(proposal, tally);
     },
   };
-  pollService.register(kind.pollKind, handler);
+  yield* pollService.register(kind.pollKind, handler);
 
   return {
     kind,

@@ -1,5 +1,5 @@
-import { and, asc, eq, isNull, lte, sql } from "drizzle-orm";
-import { Cause, Clock, Context, Duration, Effect, FiberMap, FiberSet, Layer, Queue } from "effect";
+import { and, asc, eq, inArray, isNull, lte, sql } from "drizzle-orm";
+import { Cause, Clock, Context, Duration, Effect, FiberMap, FiberSet, Layer, Queue, type Scope } from "effect";
 import type { UserError } from "../commands/command.ts";
 import { Database } from "../db/index.ts";
 import { type PollOption, polls, votes } from "../db/schema.ts";
@@ -78,6 +78,8 @@ const makePollService = Effect.gen(function* () {
 
   const handlers = new Map<string, PollHandler>();
   const resolving = new Set<number>();
+  /** Polls past their deadline whose kind has no handler, already logged. */
+  const waiting = new Set<number>();
   /** Live polls whose votes changed since their message was last edited. */
   const stale = new Set<number>();
   /** Per live poll, the fiber that waits for votes to settle and edits the message. */
@@ -88,9 +90,26 @@ const makePollService = Effect.gen(function* () {
   const wake = yield* Queue.sliding<void>(1);
   let started = false;
 
-  function register(kind: string, handler: PollHandler) {
-    if (handlers.has(kind)) throw new Error(`duplicate poll kind: ${kind}`);
-    handlers.set(kind, handler);
+  const schedule = Queue.offer(wake, undefined).pipe(Effect.asVoid);
+
+  /**
+   * Handles polls of `kind` until the scope closes. Polls of a kind without a
+   * handler stay open past their deadline, and closed ones stay unresolved,
+   * until a handler for it is registered again.
+   */
+  function register(kind: string, handler: PollHandler): Effect.Effect<void, never, Scope.Scope> {
+    return Effect.acquireRelease(
+      Effect.suspend(() => {
+        if (handlers.has(kind)) return Effect.die(new Error(`duplicate poll kind: ${kind}`));
+        handlers.set(kind, handler);
+        return schedule;
+      }),
+      () =>
+        Effect.suspend(() => {
+          handlers.delete(kind);
+          return schedule;
+        }),
+    );
   }
 
   function get(id: number): Poll | undefined {
@@ -104,8 +123,6 @@ const makePollService = Effect.gen(function* () {
   function byMessage(messageId: string): Poll | undefined {
     return db.select().from(polls).where(eq(polls.messageId, messageId)).get();
   }
-
-  const schedule = Queue.offer(wake, undefined).pipe(Effect.asVoid);
 
   /** Stores the poll, posts it, and seeds one reaction per option. */
   const create = Effect.fn("PollService.create")(function* (input: CreatePollInput) {
@@ -387,37 +404,58 @@ const makePollService = Effect.gen(function* () {
   /**
    * Closes every poll past its deadline and retries unresolved handlers. Each
    * runs in a fiber of its own, so a handler that's slow to finish doesn't
-   * hold up the deadlines of other polls.
+   * hold up the deadlines of other polls. Polls of a kind without a handler
+   * are left for when it has one again.
    */
   const tick = Effect.gen(function* () {
     const now = new Date(yield* Clock.currentTimeMillis);
     // Read before closing, so a poll closed here is resolved by its own close
     // after the message edit, not by the retry.
-    const pending = db.select().from(polls).where(eq(polls.status, "closed")).all();
+    const pending = db
+      .select()
+      .from(polls)
+      .where(eq(polls.status, "closed"))
+      .all()
+      .filter((poll) => handlers.has(poll.kind));
     const due = db
-      .select({ id: polls.id })
+      .select({ id: polls.id, kind: polls.kind })
       .from(polls)
       .where(and(eq(polls.status, "open"), lte(polls.closesAt, now)))
       .all();
-    for (const { id } of due) {
+    for (const { id, kind } of due) {
+      if (!handlers.has(kind)) {
+        if (!waiting.has(id)) {
+          waiting.add(id);
+          yield* Effect.logWarning(
+            `poll ${id}: due, but nothing handles ${kind} polls right now; it closes once something does`,
+          );
+        }
+        continue;
+      }
+      waiting.delete(id);
       yield* FiberSet.run(closing, close(id).pipe(Effect.catchCause(logFailure(`closing poll ${id}`))));
     }
     for (const poll of pending) yield* FiberSet.run(closing, resolve(poll));
   });
 
-  /** Milliseconds until the next deadline, or until failed handlers are retried. */
+  /**
+   * Milliseconds until the next deadline, or until failed handlers are
+   * retried. Only polls of kinds with a handler count; registering one wakes
+   * the loop.
+   */
   const nextDelay = Effect.gen(function* () {
+    const handled = inArray(polls.kind, [...handlers.keys()]);
     const next = db
       .select({ closesAt: polls.closesAt })
       .from(polls)
-      .where(eq(polls.status, "open"))
+      .where(and(eq(polls.status, "open"), handled))
       .orderBy(asc(polls.closesAt))
       .limit(1)
       .get();
     const hasPending = db
       .select({ id: polls.id })
       .from(polls)
-      .where(eq(polls.status, "closed"))
+      .where(and(eq(polls.status, "closed"), handled))
       .limit(1)
       .get();
 
@@ -467,15 +505,20 @@ const makePollService = Effect.gen(function* () {
     });
   }
 
-  /** Runs the poll's handler and marks it resolved. Failures are logged and retried later. */
+  /**
+   * Runs the poll's handler and marks it resolved. Failures are logged and
+   * retried later. Without a handler the poll stays closed, and is resolved
+   * once one is registered.
+   */
   function runHandler(poll: Poll): Effect.Effect<void> {
     return Effect.gen(function* () {
       const handler = handlers.get(poll.kind);
-      if (handler) {
-        yield* handler.onClose(poll, tally(poll));
-      } else {
-        yield* Effect.logWarning(`poll ${poll.id}: no handler for kind ${poll.kind}`);
+      if (!handler) {
+        return yield* Effect.logWarning(
+          `poll ${poll.id}: nothing handles ${poll.kind} polls right now; it's resolved once something does`,
+        );
       }
+      yield* handler.onClose(poll, tally(poll));
       db.update(polls).set({ status: "resolved" }).where(eq(polls.id, poll.id)).run();
     }).pipe(
       Effect.catchCause((cause) =>
