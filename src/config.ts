@@ -90,6 +90,21 @@ const RoleMenusSchema = Schema.Struct({
   menus: Schema.Array(RoleMenuSchema).pipe(orDefault([])),
 });
 
+const BoardSchema = Schema.Struct({
+  /** What `!board top` takes, e.g. `gems`. */
+  name: Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]{0,31}$/)),
+  /** A Unicode emoji, `name:id` or `<:name:id>` (`<a:name:id>` for an animated one). */
+  emoji: Schema.String.check(Schema.isMinLength(1)),
+  /** Where the bot posts the messages that make it. */
+  channelId: Snowflake,
+  /** Members other than the author who have to react before a message goes up. */
+  threshold: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(orDefault(5)),
+  /** Keeps a post up when reactions drop below the threshold again. */
+  keep: Schema.Boolean.pipe(orDefault(false)),
+  /** Channels whose messages never go up, such as private ones. Board channels never do. */
+  ignoredChannelIds: Schema.Array(Snowflake).pipe(orDefault([])),
+});
+
 /**
  * On SIGHUP (`systemctl reload orianna`) the bot reads the file again and
  * applies `prefix` and `permissions`. Every other key is read once at startup,
@@ -119,6 +134,7 @@ export const ConfigSchema = Schema.Struct({
    * - `sticker.propose`, `sticker.add`, `sticker.decide`, `sticker.cancel-any`
    * - `polls.create`: start a poll with `!poll`
    * - `polls.end-any`: end anyone's poll early with 🛑, not just one's own
+   * - `boards.remove`: take a message off a board for good with `!board remove`
    *
    * The most specific rule that names a permission decides it, so
    * `-emoji.decide` beats `+emoji.*`, which beats `+*`. Between rules that
@@ -151,6 +167,13 @@ export const ConfigSchema = Schema.Struct({
    * its message or reactions; members keep the roles they have.
    */
   roleMenus: Schema.optionalKey(RoleMenusSchema),
+  /**
+   * Starboards: once enough members react to a message with a board's emoji,
+   * the bot posts it in the board's channel. It needs View Channel and Read
+   * Message History where members react, and Send Messages and Embed Links in
+   * the board channels.
+   */
+  boards: Schema.optionalKey(Schema.Array(BoardSchema)),
 });
 
 export type Config = typeof ConfigSchema.Type;
@@ -159,6 +182,7 @@ export type PollsConfig = typeof PollsConfigSchema.Type;
 export type PermissionsConfig = typeof PermissionsSchema.Type;
 export type RoleMenusConfig = typeof RoleMenusSchema.Type;
 export type RoleMenuConfig = typeof RoleMenuSchema.Type;
+export type BoardConfig = typeof BoardSchema.Type;
 
 export class ConfigError extends Data.TaggedError("ConfigError")<{ readonly message: string }> {}
 
@@ -176,6 +200,7 @@ export function parseConfig(raw: unknown): Effect.Effect<Config, ConfigError> {
         ...checkPollsChannel(config),
         ...checkPermissions(config),
         ...checkRoleMenus(config),
+        ...checkBoards(config),
       ];
       return problems.length > 0 ? Effect.fail(invalid(problems)) : Effect.succeed(config);
     }),
@@ -277,6 +302,21 @@ function checkRoleMenus(config: Config): string[] {
         menuOfRole.set(option.roleId, menu.name);
       }
     });
+  });
+  return problems;
+}
+
+/** What the schema can't express: unique names, and emoji the bot can read. */
+function checkBoards(config: Config): string[] {
+  const problems: string[] = [];
+  const names = new Set<string>();
+  config.boards?.forEach((board, i) => {
+    const at = `/boards/${i}`;
+    if (names.has(board.name)) problems.push(`  ${at}/name: another board is also called ${board.name}`);
+    names.add(board.name);
+    if (!parseEmoji(board.emoji)) {
+      problems.push(`  ${at}/emoji: ${board.emoji} is not an emoji; use a Unicode emoji, name:id or <:name:id>`);
+    }
   });
   return problems;
 }

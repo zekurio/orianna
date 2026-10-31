@@ -29,9 +29,11 @@ section again and applies it without a restart. See
 | `sticker.propose`, `sticker.add`, `sticker.decide`, `sticker.cancel-any` | The same, for stickers |
 | `polls.create` | Starting a poll with `!poll` |
 | `polls.end-any` | Ending anyone's poll early with 🛑. Everyone can end their own. |
+| `boards.remove` | Taking a message off the boards for good with `!board remove` |
 
 Every member can run the other commands: `!help`, `!ping`, `!perms`, `!polls`,
-and `list` under `!emoji` and `!sticker`.
+`list` under `!emoji` and `!sticker`, and `top`, `optout` and `optin` under
+`!board`.
 
 ## Writing rules
 

@@ -51,6 +51,7 @@ function split(body: MessageBody): { content?: string; embeds: Embed[] } {
 /** Goes through the builder's setters, which throw a RangeError past Fluxer's limits. */
 function toBuilder(embed: Embed): EmbedBuilder {
   const builder = new EmbedBuilder();
+  if (embed.author) builder.setAuthor({ name: embed.author.name, iconURL: embed.author.iconUrl });
   if (embed.title) builder.setTitle(embed.title);
   if (embed.description) builder.setDescription(embed.description);
   if (embed.color !== undefined) builder.setColor(embed.color);
@@ -58,5 +59,6 @@ function toBuilder(embed: Embed): EmbedBuilder {
   if (embed.footer) builder.setFooter({ text: embed.footer });
   if (embed.image) builder.setImage(embed.image);
   if (embed.thumbnail) builder.setThumbnail(embed.thumbnail);
+  if (embed.timestamp) builder.setTimestamp(embed.timestamp);
   return builder;
 }

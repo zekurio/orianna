@@ -15,6 +15,13 @@
       "when": 1793140889633,
       "tag": "0001_proposal_images",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793467662229,
+      "tag": "0002_boards",
+      "breakpoints": true
     }
   ]
 }

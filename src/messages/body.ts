@@ -11,6 +11,7 @@ export interface EmbedField {
 }
 
 export interface Embed {
+  author?: { name: string; iconUrl?: string };
   title?: string;
   description?: string;
   /** 24-bit RGB. */
@@ -20,6 +21,7 @@ export interface Embed {
   /** An http(s) URL, or `attachment://name` for a file sent with the message. */
   image?: string;
   thumbnail?: string;
+  timestamp?: Date;
 }
 
 /** Plain text, or text and embeds. */

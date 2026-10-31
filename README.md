@@ -8,6 +8,8 @@ instance.
   linked, or taken from a 7TV emote. Wide images are cut into a row of emojis.
 - Members start their own polls with `!poll` and watch the results come in.
 - Role menus let members give themselves roles by reacting to a message.
+- Boards repost messages that got enough reactions, like a starboard, or a
+  hall of shame.
 - Permission rules in the config decide who may do what.
 
 Fluxer has no slash commands or buttons yet, so commands start with a prefix,

@@ -26,6 +26,7 @@ turns it on with the defaults below.
 | `sticker` | Off | Sticker proposals |
 | `polls` | Off | `!poll` |
 | `roleMenus` | Off | Role menus |
+| `boards` | Off | Starboards |
 
 ## `permissions`
 
@@ -117,6 +118,50 @@ hand out the role:
 The bot removes reactions with emojis that aren't in the menu. If someone
 deletes a menu message, the bot posts it again the next time it starts. When
 a member leaves the guild, the bot removes their reactions.
+
+## Boards
+
+A board is a channel where the bot reposts messages that got enough
+reactions with one emoji, like a starboard. You can have as many as you like,
+say 💎 for gems and 🪨 for a hall of shame:
+
+```json
+"boards": [
+  { "name": "gems", "emoji": "💎", "channelId": "000000000000000000", "threshold": 5 },
+  {
+    "name": "coal",
+    "emoji": "🪨",
+    "channelId": "000000000000000000",
+    "threshold": 8,
+    "keep": true,
+    "ignoredChannelIds": ["100000000000000020"]
+  }
+]
+```
+
+Each board:
+
+| Key | Default | What it does |
+|---|---|---|
+| `name` | Required | Lowercase letters, digits and hyphens, up to 32, starting with a letter or digit. Members type it in `!board top`. Renaming a board starts its leaderboard over. |
+| `emoji` | Required | A Unicode emoji, `name:id` or `<:name:id>` |
+| `channelId` | Required | Where the bot posts |
+| `threshold` | `5` | How many members other than the author have to react before a message goes up |
+| `keep` | `false` | Leaves a post up when reactions drop below `threshold` again. Without it, the bot takes the post down and puts it back up if the message gets there again. |
+| `ignoredChannelIds` | `[]` | Channels whose messages never go up on this board |
+
+The bot posts from every channel it can read, private ones included, so put
+channels whose messages shouldn't be seen elsewhere in `ignoredChannelIds`.
+It leaves out messages from NSFW channels unless the board's channel is NSFW
+too, and doesn't show images their uploader marked NSFW. Messages in board
+channels never go up.
+
+The bot needs View Channel and Read Message History where members react, and
+Send Messages and Embed Links in the board channels. Fluxer doesn't tell the
+bot about reactions from while it was offline. It counts them the next time
+someone reacts to the message.
+
+[Commands](commands.md#boards) explains how a message goes up and comes down.
 
 ## Environment
 
