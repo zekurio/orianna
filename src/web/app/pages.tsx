@@ -1,5 +1,6 @@
 import { MagnifyingGlass } from "@phosphor-icons/react";
-import { Lead, PageHeader, SectionTitle } from "@/components/page";
+import { PageHeader } from "@/components/page";
+import { SettingsGroup } from "@/components/settings";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,28 +13,31 @@ import { Link } from "./router.tsx";
 // The profile page behind the user menu, and the page for paths that aren't one.
 
 export function ProfilePage() {
-  const { user, admin } = useSession();
+  const { user, admin, guild } = useSession();
   return (
     <>
       <PageHeader title="Profile" />
       <Card>
         <CardContent className="flex items-center gap-4">
-          <Avatar className="size-16">
+          <Avatar className="size-14">
             <AvatarImage src={user.avatarUrl} alt="" />
             <AvatarFallback>{user.name.slice(0, 1)}</AvatarFallback>
           </Avatar>
-          <div className="grid justify-items-start gap-0.5">
-            <strong className="font-heading text-[1.375rem] leading-tight">{user.name}</strong>
-            {user.tag !== user.name && <span className="text-muted-foreground">{user.tag}</span>}
-            {admin && <Badge className="mt-1">Server admin</Badge>}
+          <div className="grid min-w-0 gap-0.5">
+            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+              <strong className="truncate font-heading text-[1.375rem] leading-tight">{user.name}</strong>
+              {admin && <Badge>Server admin</Badge>}
+            </div>
+            <span className="text-muted-foreground">
+              {user.tag !== user.name ? `${user.tag} · ` : ""}
+              {guild.name}
+            </span>
           </div>
         </CardContent>
       </Card>
-      <div className="flex flex-col gap-2">
-        <SectionTitle>Your settings</SectionTitle>
-        <Lead>Settings that only change things for you.</Lead>
-      </div>
-      <StarboardOptOut />
+      <SettingsGroup title="Privacy" description="What the bot may do with your messages. These only change things for you.">
+        <StarboardOptOut />
+      </SettingsGroup>
     </>
   );
 }

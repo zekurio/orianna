@@ -13,15 +13,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
+import { SettingRow } from "@/components/settings";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { Api, failureMessage, STARBOARD_KEYS } from "./api.ts";
 import { useSession } from "./App.tsx";
 
 // The starboard opt-out from shinpuru's privacy settings, like
-// `!starboard optout` and `optin`.
+// `!starboard optout` and `optin`, as a row of the profile page's privacy
+// settings.
 
 const KEYS = ["starboard-opt-out"];
 
@@ -30,26 +30,29 @@ export function StarboardOptOut() {
   const id = useId();
   const optedOut = useAtomValue(Api.query("starboardOptOut", undefined, { reactivityKeys: KEYS }));
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Starboard</CardTitle>
-        <CardDescription>
+    <SettingRow
+      id={id}
+      title="Opt-out from starboard"
+      description={
+        <>
           The starboard allows users to vote high quality or funny messages into the "starboard", where all voted
           messages are presented with their vote count. This starboard is represented as channel on the server as
           well as section in the web interface. Therefore, the message content needs to be stored in the database.
           If you don't want your messages to be presented in the starboard, here you can opt-out from it globally.
-          Same as <code>{prefix}starboard optout</code> and <code>{prefix}starboard optin</code> in chat.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        {AsyncResult.matchWithError(optedOut, {
-          onInitial: () => <Spinner />,
-          onError: () => <span className="text-sm text-destructive">Couldn't load this.</span>,
-          onDefect: () => <span className="text-sm text-destructive">Couldn't load this.</span>,
-          onSuccess: ({ value }) => <OptOutSwitch optedOut={value} id={id} />,
-        })}
-      </CardContent>
-    </Card>
+        </>
+      }
+      hint={
+        <>
+          In chat: <code>{prefix}starboard optout</code> and <code>{prefix}starboard optin</code>.
+        </>
+      }
+      control={AsyncResult.matchWithError(optedOut, {
+        onInitial: () => <Spinner />,
+        onError: () => <span className="text-sm text-destructive">Couldn't load this.</span>,
+        onDefect: () => <span className="text-sm text-destructive">Couldn't load this.</span>,
+        onSuccess: ({ value }) => <OptOutSwitch optedOut={value} id={id} />,
+      })}
+    />
   );
 }
 
@@ -73,20 +76,16 @@ function OptOutSwitch({ optedOut, id }: { optedOut: boolean; id: string }) {
 
   return (
     <>
-      <div className="flex items-center gap-2">
-        <Switch
-          id={id}
-          checked={optedOut}
-          disabled={busy}
-          onCheckedChange={(checked) => {
-            if (checked) setConfirming(true);
-            else change(false);
-          }}
-        />
-        <Label htmlFor={id} className="whitespace-nowrap">
-          Opt-out from starboard
-        </Label>
-      </div>
+      <Switch
+        id={id}
+        checked={optedOut}
+        disabled={busy}
+        aria-describedby={`${id}-description`}
+        onCheckedChange={(checked) => {
+          if (checked) setConfirming(true);
+          else change(false);
+        }}
+      />
       <AlertDialog open={confirming} onOpenChange={(open) => !busy && setConfirming(open)}>
         <AlertDialogContent>
           <AlertDialogHeader>
