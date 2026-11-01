@@ -45,11 +45,12 @@ in
     settings = lib.mkOption {
       description = ''
         Deployment configuration, written to /etc/orianna/config.json. See
-        docs/configuration.md for every key. Unknown keys are rejected when the bot
+        src/config.ts for every key. Unknown keys are rejected when the bot
         starts, and any change restarts it.
 
         Bot settings like `permissions`, `emoji` or `starboard` live in the bot's
-        database and are edited with `!settings`, not here.
+        database, one set per server, and are edited on the web interface's
+        Admin tab or with `!settings`, not here.
       '';
       example = lib.literalExpression ''
         {

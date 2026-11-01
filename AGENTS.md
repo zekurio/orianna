@@ -113,10 +113,15 @@ Body explaining what changed and why, wrapped at 72 columns.
   stored document, or the bot won't start.
 - Commit a schema change and its generated migration together. Never edit a
   migration that has already been committed.
-- When `src/config.ts` changes, update `config.example.json` or
-  `settings.example.json`, and `docs/configuration.md`, in the same commit.
-- When a command, its options or a permission changes, update
-  `docs/commands.md` or `docs/permissions.md` in the same commit.
+- The code is the documentation; there's no `docs/` to keep in step. When
+  `src/config.ts` changes, keep its doc comments current and update
+  `config.example.json` or `settings.example.json` in the same commit.
+- `!help` and the web interface's commands page show the descriptions of
+  commands and their options, so write those for members. A new permission
+  goes in `PERMISSIONS` in `src/permissions/rules.ts` and in the list in the
+  `permissions` comment in `src/config.ts`.
+- Don't add markdown files besides `README.md` and this one. Update the
+  README when what it says about running the bot changes.
 
 ## Branches
 
