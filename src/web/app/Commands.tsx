@@ -2,13 +2,13 @@ import { useAtomValue } from "@effect/atom-react";
 import { MagnifyingGlass, ShieldStar } from "@phosphor-icons/react";
 import { AsyncResult } from "effect/reactivity";
 import { useDeferredValue, useMemo, useState } from "react";
+import { ListCardSkeleton, Placeholder, TextSkeleton } from "@/components/loading";
 import { PageHeader, SectionTitle } from "@/components/page";
 import { Problem } from "@/components/Problem";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
-import { Spinner } from "@/components/ui/spinner";
 import type { CommandInfo, CommandSection } from "../rpc.ts";
 import { Api } from "./api.ts";
 import { useSession } from "./App.tsx";
@@ -45,10 +45,14 @@ export function CommandsPage() {
       </InputGroup>
       {AsyncResult.matchWithError(commands, {
         onInitial: () => (
-          <p className="flex items-center gap-2 text-muted-foreground">
-            <Spinner />
-            Loading…
-          </p>
+          <Placeholder label="Loading the commands" className="flex flex-col gap-8">
+            {[4, 3].map((rows, i) => (
+              <div key={i} className="flex flex-col gap-3">
+                <TextSkeleton className="h-7 w-36" />
+                <ListCardSkeleton title={false} rows={rows} />
+              </div>
+            ))}
+          </Placeholder>
         ),
         onError: () => <Problem />,
         onDefect: () => <Problem />,

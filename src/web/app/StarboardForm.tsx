@@ -5,6 +5,7 @@ import { AsyncResult } from "effect/reactivity";
 import { type FormEvent, useId, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { EmojiPicker } from "@/components/EmojiPicker";
+import { FieldSkeleton, Placeholder } from "@/components/loading";
 import { Problem } from "@/components/Problem";
 import { Button } from "@/components/ui/button";
 import { DialogFooter } from "@/components/ui/dialog";
@@ -49,11 +50,15 @@ export const setupQuery = Api.query("starboardSetup", undefined, { reactivityKey
 export function StarboardSettings({ onCancel, onDone }: { onCancel: () => void; onDone: () => void }) {
   const setup = useAtomValue(setupQuery);
   return AsyncResult.matchWithError(setup, {
-    // About as tall as the form, so the dialog doesn't jump when it comes in.
+    // The form's fields, so the dialog doesn't jump when they come in.
     onInitial: () => (
-      <div className="grid min-h-60 place-items-center text-muted-foreground">
-        <Spinner className="size-6" />
-      </div>
+      <Placeholder label="Loading the settings" className="flex flex-col gap-5">
+        <FieldSkeleton />
+        <div className="grid gap-x-6 gap-y-5 sm:grid-cols-2">
+          <FieldSkeleton />
+          <FieldSkeleton />
+        </div>
+      </Placeholder>
     ),
     onError: (error) => <Problem message={error._tag === "Refused" ? error.message : undefined} />,
     onDefect: () => <Problem />,

@@ -4,6 +4,7 @@ import { Cause, Exit } from "effect";
 import { AsyncResult } from "effect/reactivity";
 import { type ChangeEvent, useRef, useState } from "react";
 import { toast } from "sonner";
+import { Placeholder, TextSkeleton } from "@/components/loading";
 import { Problem } from "@/components/Problem";
 import {
   AlertDialog,
@@ -153,7 +154,16 @@ function ChangeLog() {
       </CardHeader>
       <CardContent>
         {AsyncResult.matchWithError(log, {
-          onInitial: () => <Spinner />,
+          onInitial: () => (
+            <Placeholder label="Loading the history" className="flex flex-col gap-4">
+              {Array.from({ length: 4 }, (_, i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <TextSkeleton className="w-36" />
+                  <TextSkeleton className={i % 2 ? "w-40" : "w-56"} />
+                </div>
+              ))}
+            </Placeholder>
+          ),
           onError: (error) => <Problem message={error._tag === "Refused" ? error.message : undefined} />,
           onDefect: () => <Problem />,
           onSuccess: ({ value }) => (

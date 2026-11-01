@@ -51,6 +51,10 @@ points at its docs and examples.
 - Say how an action went with a toast, `toast` from `sonner`; the
   `Toaster` is mounted once in `src/web/app/main.tsx`. Keep inline messages
   for problems with a form's fields and for data that didn't load.
+- While data loads, show skeletons in the shape of what's coming, inside a
+  `Placeholder` from `src/web/app/components/loading.tsx`, which fades them in
+  only once the wait is noticeable. No "Loading…" text, and spinners only in
+  buttons whose action is running.
 - State the bot doesn't hold, like how a page is sorted or whether a dialog
   is open, goes in a zustand store when more than one component needs it or
   it should survive leaving the page; local state stays in `useState`.

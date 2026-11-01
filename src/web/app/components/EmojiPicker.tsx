@@ -3,8 +3,9 @@ import { cn } from "cn";
 import { type ComponentProps, type KeyboardEvent, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Placeholder, TextSkeleton } from "@/components/loading";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Spinner } from "@/components/ui/spinner";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useSession } from "../App.tsx";
 import type { UnicodeEmoji } from "../../rpc.ts";
 import { emojiImage, findUnicodeEmoji, useUnicodeEmojis } from "../emojis.ts";
@@ -142,10 +143,14 @@ export function EmojiPicker({
         </div>
         <div className="h-72 overflow-y-auto px-2 pb-2" onMouseLeave={() => setHovered(undefined)}>
           {!categories && (
-            <p className="flex items-center gap-2 p-2 text-sm text-muted-foreground">
-              <Spinner />
-              Loading emoji…
-            </p>
+            <Placeholder label="Loading emoji" className="flex flex-col gap-2 pt-2">
+              <TextSkeleton className="h-3 w-20" />
+              <div className="grid grid-cols-8 gap-1.5">
+                {Array.from({ length: 32 }, (_, i) => (
+                  <Skeleton key={i} className="aspect-square rounded-md" />
+                ))}
+              </div>
+            </Placeholder>
           )}
           {sections.map(({ label, choices }) => (
             <section key={label} aria-label={label}>

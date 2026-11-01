@@ -123,3 +123,18 @@
     @apply rounded-md border bg-card px-[0.35em] py-[0.1em] font-mono text-[0.875em];
   }
 }
+
+/* Loading placeholders fade in once a wait is long enough to notice, so a
+   quick load doesn't flash them. */
+@utility appear-late {
+  animation: appear-late 200ms ease-out 300ms both;
+}
+
+@keyframes appear-late {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

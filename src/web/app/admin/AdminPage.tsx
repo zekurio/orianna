@@ -2,9 +2,9 @@ import { useAtomValue } from "@effect/atom-react";
 import { CheckSquare, ClockCounterClockwise, GearSix, type Icon, Key, ListChecks } from "@phosphor-icons/react";
 import { AsyncResult } from "effect/reactivity";
 import type { ReactNode } from "react";
+import { FormCardSkeleton, Placeholder } from "@/components/loading";
 import { PageHeader } from "@/components/page";
 import { Problem } from "@/components/Problem";
-import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSession } from "../App.tsx";
 import { navigate } from "../router.tsx";
@@ -82,10 +82,10 @@ function Loaded({ children }: { children: (props: SectionProps) => ReactNode }) 
   const setup = useAtomValue(setupQuery);
   return AsyncResult.matchWithError(setup, {
     onInitial: () => (
-      <p className="flex items-center gap-2 text-muted-foreground">
-        <Spinner />
-        Loading the settings…
-      </p>
+      <Placeholder label="Loading the settings" className="flex flex-col gap-6">
+        <FormCardSkeleton fields={2} />
+        <FormCardSkeleton fields={4} />
+      </Placeholder>
     ),
     onError: (error) => <Problem message={error._tag === "Refused" ? error.message : undefined} />,
     onDefect: () => <Problem />,

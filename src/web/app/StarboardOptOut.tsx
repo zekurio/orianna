@@ -13,7 +13,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Placeholder } from "@/components/loading";
 import { SettingRow } from "@/components/settings";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { Api, failureMessage, STARBOARD_KEYS } from "./api.ts";
@@ -47,7 +49,11 @@ export function StarboardOptOut() {
         </>
       }
       control={AsyncResult.matchWithError(optedOut, {
-        onInitial: () => <Spinner />,
+        onInitial: () => (
+          <Placeholder>
+            <Skeleton className="h-[18.4px] w-8 rounded-full" />
+          </Placeholder>
+        ),
         onError: () => <span className="text-sm text-destructive">Couldn't load this.</span>,
         onDefect: () => <span className="text-sm text-destructive">Couldn't load this.</span>,
         onSuccess: ({ value }) => <OptOutSwitch optedOut={value} id={id} />,

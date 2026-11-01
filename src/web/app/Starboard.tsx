@@ -2,6 +2,7 @@ import { useAtomMount, useAtomRefresh, useAtomValue } from "@effect/atom-react";
 import { ArrowClockwise, EyeSlash, File, GearSix, SortDescending, Star } from "@phosphor-icons/react";
 import { AsyncResult } from "effect/reactivity";
 import { type MouseEvent, type ReactNode, useRef } from "react";
+import { Placeholder, TextSkeleton } from "@/components/loading";
 import { PageHeader } from "@/components/page";
 import { Problem } from "@/components/Problem";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -10,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
-import { Spinner } from "@/components/ui/spinner";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   type Names,
   STARBOARD_PAGE_SIZE,
@@ -73,7 +74,7 @@ export function StarboardPage() {
       />
       {configStarboard && <SettingsDialog />}
       {AsyncResult.matchWithError(starboard, {
-        onInitial: () => <Loading />,
+        onInitial: () => <EntriesSkeleton />,
         onError: () => <Problem />,
         onDefect: () => <Problem />,
         onSuccess: () =>
@@ -122,12 +123,27 @@ function SettingsDialog() {
   );
 }
 
-function Loading() {
+/** Entries in the shape of {@link EntryCard}, while they load. */
+function EntriesSkeleton({ count = 3 }: { count?: number }) {
   return (
-    <p className="flex items-center gap-2 text-muted-foreground">
-      <Spinner />
-      Loading…
-    </p>
+    <Placeholder label="Loading the starboard" className="flex flex-col gap-4">
+      {Array.from({ length: count }, (_, i) => (
+        <Card key={i}>
+          <CardHeader className="flex items-center gap-3">
+            <Skeleton className="size-8 rounded-full" />
+            <TextSkeleton className="w-32" />
+            <TextSkeleton className="w-10" />
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col gap-2.5 rounded-lg bg-background p-3">
+              <TextSkeleton className="w-5/6" />
+              <TextSkeleton className="w-2/3" />
+              {i === 0 && <Skeleton className="mt-1 h-40 w-full max-w-md rounded-lg" />}
+            </div>
+          </CardContent>
+        </Card>
+      ))}
+    </Placeholder>
   );
 }
 
@@ -176,7 +192,7 @@ function EntryPage({
   const shown = useRef<typeof page>(undefined);
   if (!AsyncResult.isInitial(page)) shown.current = page;
   return AsyncResult.matchWithError(shown.current ?? page, {
-    onInitial: () => <Loading />,
+    onInitial: () => <EntriesSkeleton count={offset === 0 ? 3 : 1} />,
     onError: () => <Problem />,
     onDefect: () => <Problem />,
     onSuccess: ({ value: { entries, total, names } }) => {
