@@ -43,15 +43,23 @@ export const starboardCommands = Effect.fnUntraced(function* () {
         required: false,
         named: true,
       },
+      {
+        name: "karma",
+        description: "The amount of karma an author gets when their message gets into the starboard.",
+        type: "integer",
+        required: false,
+        named: true,
+      },
     ] as const,
     permission: "starboard.config",
     run: (ctx) =>
       Effect.gen(function* () {
-        const { channel, threshold, emoji } = ctx.options;
+        const { channel, threshold, emoji, karma } = ctx.options;
         const changes: StarboardChanges = {
           ...(channel !== undefined && { channelId: yield* channelOf(channel) }),
           ...(threshold !== undefined && { threshold }),
           ...(emoji !== undefined && { emoji }),
+          ...(karma !== undefined && { karma }),
         };
         yield* ctx.reply({ embeds: [{ description: describe(yield* setStarboard(changes, ctx.userId)) }] });
       }).pipe(withGuild),
@@ -103,7 +111,7 @@ export function describe(config: StarboardConfig): string {
   }
   return (
     `Set starboard config:\n\nChannel: <#${config.channelId}>\nThreshold: \`${config.threshold}\`\n` +
-    `Emoji: ${config.emoji}`
+    `Emoji: ${config.emoji}\nKarma Gain: \`${config.karma}\``
   );
 }
 

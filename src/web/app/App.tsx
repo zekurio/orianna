@@ -9,6 +9,7 @@ import { Header } from "./Header.tsx";
 import { CommandsPage } from "./Commands.tsx";
 import { AdminPage, parseAdminPath } from "./admin/AdminPage.tsx";
 import { GuildContext, guildPath, homeGuild, parseGuildPath, useLastGuild } from "./guild.tsx";
+import { KarmaPage } from "./Karma.tsx";
 import { NoGuildsPage, NotFoundPage, ProfilePage } from "./pages.tsx";
 import { navigate, usePath } from "./router.tsx";
 import { SignIn } from "./SignIn.tsx";
@@ -117,6 +118,8 @@ function Page({ path }: { path: string }) {
   switch (inGuild.page) {
     case "/starboard":
       return <StarboardPage key={guild.id} />;
+    case "/karma":
+      return <KarmaPage key={guild.id} />;
     case "/commands":
       return <CommandsPage key={guild.id} />;
     default:

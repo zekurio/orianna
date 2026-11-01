@@ -1,3 +1,31 @@
+CREATE TABLE `karma` (
+	`guild_id` text NOT NULL,
+	`user_id` text NOT NULL,
+	`value` integer NOT NULL,
+	PRIMARY KEY(`guild_id`, `user_id`)
+);
+--> statement-breakpoint
+CREATE INDEX `karma_guild_id_value_idx` ON `karma` (`guild_id`,`value`);--> statement-breakpoint
+CREATE TABLE `karma_bonuses` (
+	`message_id` text PRIMARY KEY NOT NULL,
+	`guild_id` text NOT NULL,
+	`user_id` text NOT NULL,
+	`amount` integer NOT NULL,
+	`given_at` integer NOT NULL,
+	`revoked` integer DEFAULT false NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE `karma_votes` (
+	`message_id` text NOT NULL,
+	`voter_id` text NOT NULL,
+	`guild_id` text NOT NULL,
+	`author_id` text NOT NULL,
+	`value` integer NOT NULL,
+	`voted_at` integer NOT NULL,
+	PRIMARY KEY(`message_id`, `voter_id`)
+);
+--> statement-breakpoint
+CREATE INDEX `karma_votes_guild_id_voter_id_voted_at_idx` ON `karma_votes` (`guild_id`,`voter_id`,`voted_at`);--> statement-breakpoint
 CREATE TABLE `polls` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`slug` text NOT NULL,

@@ -8,6 +8,7 @@ import { type ParsedEmoji, parseEmoji, type ReactionEmoji, reactionKey } from ".
 import { ImageMagick } from "../expressions/process.ts";
 import { type FluxerError, logFailure } from "../fluxer.ts";
 import { ImageStore } from "../imagestore.ts";
+import { Karma } from "../karma/karma.ts";
 import type { MessageBody } from "../messages/body.ts";
 import { Settings } from "../settings/settings.ts";
 
@@ -27,6 +28,8 @@ export interface StarboardMessage {
   /** Null in a DM. */
   guildId: string | null;
   authorId: string;
+  /** Bots get no karma for their messages. */
+  authorBot: boolean;
   /** The username, with the discriminator on instances that use them, like shinpuru shows authors. */
   authorName: string;
   authorAvatar: string;
@@ -86,6 +89,8 @@ interface Board {
   channelId: string;
   threshold: number;
   emoji: ParsedEmoji;
+  /** For the author, the first time a message gets in. */
+  karma: number;
 }
 
 type Entry = typeof starboardEntries.$inferSelect;
@@ -125,13 +130,19 @@ export const makeStarboard = Effect.fnUntraced(function* (config: StarboardConfi
   const guild = yield* StarboardGuild;
   const magick = yield* ImageMagick;
   const store = yield* ImageStore;
+  const karma = yield* Karma;
   const lock = yield* Semaphore.make(1);
 
   // The settings check already rejected emoji that don't parse.
   const board: Board | undefined =
     config?.channelId === undefined
       ? undefined
-      : { channelId: config.channelId, threshold: config.threshold, emoji: parseEmoji(config.emoji)! };
+      : {
+          channelId: config.channelId,
+          threshold: config.threshold,
+          emoji: parseEmoji(config.emoji)!,
+          karma: config.karma,
+        };
 
   function enqueue<E>(label: string, task: Effect.Effect<void, E>): Effect.Effect<void> {
     return lock.withPermits(1)(task).pipe(Effect.catchCause(logFailure(`starboard: ${label}`)));
@@ -249,6 +260,8 @@ export const makeStarboard = Effect.fnUntraced(function* (config: StarboardConfi
             })
             .run();
         }),
+        // Karma only gives it once per message, however often it goes up.
+        Effect.andThen(message.authorBot ? Effect.void : karma.starboardBonus(messageId, message.authorId, board.karma)),
       ),
     );
   });
@@ -284,13 +297,17 @@ export const makeStarboard = Effect.fnUntraced(function* (config: StarboardConfi
     yield* forgetBlurred(row);
   });
 
-  /** Keeps the entry, so the message doesn't go up again. */
+  /**
+   * Keeps the entry, so the message doesn't go up again. Someone deleted the
+   * post, so the author loses the karma it gave them.
+   */
   const markRemoved = Effect.fnUntraced(function* (row: Entry) {
     db.update(starboardEntries)
       .set({ removed: true, postChannelId: null, postId: null, media: [] })
       .where(eq(starboardEntries.messageId, row.messageId))
       .run();
     yield* forgetBlurred(row);
+    yield* karma.revokeBonus(row.messageId);
   });
 
   /** Deletes the blurred copy from the image store, once no post shows it. */

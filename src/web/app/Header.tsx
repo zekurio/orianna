@@ -7,6 +7,7 @@ import {
   ShieldStar,
   SignOut,
   Star,
+  ThumbsUp,
   UserCircle,
 } from "@phosphor-icons/react";
 import { cn } from "cn";
@@ -30,6 +31,7 @@ import { Link, navigate } from "./router.tsx";
 /** A guild's pages, by their path within it. */
 const TABS: { page: string; label: string; icon: Icon }[] = [
   { page: "/starboard", label: "Starboard", icon: Star },
+  { page: "/karma", label: "Karma", icon: ThumbsUp },
   { page: "/commands", label: "Commands", icon: BookOpenText },
 ];
 

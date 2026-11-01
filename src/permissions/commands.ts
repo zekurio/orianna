@@ -1,11 +1,8 @@
 import { Effect } from "effect";
-import { defineCommand, refuse } from "../commands/command.ts";
+import { defineCommand, memberId } from "../commands/command.ts";
 import { ACCENT } from "../messages/body.ts";
 import { Settings } from "../settings/settings.ts";
 import { type Decision, GuildAccess, groupOf, PERMISSIONS, type Permission } from "./rules.ts";
-
-/** `<@id>`, `<@!id>` or a bare ID. */
-const MEMBER = /^(?:<@!?(\d+)>|(\d+))$/;
 
 export const perms = defineCommand({
   name: "perms",
@@ -38,12 +35,6 @@ export const perms = defineCommand({
       yield* ctx.reply({ embeds: [{ title: "Permissions", description, color: ACCENT }] });
     }),
 });
-
-function memberId(input: string) {
-  const match = MEMBER.exec(input);
-  if (!match) return refuse(`${input} isn't a mention or a user ID.`);
-  return Effect.succeed((match[1] ?? match[2])!);
-}
 
 /** e.g. "✅ `emoji.add`: `+emoji.*` on @Curators" */
 function describe(permission: Permission, decision: Decision): string {

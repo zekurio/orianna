@@ -8,6 +8,9 @@ import { type ParsedEmoji, parseEmoji } from "../emoji.ts";
 import { Fluxer, type FluxerError, logFailure, request, tagOf } from "../fluxer.ts";
 import { CurrentGuild } from "../guild.ts";
 import { Guilds } from "../guilds.ts";
+import { SCOREBOARD_SIZE } from "../karma/commands.ts";
+import { Karma, KarmaGuild } from "../karma/karma.ts";
+import { currentKarma, disableKarma, setKarma } from "../karma/manage.ts";
 import { GuildAccess, PERMISSIONS } from "../permissions/rules.ts";
 import { Settings } from "../settings/settings.ts";
 import { currentStarboard, disableStarboard, setStarboard } from "../starboard/manage.ts";
@@ -19,6 +22,7 @@ import {
   type CommandInfo,
   type CommandSection,
   CurrentMember,
+  type EmojiInfo,
   type GuildInfo,
   type Names,
   NotMember,
@@ -187,6 +191,21 @@ export const HandlersLive = WebRpcs.toLayer(
       return userId;
     });
 
+    /** Refuses members without `karma.config`. */
+    const mayConfigKarma = Effect.gen(function* () {
+      const { userId } = yield* member;
+      if (!(yield* (yield* GuildAccess).can(userId, "karma.config"))) {
+        return yield* new Refused({ message: "Changing karma takes the karma.config permission." });
+      }
+      return userId;
+    });
+
+    /** An emoji from the settings, as the app draws it. */
+    const emojiInfo = (text: string): EmojiInfo => {
+      const emoji = parseEmoji(text);
+      return { emoji: emoji?.text ?? text, url: customEmojiUrl(emoji) };
+    };
+
     /** The names the entries' mentions show, of channels the member can see. */
     const namesFor = Effect.fnUntraced(function* (texts: readonly string[], channelIds: readonly string[]) {
       const { userId } = yield* member;
@@ -243,6 +262,7 @@ export const HandlersLive = WebRpcs.toLayer(
           iconUrl: guild.iconURL({ size: 64 }),
           admin: permissions.bypass !== null,
           configStarboard: permissions.has("starboard.config"),
+          configKarma: permissions.has("karma.config"),
           prefix,
         };
         return info;
@@ -377,9 +397,10 @@ export const HandlersLive = WebRpcs.toLayer(
                 if (mayRun(entry, permissions)) standalone.push(info(entry.name, entry));
                 continue;
               }
-              const commands = entry.subcommands
-                .filter((c) => mayRun(c, permissions))
-                .map((c) => info(`${entry.name} ${c.name}`, c));
+              const commands = [
+                ...(entry.default && mayRun(entry.default, permissions) ? [info(entry.name, entry.default)] : []),
+                ...entry.subcommands.filter((c) => mayRun(c, permissions)).map((c) => info(`${entry.name} ${c.name}`, c)),
+              ];
               if (commands.length > 0) groups.push({ group: entry.name, description: entry.description, commands });
             }
             return [{ group: null, description: null, commands: standalone }, ...groups].filter(
@@ -465,6 +486,7 @@ export const HandlersLive = WebRpcs.toLayer(
                 threshold: config.threshold,
                 emoji: emoji?.text ?? config.emoji,
                 emojiUrl: customEmojiUrl(emoji),
+                karma: config.karma,
               },
               channels: channels.filter((c) => visible.has(c.id)).map(({ id, name, nsfw }) => ({ id, name, nsfw })),
               emojis: serverEmojis(yield* guild.emojis),
@@ -487,6 +509,68 @@ export const HandlersLive = WebRpcs.toLayer(
             yield* disableStarboard(userId);
           }),
         ).pipe(answer("disabling the starboard")),
+
+      karma: () =>
+        inGuild(
+          Effect.gen(function* () {
+            const { userId } = yield* member;
+            const { karma: config, starboard } = yield* Settings.current;
+            if (!config) return null;
+            const karma = yield* Karma;
+            const top = yield* karma.top(SCOREBOARD_SIZE);
+            const members = yield* (yield* KarmaGuild).members(top.map((t) => t.userId));
+            return {
+              own: yield* karma.of(userId),
+              top: top.flatMap(({ userId, value }) => {
+                const found = members.get(userId);
+                return found ? [{ userId, value, ...found }] : [];
+              }),
+              upvotes: config.upvotes.map(emojiInfo),
+              downvotes: config.downvotes.map(emojiInfo),
+              votesPerHour: config.votesPerHour,
+              penalty: config.penalty,
+              starboardGain: starboard?.channelId === undefined ? 0 : starboard.karma,
+            };
+          }),
+        ).pipe(hide("loading karma")),
+
+      karmaSetup: () =>
+        inGuild(
+          Effect.gen(function* () {
+            yield* mayConfigKarma;
+            const { id: guildId } = yield* CurrentGuild;
+            const fluxerGuild = yield* request("fetching the guild", () => client.guilds.resolve(guildId));
+            const roles = yield* request("fetching roles", () => fluxerGuild.fetchRoles());
+            const config = yield* currentKarma;
+            const blocked = yield* (yield* KarmaGuild).members(config.blocklist);
+            return {
+              on: (yield* Settings.current).karma !== undefined,
+              config,
+              blocked: Object.fromEntries([...blocked].map(([id, { name }]) => [id, name])),
+              roles: roles
+                .filter((r) => r.id !== guildId)
+                .sort((a, b) => b.position - a.position)
+                .map(({ id, name }) => ({ id, name })),
+              emojis: serverEmojis(yield* (yield* StarboardGuild).emojis),
+            };
+          }),
+        ).pipe(answer("loading the karma settings")),
+
+      setKarma: ({ karma }) =>
+        inGuild(
+          Effect.gen(function* () {
+            const userId = yield* mayConfigKarma;
+            yield* setKarma(karma, userId).pipe(Effect.catchTag("InvalidSettings", (err) => Effect.fail(rejected(err))));
+          }),
+        ).pipe(answer("setting karma")),
+
+      disableKarma: () =>
+        inGuild(
+          Effect.gen(function* () {
+            const userId = yield* mayConfigKarma;
+            yield* disableKarma(userId);
+          }),
+        ).pipe(answer("disabling karma")),
     };
   }),
 );

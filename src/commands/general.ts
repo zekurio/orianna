@@ -29,9 +29,14 @@ export const help = defineCommand({
       const entries = yield* (yield* CommandRouter).entries(ctx.guildId);
       const lines = [...entries.values()].flatMap((entry) =>
         isGroup(entry)
-          ? entry.subcommands
-              .filter((c) => mayRun(c, permissions))
-              .map((c) => usageLine(prefix, `${entry.name} ${c.name}`, c))
+          ? [
+              ...(entry.default && mayRun(entry.default, permissions)
+                ? [usageLine(prefix, entry.name, entry.default)]
+                : []),
+              ...entry.subcommands
+                .filter((c) => mayRun(c, permissions))
+                .map((c) => usageLine(prefix, `${entry.name} ${c.name}`, c)),
+            ]
           : mayRun(entry, permissions)
             ? [usageLine(prefix, entry.name, entry)]
             : [],

@@ -49,6 +49,8 @@ export const GuildInfo = Schema.Struct({
   admin: Schema.Boolean,
   /** The member has `starboard.config` there, so may change the starboard. */
   configStarboard: Schema.Boolean,
+  /** The member has `karma.config` there, so may change karma. */
+  configKarma: Schema.Boolean,
   /** What commands start with there. */
   prefix: Schema.String,
 });
@@ -148,6 +150,10 @@ export const StarboardInput = Schema.Struct({
     Schema.isNonEmpty({ message: "Pick an emoji." }),
     Schema.makeFilter((emoji: string) => parseEmoji(emoji) !== undefined, { message: "That isn't an emoji." }),
   ),
+  karma: Schema.Number.check(
+    Schema.isInt({ message: "A whole number, 0 or more." }),
+    Schema.isGreaterThanOrEqualTo(0, { message: "A whole number, 0 or more." }),
+  ),
 });
 export type StarboardInput = typeof StarboardInput.Type;
 
@@ -159,6 +165,7 @@ export const StarboardSetup = Schema.Struct({
     threshold: Schema.Number,
     emoji: Schema.String,
     emojiUrl: Schema.NullOr(Schema.String),
+    karma: Schema.Number,
   }),
   /** Channels the starboard can go in, of those the member can see. */
   channels: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String, nsfw: Schema.Boolean })),
@@ -166,6 +173,76 @@ export const StarboardSetup = Schema.Struct({
   emojis: Schema.Array(Schema.Struct({ text: Schema.String, name: Schema.String, url: Schema.String })),
 });
 export type StarboardSetup = typeof StarboardSetup.Type;
+
+/** An emoji as the app draws it: the Unicode emoji, or `<:name:id>` with its picture. */
+const EmojiInfo = Schema.Struct({ emoji: Schema.String, url: Schema.NullOr(Schema.String) });
+export type EmojiInfo = typeof EmojiInfo.Type;
+
+/** A member on the karma scoreboard. */
+export const KarmaEntry = Schema.Struct({
+  userId: Schema.String,
+  name: Schema.String,
+  avatarUrl: Schema.String,
+  value: Schema.Number,
+});
+export type KarmaEntry = typeof KarmaEntry.Type;
+
+/** Karma while it's on: the member's own, the scoreboard, and how voting goes. */
+export const KarmaBoard = Schema.Struct({
+  own: Schema.Number,
+  /** Most karma first, members who left aside. */
+  top: Schema.Array(KarmaEntry),
+  upvotes: Schema.Array(EmojiInfo),
+  downvotes: Schema.Array(EmojiInfo),
+  votesPerHour: Schema.Number,
+  penalty: Schema.Boolean,
+  /** What getting into the starboard gives; 0 while it's off. */
+  starboardGain: Schema.Number,
+});
+export type KarmaBoard = typeof KarmaBoard.Type;
+
+const KarmaRuleInput = Schema.Struct({
+  when: Schema.Literals(["above", "below"]),
+  value: Schema.Number.check(Schema.isInt({ message: "A whole number." })),
+  action: Schema.Literals(["role", "message", "kick", "ban"]),
+  roleId: Schema.optionalKey(Schema.String),
+  message: Schema.optionalKey(Schema.String),
+});
+export type KarmaRuleInput = typeof KarmaRuleInput.Type;
+
+/**
+ * Karma as members with `karma.config` set it: the `karma` section of the
+ * settings. The form checks the numbers before it sends anything; the bot
+ * checks the rest with the settings, and its problems come back with their
+ * paths, like `/karma/upvotes/0: …`.
+ */
+export const KarmaInput = Schema.Struct({
+  upvotes: Schema.Array(Schema.String),
+  downvotes: Schema.Array(Schema.String),
+  votesPerHour: Schema.Number.check(
+    Schema.isInt({ message: "A whole number, 1 or more." }),
+    Schema.isGreaterThanOrEqualTo(1, { message: "A whole number, 1 or more." }),
+  ),
+  penalty: Schema.Boolean,
+  /** User IDs. */
+  blocklist: Schema.Array(Schema.String),
+  rules: Schema.Array(KarmaRuleInput),
+});
+export type KarmaInput = typeof KarmaInput.Type;
+
+/** What the karma settings form needs. */
+export const KarmaSetup = Schema.Struct({
+  on: Schema.Boolean,
+  /** As it's set now, or what turning it on starts with. */
+  config: KarmaInput,
+  /** Names of the blocked members still in the server, by user ID. */
+  blocked: Schema.Record(Schema.String, Schema.String),
+  /** Roles, highest first, @everyone left out. */
+  roles: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String })),
+  /** The server's custom emoji. */
+  emojis: Schema.Array(Schema.Struct({ text: Schema.String, name: Schema.String, url: Schema.String })),
+});
+export type KarmaSetup = typeof KarmaSetup.Type;
 
 /**
  * The settings didn't validate, one line per problem, each starting with its
@@ -301,6 +378,17 @@ export const WebRpcs = RpcGroup.make(
   Rpc.make("setStarboard", { payload: { guildId: GuildId, starboard: StarboardInput }, error: Refused }),
   /** Disables the starboard, like `!starboard disable`. */
   Rpc.make("disableStarboard", { payload: { guildId: GuildId }, error: Refused }),
+  /** Karma and its scoreboard, null while it's off. */
+  Rpc.make("karma", { payload: { guildId: GuildId }, success: Schema.NullOr(KarmaBoard) }),
+  /** The karma settings, for members with `karma.config`. */
+  Rpc.make("karmaSetup", { payload: { guildId: GuildId }, success: KarmaSetup, error: Refused }),
+  /** Turns karma on with these settings, or changes them. */
+  Rpc.make("setKarma", {
+    payload: { guildId: GuildId, karma: KarmaInput },
+    error: Schema.Union([Refused, SettingsRejected]),
+  }),
+  /** Turns karma off. Members keep their karma for when it's back on. */
+  Rpc.make("disableKarma", { payload: { guildId: GuildId }, error: Refused }),
 ).middleware(Authentication);
 
 /**

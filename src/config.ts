@@ -98,8 +98,46 @@ const StarboardSchema = Schema.Struct({
   channelId: Schema.optionalKey(Snowflake),
   /** The minimum number of votes, the author's own included, until a message gets into the starboard. */
   threshold: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(orDefault(5)),
-  /** A Unicode emoji, `name:id` or `<:name:id>` (`<a:name:id>` for an animated one). */
+  /** A Unicode emoji, `name:id` or `<:name:id>` (`<a:name:id>` for an animated one). It can't be a karma emoji too. */
   emoji: Schema.String.check(Schema.isMinLength(1)).pipe(orDefault("⭐")),
+  /**
+   * Karma for the author the first time one of their messages gets in, while
+   * karma is on. Deleting the post takes it back. 0 gives none.
+   */
+  karma: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(orDefault(3)),
+});
+
+/** Emoji for upvotes or downvotes; a message can carry 30 different reactions. */
+const KarmaEmojiSchema = Schema.Array(Schema.String).check(Schema.isMaxLength(20));
+
+const KarmaRuleSchema = Schema.Struct({
+  /** `above` acts once karma rises past `value`, `below` once it drops under it. */
+  when: Schema.Literals(["above", "below"]),
+  value: Schema.Int,
+  /**
+   * - `role`: give the member `roleId` while karma stays there, and take it
+   *   back once it doesn't
+   * - `message`: send them `message` in a DM
+   * - `kick`, `ban`: kick or ban them, and tell them why in a DM
+   */
+  action: Schema.Literals(["role", "message", "kick", "ban"]),
+  roleId: Schema.optionalKey(Snowflake),
+  message: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1000))),
+});
+
+const KarmaSchema = Schema.Struct({
+  /** Reactions that give the message's author a point, written like `starboard.emoji`. */
+  upvotes: KarmaEmojiSchema.pipe(orDefault(["👍"])),
+  /** Reactions that take one. Empty for no downvotes. */
+  downvotes: KarmaEmojiSchema.pipe(orDefault(["👎"])),
+  /** How many votes a member may give in an hour. Votes past that don't count. */
+  votesPerHour: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(orDefault(5)),
+  /** A downvote costs the member who gives it a point too. */
+  penalty: Schema.Boolean.pipe(orDefault(false)),
+  /** Members who can't give or get karma, by user ID. They keep what they have. */
+  blocklist: Schema.Array(Snowflake).pipe(orDefault([])),
+  /** What happens when a member's karma crosses a value, checked on every change. */
+  rules: Schema.Array(KarmaRuleSchema).pipe(orDefault([])),
 });
 
 /**
@@ -124,6 +162,8 @@ export const BotSettingsSchema = Schema.Struct({
    * - `polls.create`: start a poll with `!poll`
    * - `polls.end-any`: end anyone's poll early with 🛑, not just one's own
    * - `starboard.config`: change the starboard with `!starboard set` and `disable`
+   * - `karma.config`: change karma with `!karma set`, `disable`, `block`,
+   *   `unblock`, `addrule` and `removerule`, and see it with `settings`
    *
    * The most specific rule that names a permission decides it, so
    * `-emoji.decide` beats `+emoji.*`, which beats `+*`. Between rules that
@@ -168,6 +208,16 @@ export const BotSettingsSchema = Schema.Struct({
    * channel. Off while this section or its `channelId` is missing.
    */
   starboard: Schema.optionalKey(StarboardSchema),
+  /**
+   * Karma, as on shinpuru: members vote on each other's messages with
+   * reactions, and the starboard adds to it. A member's vote on a message
+   * counts once, and removing the reaction doesn't take it back. Votes on
+   * their own messages, and from or for bots, don't count. The bot needs
+   * View Channel and Read Message History where members react, Manage Roles
+   * for `role` rules, with its own role above theirs, and Kick Members or Ban
+   * Members for those rules. Off while this section is missing.
+   */
+  karma: Schema.optionalKey(KarmaSchema),
 });
 
 export type BotSettings = typeof BotSettingsSchema.Type;
@@ -233,6 +283,11 @@ export type PermissionsConfig = typeof PermissionsSchema.Type;
 export type RoleMenusConfig = typeof RoleMenusSchema.Type;
 export type RoleMenuConfig = typeof RoleMenuSchema.Type;
 export type StarboardConfig = typeof StarboardSchema.Type;
+export type KarmaConfig = typeof KarmaSchema.Type;
+export type KarmaRule = typeof KarmaRuleSchema.Type;
+
+/** What karma starts as when it's turned on. */
+export const KARMA_DEFAULTS: KarmaConfig = Schema.decodeUnknownSync(KarmaSchema)({});
 
 export class ConfigError extends Data.TaggedError("ConfigError")<{ readonly message: string }> {}
 
@@ -275,6 +330,7 @@ export function parseSettings(raw: unknown, guildId: string): Effect.Effect<BotS
         ...checkPermissions(settings, guildId),
         ...checkRoleMenus(settings),
         ...checkStarboard(settings),
+        ...checkKarma(settings),
       ];
       return problems.length > 0 ? Effect.fail(new InvalidSettings({ problems })) : Effect.succeed(settings);
     }),
@@ -381,6 +437,44 @@ function checkStarboard(settings: BotSettings): string[] {
   const emoji = settings.starboard?.emoji;
   if (emoji === undefined || parseEmoji(emoji)) return [];
   return [`/starboard/emoji: ${emoji} is not an emoji; use a Unicode emoji, name:id or <:name:id>`];
+}
+
+/**
+ * What the schema can't express: emoji the bot can read, each in one list,
+ * none the starboard votes with, and what each rule's action needs.
+ */
+function checkKarma(settings: BotSettings): string[] {
+  const { karma, starboard } = settings;
+  if (!karma) return [];
+  const problems: string[] = [];
+  const starboardKey = starboard && parseEmoji(starboard.emoji)?.key;
+  const seen = new Set<string>();
+  for (const list of ["upvotes", "downvotes"] as const) {
+    karma[list].forEach((emoji, i) => {
+      const at = `/karma/${list}/${i}`;
+      const parsed = parseEmoji(emoji);
+      if (!parsed) {
+        problems.push(`${at}: ${emoji} is not an emoji; use a Unicode emoji, name:id or <:name:id>`);
+      } else if (parsed.key === starboardKey) {
+        problems.push(`${at}: ${emoji} is the starboard's emoji, so it can't vote for karma too`);
+      } else if (seen.has(parsed.key)) {
+        problems.push(`${at}: ${emoji} is already a karma emoji`);
+      }
+      if (parsed) seen.add(parsed.key);
+    });
+  }
+  karma.rules.forEach((rule, i) => {
+    const at = `/karma/rules/${i}`;
+    if (rule.action === "role" && rule.roleId === undefined) problems.push(`${at}/roleId: a role rule needs a role`);
+    if (rule.action !== "role" && rule.roleId !== undefined) problems.push(`${at}/roleId: only a role rule takes a role`);
+    if (rule.action === "message" && rule.message === undefined) {
+      problems.push(`${at}/message: a message rule needs a message`);
+    }
+    if (rule.action !== "message" && rule.message !== undefined) {
+      problems.push(`${at}/message: only a message rule takes a message`);
+    }
+  });
+  return problems;
 }
 
 /** The channels the settings have the bot post in, with where in the document each is. */

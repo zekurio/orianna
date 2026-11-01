@@ -7,6 +7,8 @@ import { FluxerExpressionGuild } from "./expressions/fluxer.ts";
 import type { ExpressionGuild } from "./expressions/proposals.ts";
 import { Fluxer } from "./fluxer.ts";
 import { CurrentGuild } from "./guild.ts";
+import { FluxerKarmaGuild } from "./karma/fluxer.ts";
+import { Karma, type KarmaGuild } from "./karma/karma.ts";
 import { FluxerGuildAccess } from "./permissions/fluxer.ts";
 import type { GuildAccess } from "./permissions/rules.ts";
 import type { CommunityPollChat } from "./polls/community.ts";
@@ -32,6 +34,8 @@ export type GuildServices =
   | RoleGuild
   | ExpressionGuild
   | StarboardGuild
+  | KarmaGuild
+  | Karma
   | CommunityPollChat
   | LiveStarboard;
 
@@ -39,14 +43,18 @@ export type GuildServices =
 type Shared = Fluxer | Database | SettingsStore | PollTransport | HttpClient.HttpClient | Dns.Dns;
 
 const guildLayer = (guildId: string) =>
-  Layer.mergeAll(
-    FluxerGuildAccess,
-    FluxerRoleGuild,
-    FluxerExpressionGuild,
-    FluxerStarboardGuild,
-    FluxerCommunityPollChat,
-    LiveStarboard.layer,
-  ).pipe(
+  Karma.layer.pipe(
+    Layer.provideMerge(
+      Layer.mergeAll(
+        FluxerGuildAccess,
+        FluxerRoleGuild,
+        FluxerExpressionGuild,
+        FluxerStarboardGuild,
+        FluxerKarmaGuild,
+        FluxerCommunityPollChat,
+        LiveStarboard.layer,
+      ),
+    ),
     Layer.provideMerge(Settings.layer),
     Layer.provideMerge(FluxerSettingsGuild),
     Layer.provideMerge(Layer.succeed(CurrentGuild, { id: guildId })),

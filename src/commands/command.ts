@@ -75,6 +75,16 @@ export function refuse(message: string): Effect.Effect<never, UserError> {
   return Effect.fail(new UserError({ message }));
 }
 
+/** `<@id>`, `<@!id>` or a bare ID. */
+const MEMBER = /^(?:<@!?(\d+)>|(\d+))$/;
+
+/** The user ID of a member option, given as a mention or an ID. */
+export function memberId(input: string): Effect.Effect<string, UserError> {
+  const match = MEMBER.exec(input.trim());
+  if (!match) return refuse(`${input} isn't a mention or a user ID.`);
+  return Effect.succeed((match[1] ?? match[2])!);
+}
+
 /** Services every command may use. */
 /** What every command may use: its guild's settings and access, and what all guilds share. */
 export type CommandServices = AppConfig | CurrentGuild | Settings | GuildAccess | Fluxer | CommandRouter;
@@ -137,6 +147,12 @@ export interface CommandGroup {
   name: string;
   description: string;
   subcommands: Command[];
+  /**
+   * Runs on the group's name alone, or when the next word isn't a
+   * subcommand, like `!karma @someone`. Without it, the group lists its
+   * subcommands.
+   */
+  default?: Command;
 }
 
 export type CommandEntry = Command | CommandGroup;

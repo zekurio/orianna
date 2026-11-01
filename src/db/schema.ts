@@ -224,6 +224,53 @@ export const starboardOptOuts = sqliteTable("starboard_opt_outs", {
   optedOutAt: integer({ mode: "timestamp_ms" }).notNull(),
 });
 
+/** Each member's karma in a guild; src/karma/karma.ts keeps it. */
+export const karma = sqliteTable(
+  "karma",
+  {
+    guildId: text().notNull(),
+    userId: text().notNull(),
+    value: integer().notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.guildId, t.userId] }), index("karma_guild_id_value_idx").on(t.guildId, t.value)],
+);
+
+/**
+ * Karma votes, one per member and message for good, so removing a reaction
+ * and adding it again doesn't count twice.
+ */
+export const karmaVotes = sqliteTable(
+  "karma_votes",
+  {
+    messageId: text().notNull(),
+    voterId: text().notNull(),
+    guildId: text().notNull(),
+    authorId: text().notNull(),
+    /** 1 for an upvote, -1 for a downvote. */
+    value: integer().notNull(),
+    votedAt: integer({ mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.messageId, t.voterId] }),
+    // For the votes a member gave in the last hour.
+    index("karma_votes_guild_id_voter_id_voted_at_idx").on(t.guildId, t.voterId, t.votedAt),
+  ],
+);
+
+/**
+ * Karma the starboard gave, one per message, so a message that drops out and
+ * gets in again doesn't pay twice.
+ */
+export const karmaBonuses = sqliteTable("karma_bonuses", {
+  messageId: text().primaryKey(),
+  guildId: text().notNull(),
+  userId: text().notNull(),
+  amount: integer().notNull(),
+  givenAt: integer({ mode: "timestamp_ms" }).notNull(),
+  /** Someone deleted the post, which took the karma back. */
+  revoked: integer({ mode: "boolean" }).notNull().default(false),
+});
+
 /**
  * The bot settings, one JSON document per guild. The bot validates them when
  * it loads them; src/settings/settings.ts reads and writes them.

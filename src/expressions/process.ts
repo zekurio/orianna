@@ -1,5 +1,4 @@
-import { join } from "node:path";
-import { Context, Data, Duration, Effect, FileSystem, Layer, Semaphore, Stream } from "effect";
+import { Context, Data, Duration, Effect, FileSystem, Layer, Path, Semaphore, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { refuse, type UserError } from "../commands/command.ts";
 import { formatKiB } from "../download.ts";
@@ -83,6 +82,7 @@ export interface CutOptions {
 const makeImageMagick = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
   const slots = yield* Semaphore.make(MAX_RUNNING);
   /** Runs going on or waiting for a slot. */
   let queued = 0;
@@ -240,7 +240,7 @@ const makeImageMagick = Effect.gen(function* () {
       const animated = info.frames > 1;
       const type = animated ? WEBP : PNG;
       const dir = yield* fs.makeTempDirectoryScoped({ prefix: "orianna-" }).pipe(Effect.orDie);
-      const files = regions.map((_, i) => join(dir, `${i}.${type.ext}`));
+      const files = regions.map((_, i) => path.join(dir, `${i}.${type.ext}`));
       yield* magickOrExplain(image, [
         input(info.type),
         // The pieces carry no EXIF orientation, so apply it to the pixels.

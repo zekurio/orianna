@@ -9,7 +9,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Spinner } from "@/components/ui/spinner";
 import type { BotSettings } from "../../../config.ts";
 import type { AdminSetup } from "../../rpc.ts";
-import { Api, failureMessage, STARBOARD_KEYS } from "../api.ts";
+import { Api, failureMessage, KARMA_KEYS, STARBOARD_KEYS } from "../api.ts";
 import { useGuild } from "../guild.tsx";
 
 // What the Admin tab's sections share. Each section edits a few top-level
@@ -30,8 +30,8 @@ export const ADMIN_KEYS = ["admin"];
 
 export const setupQuery = (guildId: string) => Api.query("adminSetup", { guildId }, { reactivityKeys: ADMIN_KEYS });
 
-/** Saving can change the prefix in the session, and the starboard if its section changed. */
-const SAVE_KEYS = [...ADMIN_KEYS, "session", ...STARBOARD_KEYS];
+/** Saving can change the prefix in the session, and the starboard or karma if their sections changed. */
+const SAVE_KEYS = [...ADMIN_KEYS, "session", ...STARBOARD_KEYS, ...KARMA_KEYS];
 
 /** The bot's problems with the last save, by path. */
 export type Problems = readonly string[];

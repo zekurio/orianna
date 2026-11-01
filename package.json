@@ -7,7 +7,9 @@
     "dev": "bun --watch src/main.ts",
     "build": "bun scripts/build.ts",
     "typecheck": "tsc --noEmit",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "rm -rf drizzle && drizzle-kit generate --name init",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
     "@effect/atom-react": "^4.1.1",
@@ -31,6 +33,7 @@
     "zustand": "^5.0.16"
   },
   "devDependencies": {
+    "@libsql/client": "^0.18.0",
     "@types/bun": "^1.4.3",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

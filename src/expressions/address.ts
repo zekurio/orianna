@@ -1,4 +1,3 @@
-import { isIP } from "node:net";
 import { Data, Effect, Result } from "effect";
 import { Dns, Host, NetAddress } from "effect/net";
 
@@ -66,7 +65,7 @@ export class RefusedHost extends Data.TaggedError("RefusedHost")<{ readonly mess
 export const checkPublicHost = Effect.fnUntraced(function* (hostname: string) {
   const host = hostname.replace(/^\[(.*)\]$/, "$1");
   let addresses = [host];
-  if (!isIP(host)) {
+  if (Result.isFailure(NetAddress.ipFromString(host))) {
     const name = Host.domainNameFromString(host);
     if (Result.isFailure(name)) {
       return yield* new RefusedHost({ message: `${hostname} is not a host name` });
@@ -87,38 +86,17 @@ export const checkPublicHost = Effect.fnUntraced(function* (hostname: string) {
  * comes out as IPv4 so that it meets the same ranges.
  */
 function parseAddress(text: string): Address | null {
-  const address = text.replace(/%.*$/, "");
-  const family = isIP(address);
-  if (family === 4) return { family, value: ipv4Value(address) };
-  if (family !== 6) return null;
+  const parsed = NetAddress.ipFromString(text.replace(/%.*$/, ""));
+  if (Result.isFailure(parsed)) return null;
+  const address = parsed.success;
+  if (NetAddress.isIpv4Address(address)) return { family: 4, value: join(NetAddress.ipv4ToOctets(address), 8n) };
 
-  const value = ipv6Value(address);
+  const value = join(NetAddress.ipv6ToSegments(address), 16n);
   if (IPV4_IN_IPV6.includes(value >> 32n)) return { family: 4, value: value & 0xffffffffn };
   return { family: 6, value };
 }
 
-function ipv4Value(address: string): bigint {
-  return address.split(".").reduce((n, part) => (n << 8n) | BigInt(part), 0n);
-}
-
-function ipv6Value(address: string): bigint {
-  // A dotted IPv4 tail, as in `::ffff:127.0.0.1`, stands for the last two groups.
-  const tail = /\d+\.\d+\.\d+\.\d+$/.exec(address);
-  let hex = address;
-  if (tail) {
-    const v4 = ipv4Value(tail[0]);
-    hex = `${address.slice(0, tail.index)}${(v4 >> 16n).toString(16)}:${(v4 & 0xffffn).toString(16)}`;
-  }
-
-  const groups = (part: string | undefined) => (part ? part.split(":") : []);
-  const [head, rest] = hex.split("::");
-  const all =
-    rest === undefined
-      ? groups(head)
-      : [
-          ...groups(head),
-          ...Array<string>(8 - groups(head).length - groups(rest).length).fill("0"),
-          ...groups(rest),
-        ];
-  return all.reduce((n, group) => (n << 16n) | BigInt(`0x${group}`), 0n);
+/** Puts an address's parts, `bits` wide and most significant first, into one number. */
+function join(parts: ReadonlyArray<number>, bits: bigint): bigint {
+  return parts.reduce((n, part) => (n << bits) | BigInt(part), 0n);
 }

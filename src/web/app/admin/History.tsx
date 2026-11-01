@@ -21,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
 import type { SettingsChangeInfo } from "../../rpc.ts";
-import { Api, failureMessage, STARBOARD_KEYS } from "../api.ts";
+import { Api, failureMessage, KARMA_KEYS, STARBOARD_KEYS } from "../api.ts";
 import { useGuild } from "../guild.tsx";
 import { ADMIN_KEYS, type SectionProps } from "./shared.tsx";
 
@@ -74,7 +74,7 @@ function SettingsFile({ settings }: Pick<SectionProps, "settings">) {
     setBusy(true);
     const exit = await importSettings({
       payload: { guildId, document: pending.document },
-      reactivityKeys: [...ADMIN_KEYS, "session", ...STARBOARD_KEYS],
+      reactivityKeys: [...ADMIN_KEYS, "session", ...STARBOARD_KEYS, ...KARMA_KEYS],
     });
     setBusy(false);
     setPending(undefined);

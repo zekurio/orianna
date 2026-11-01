@@ -108,15 +108,18 @@ export const makeCommandRouter = Effect.fnUntraced(function* () {
       const sub = second
         ? entry.subcommands.find((c) => c.name === second.word.toLowerCase())
         : undefined;
-      if (!second || !sub) {
+      if (second && sub) {
+        command = sub;
+        path = `${entry.name} ${sub.name}`;
+        input = second.rest;
+      } else if (entry.default) {
+        command = entry.default;
+      } else {
         yield* listSubcommands(prefix, base, entry).pipe(
           Effect.catchCause(logFailure(`listing ${entry.name} commands`)),
         );
         return;
       }
-      command = sub;
-      path = `${entry.name} ${sub.name}`;
-      input = second.rest;
     } else {
       command = entry;
     }

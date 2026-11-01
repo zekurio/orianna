@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { refuse } from "../commands/command.ts";
 import type { StarboardConfig } from "../config.ts";
-import { parseEmoji } from "../emoji.ts";
+import { emojiKey, parseEmoji } from "../emoji.ts";
 import { Settings } from "../settings/settings.ts";
 import { StarboardGuild } from "./starboard.ts";
 
@@ -14,10 +14,11 @@ export interface StarboardChanges {
   readonly channelId?: string;
   readonly threshold?: number;
   readonly emoji?: string;
+  readonly karma?: number;
 }
 
 /** shinpuru's defaults, for a starboard that was never set. */
-const DEFAULTS: StarboardConfig = { threshold: 5, emoji: "⭐" };
+const DEFAULTS: StarboardConfig = { threshold: 5, emoji: "⭐", karma: 3 };
 
 /** The starboard as it's set now, the defaults when it never was. */
 export const currentStarboard = Settings.current.pipe(Effect.map((s) => s.starboard ?? DEFAULTS));
@@ -44,6 +45,20 @@ const check = Effect.fnUntraced(function* (changes: StarboardChanges) {
       return yield* refuse(`${emoji} isn't an emoji. Use a Unicode emoji or a custom one like <:name:id>.`);
     }
     checked.emoji = emoji;
+  }
+  if (changes.karma !== undefined) {
+    if (!Number.isInteger(changes.karma) || changes.karma < 0) {
+      return yield* refuse("The karma gain has to be a whole number, 0 or more.");
+    }
+    checked.karma = changes.karma;
+  }
+  // The settings refuse it too, but this says what to do about it.
+  const emoji = checked.emoji ?? (yield* currentStarboard).emoji;
+  const karma = (yield* Settings.current).karma;
+  if (karma && [...karma.upvotes, ...karma.downvotes].some((e) => emojiKey(e) === emojiKey(emoji))) {
+    return yield* refuse(
+      `${emoji} is a karma emoji, so it can't star messages too. Pick another emoji, or take it out of karma first.`,
+    );
   }
   return checked;
 });

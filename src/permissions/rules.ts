@@ -20,12 +20,13 @@ export const PERMISSIONS = [
   "polls.create",
   "polls.end-any",
   "starboard.config",
+  "karma.config",
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
 
 /** Named after the settings section that turns the feature on. */
-export type PermissionGroup = "emoji" | "sticker" | "polls" | "starboard";
+export type PermissionGroup = "emoji" | "sticker" | "polls" | "starboard" | "karma";
 
 export function groupOf(permission: Permission): PermissionGroup {
   return permission.slice(0, permission.indexOf(".")) as PermissionGroup;

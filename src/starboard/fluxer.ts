@@ -105,6 +105,7 @@ function starboardMessage(m: Message): StarboardMessage {
     channelId: m.channelId,
     guildId: m.guildId,
     authorId: m.author.id,
+    authorBot: m.author.bot,
     authorName: tagOf(m.author),
     authorAvatar: m.author.displayAvatarURL({ size: 64 }),
     content: m.content,

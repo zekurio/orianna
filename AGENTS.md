@@ -35,6 +35,9 @@ points at its docs and examples.
   fibers that stop on shutdown. Every guild's listeners see every guild's
   events, so a guild's listener ignores the ones from other guilds.
 - bun:sqlite is synchronous, so drizzle queries run inline in effects.
+- The bot runs on Bun alone. Use Bun's APIs (`Bun.file`, `Bun.write`,
+  `bun:sqlite`) or Effect's platform services (`FileSystem`, `Path`, `Dns`,
+  `effect/net`) instead of importing `node:` modules.
 - Read bot settings through the `Settings` service in
   `src/settings/settings.ts`, not `AppConfig`; each guild has its own, and
   they change while the bot runs. `AppConfig` holds only the deployment keys from the config file.
@@ -109,14 +112,24 @@ Body explaining what changed and why, wrapped at 72 columns.
 - Unknown config keys stop the bot at startup, so renaming or removing a key
   breaks existing deployments. Mark those commits with `!` and a
   `BREAKING CHANGE:` footer that says what to change in the config.
-- The bot settings in the database are validated on every start too, so
-  renaming or removing a settings key also needs code that rewrites the
-  stored document, or the bot won't start.
-- Commit a schema change and its generated migration together. Never edit a
-  migration that has already been committed.
+- Orianna is in early development, so there's no migration code. Don't
+  write code that upgrades stored data, like old settings documents or rows
+  from an older schema. The bot validates the stored settings on every
+  start, so renaming or removing a settings key, like a schema change that
+  doesn't fit an existing database, means deleting the database. Mark those
+  commits with `!` and a `BREAKING CHANGE:` footer that says so.
+- `drizzle/` holds one migration, `0000_init`, which the bot applies when it
+  opens the database. After changing `src/db/schema.ts`, run
+  `bun run db:generate`, which replaces `drizzle/` with a new `0000_init`,
+  and commit it with the schema change. Then delete the dev database; the
+  bot creates it again when it starts. The `db:*` scripts run drizzle-kit,
+  which finds the database through the config file, like the bot; see
+  `drizzle.config.ts`.
 - The code is the documentation; there's no `docs/` to keep in step. When
-  `src/config.ts` changes, keep its doc comments current and update
-  `config.example.json` or `settings.example.json` in the same commit.
+  `src/config.ts` changes, keep its doc comments current, and update
+  `config.example.json` in the same commit when the config file changes.
+  Bot settings live only in the database, so there's no example file for
+  them.
 - `!help` and the web interface's commands page show the descriptions of
   commands and their options, so write those for members. A new permission
   goes in `PERMISSIONS` in `src/permissions/rules.ts` and in the list in the

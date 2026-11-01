@@ -8,6 +8,9 @@ import { EMOJI, makeExpressionProposals, STICKER } from "./expressions/proposals
 import { listen, logFailure } from "./fluxer.ts";
 import { CurrentGuild } from "./guild.ts";
 import { Guilds } from "./guilds.ts";
+import { karmaCommands } from "./karma/commands.ts";
+import { attachKarmaEvents } from "./karma/fluxer.ts";
+import { Karma } from "./karma/karma.ts";
 import { GuildAccess } from "./permissions/rules.ts";
 import { pollCommands } from "./polls/commands.ts";
 import { makeCommunityPolls } from "./polls/community.ts";
@@ -32,8 +35,14 @@ const warnUnknownRoles = Effect.gen(function* () {
   }
 }).pipe(Effect.catch((err) => Effect.logError(`checking permission roles failed: ${err.message}`)));
 
-/** What a change has to touch for the features to be built again. The rest is read on every use. */
-const featureSettings = ({ prefix: _prefix, permissions: _permissions, ...rest }: BotSettings) => rest;
+/**
+ * What a change has to touch for the features to be built again. The rest is
+ * read on every use, like karma, which only needs a start over to turn on or off.
+ */
+const featureSettings = ({ prefix: _prefix, permissions: _permissions, karma, ...rest }: BotSettings) => ({
+  ...rest,
+  karma: karma !== undefined,
+});
 
 /** Counts of what has happened since startup, for features built later. */
 export interface Milestones {
@@ -84,6 +93,8 @@ const startFeatures = Effect.fnUntraced(function* (
   const starboard = yield* makeStarboard(settings.starboard, guildId);
   commands.push(yield* starboardCommands());
   yield* LiveStarboard.provide(starboard);
+  // Built while it's off too, so `!karma set` can turn it on.
+  commands.push(yield* karmaCommands());
   // Built even without a `roleMenus` section, so removing it takes the menus down.
   const roleMenus = yield* makeRoleMenus(settings.roleMenus);
 
@@ -91,6 +102,7 @@ const startFeatures = Effect.fnUntraced(function* (
   if (community) yield* attachPollMessageDeletes(community);
   yield* attachRoleMenuEvents(roleMenus);
   if (starboard.board) yield* attachStarboardEvents(starboard);
+  if (settings.karma) yield* attachKarmaEvents(yield* Karma);
 
   // Right away when the bot is already logged in, which is the case after a
   // change, and again on every login. 🛑 from while offline waits for the

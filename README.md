@@ -11,10 +11,12 @@ settings, which start at the defaults.
 - Role menus give a role to whoever reacts to a message.
 - The starboard, copied from shinpuru, reposts messages once they get enough
   ⭐ reactions.
+- Members give each other karma by reacting to messages, as on shinpuru, and
+  getting into the starboard adds to it. Rules can hand out roles at a value.
 - Permission rules decide who may run which command.
 - Members sign in to a web interface with their Fluxer account. They can browse
-  the starboard and see the commands they're allowed to run, and admins
-  change the settings there.
+  the starboard and the karma scoreboard and see the commands they're allowed
+  to run, and admins change the settings there.
 
 Fluxer has no slash commands or buttons yet, so commands start with a prefix,
 `!` by default, and every vote is a reaction.
@@ -100,6 +102,8 @@ leaves off.
 | Role menus | The menu channels | Send Messages, Embed Links, Add Reactions, Manage Messages, Read Message History |
 | Starboard | Where members react | View Channel, Read Message History |
 | Starboard | The starboard channel | Send Messages, Embed Links, Attach Files |
+| Karma | Where members react | View Channel, Read Message History |
+| Karma rules | The server | Manage Roles, with the bot's highest role above every rule role; Kick Members and Ban Members for those rules |
 
 Manage Messages lets the bot move a vote when someone picks another answer,
 clear reactions that don't belong, and delete the `!poll` message once the
@@ -119,6 +123,19 @@ bun run dev
 
 `bun run dev` restarts the bot when a file changes and reloads open pages of
 the web interface. `bun run typecheck` is the only check there is, so run it
-before every commit. After changing `src/db/schema.ts`, run
-`bun run db:generate` and commit what it writes to `drizzle/`.
+before every commit.
+
+The bot creates its database when it's missing and applies the migration in
+`drizzle/` whenever it starts. The `db:*` scripts run drizzle-kit on the
+database named in the config file, the same one the bot opens:
+
+| Script | What it does |
+|---|---|
+| `bun db:generate` | Replaces `drizzle/` with a fresh `0000_init` from `src/db/schema.ts` |
+| `bun db:push` | Changes the database to match `src/db/schema.ts`, without a migration |
+| `bun db:studio` | Opens it in Drizzle Studio |
+
+There are no migrations while the bot is in early development, so after
+changing `src/db/schema.ts`, run `bun db:generate`, delete the database and
+its `-wal` and `-shm` files, and start the bot, which creates it again.
 [AGENTS.md](AGENTS.md) covers commit style, branch names and pull requests.

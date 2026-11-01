@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { StarboardInput, type StarboardSetup } from "../rpc.ts";
-import { Api, failureMessage, STARBOARD_KEYS } from "./api.ts";
+import { Api, failureMessage, KARMA_KEYS, STARBOARD_KEYS } from "./api.ts";
 import { useGuild } from "./guild.tsx";
 
 // The starboard settings, for members with `starboard.config`, in a dialog
@@ -26,7 +26,7 @@ type Key = keyof StarboardInput;
 type Problems = Partial<Record<Key, string>>;
 
 /** The fields in the order the form shows them, to focus the first one with a problem. */
-const ORDER: readonly Key[] = ["channelId", "threshold", "emoji"];
+const ORDER: readonly Key[] = ["channelId", "threshold", "emoji", "karma"];
 
 const decodeInput = Schema.decodeUnknownResult(StarboardInput);
 const formatIssue = SchemaIssue.makeFormatterStandardSchemaV1();
@@ -59,6 +59,7 @@ export function StarboardSettings({ onCancel, onDone }: { onCancel: () => void; 
         <div className="grid gap-x-6 gap-y-5 sm:grid-cols-2">
           <FieldSkeleton />
           <FieldSkeleton />
+          <FieldSkeleton />
         </div>
       </Placeholder>
     ),
@@ -85,6 +86,7 @@ function StarboardForm({
     channelId: config.channelId ?? "",
     threshold: config.threshold,
     emoji: config.emoji,
+    karma: config.karma,
   });
   // A field's problem shows once the member has left it, or tried to save.
   const [touched, setTouched] = useState<ReadonlySet<Key>>(new Set());
@@ -117,21 +119,24 @@ function StarboardForm({
     }
     const config = checked.success;
     setBusy(true);
-    const exit = await save({ payload: { guildId, starboard: config }, reactivityKeys: STARBOARD_KEYS });
+    // The karma page says what getting into the starboard gives.
+    const exit = await save({ payload: { guildId, starboard: config }, reactivityKeys: [...STARBOARD_KEYS, ...KARMA_KEYS] });
     setBusy(false);
     if (Exit.isFailure(exit)) return toast.error(failureMessage(exit.cause));
-    // Like shinpuru's reply: the channel, the threshold and the emoji.
+    // Like shinpuru's reply: the channel, the threshold, the emoji and the karma gain.
     const where = setup.channels.find((c) => c.id === config.channelId)?.name ?? "a channel you can't see";
     const custom = /^<a?:(\w+):\d+>$/.exec(config.emoji)?.[1];
     toast.success("Set starboard config", {
-      description: `#${where} · threshold ${config.threshold} · ${custom ? `:${custom}:` : config.emoji}`,
+      description:
+        `#${where} · threshold ${config.threshold} · ${custom ? `:${custom}:` : config.emoji} · ` +
+        `karma gain ${config.karma}`,
     });
     onDone();
   };
 
   const turnOff = async () => {
     setBusy(true);
-    const exit = await disable({ payload: { guildId }, reactivityKeys: STARBOARD_KEYS });
+    const exit = await disable({ payload: { guildId }, reactivityKeys: [...STARBOARD_KEYS, ...KARMA_KEYS] });
     setBusy(false);
     if (Exit.isFailure(exit)) return toast.error(failureMessage(exit.cause));
     toast.success("Starboard disabled", {
@@ -205,6 +210,25 @@ function StarboardForm({
             />
             <FieldDescription id={`${id}-emoji-hint`}>The emoji to be used for starring messages.</FieldDescription>
             <FieldError id={`${id}-emoji-problem`}>{problem("emoji")}</FieldError>
+          </Field>
+
+          <Field data-invalid={problem("karma") ? true : undefined}>
+            <FieldLabel htmlFor={`${id}-karma`}>Karma gain</FieldLabel>
+            <Input
+              {...control("karma")}
+              type="number"
+              inputMode="numeric"
+              min={0}
+              step={1}
+              value={Number.isNaN(draft.karma) ? "" : draft.karma}
+              onChange={(e) => set("karma", e.target.valueAsNumber)}
+              onBlur={() => touch("karma")}
+              required
+            />
+            <FieldDescription id={`${id}-karma-hint`}>
+              The amount of karma an author gets when their message gets into the starboard, while karma is on.
+            </FieldDescription>
+            <FieldError id={`${id}-karma-problem`}>{problem("karma")}</FieldError>
           </Field>
         </div>
       </FieldGroup>
