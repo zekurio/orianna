@@ -241,6 +241,8 @@ describes.
 Only the guild owner and members with Administrator may run these, and
 `!help` doesn't show them to anyone else. No permission rule can hand them
 out. [Configuration](configuration.md#bot-settings) explains the settings.
+The web interface's Admin tab does the same, and edits each section in a
+form.
 
 | Command | Permission | What it does |
 |---|---|---|

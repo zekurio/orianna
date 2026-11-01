@@ -28,7 +28,16 @@ export class Authentication extends RpcMiddleware.Service<Authentication, { prov
   { error: Schema.Union([SignedOut, NotMember]) },
 ) {}
 
+/** The guild the bot serves. A deployment serves one, set by `guildId` in its config file. */
+export const GuildInfo = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  iconUrl: Schema.NullOr(Schema.String),
+});
+export type GuildInfo = typeof GuildInfo.Type;
+
 export const Session = Schema.Struct({
+  guild: GuildInfo,
   user: Schema.Struct({
     id: Schema.String,
     /** The display name, or the username without one. */
@@ -145,6 +154,44 @@ export const StarboardSetup = Schema.Struct({
 });
 export type StarboardSetup = typeof StarboardSetup.Type;
 
+/**
+ * The settings didn't validate, one line per problem, each starting with its
+ * path in the settings, like `/polls/defaultHours: Expected …`.
+ */
+export class SettingsRejected extends Schema.TaggedError<SettingsRejected>()("SettingsRejected", {
+  problems: Schema.Array(Schema.String),
+}) {}
+
+/** What the Admin tab needs to show and change the bot settings. */
+export const AdminSetup = Schema.Struct({
+  /**
+   * The bot settings with defaults filled in, as `!settings export` gives
+   * them. The settings schema in src/config.ts says what's in them; the bot
+   * checks them again on every change.
+   */
+  settings: Schema.Unknown,
+  /** Text channels, in the order the client lists them. */
+  channels: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String, nsfw: Schema.Boolean })),
+  /** Roles, highest first, @everyone left out. */
+  roles: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String, color: Schema.Number })),
+  /** The server's custom emoji. */
+  emojis: Schema.Array(Schema.Struct({ text: Schema.String, name: Schema.String, url: Schema.String })),
+  /** Every permission a rule can name. */
+  permissions: Schema.Array(Schema.String),
+});
+export type AdminSetup = typeof AdminSetup.Type;
+
+/** A change to the bot settings, as `!settings log` lists it. */
+export const SettingsChangeInfo = Schema.Struct({
+  /** In milliseconds since 1970. */
+  at: Schema.Number,
+  /** Null when the bot stored the first settings itself. */
+  by: Schema.NullOr(Schema.Struct({ id: Schema.String, name: Schema.NullOr(Schema.String) })),
+  source: Schema.Literals(["config-file", "defaults", "command"]),
+  sections: Schema.Array(Schema.String),
+});
+export type SettingsChangeInfo = typeof SettingsChangeInfo.Type;
+
 /** A command option, as `!help` shows it. */
 const CommandOption = Schema.Struct({
   name: Schema.String,
@@ -210,6 +257,25 @@ export const WebRpcs = RpcGroup.make(
    * `!starboard optout` and `optin`. Answers how many posts came down.
    */
   Rpc.make("setStarboardOptOut", { payload: { optedOut: Schema.Boolean }, success: Schema.Number }),
+  /** The bot settings and what they can name, for the Admin tab. */
+  Rpc.make("adminSetup", { success: AdminSetup, error: Refused }),
+  /**
+   * Replaces the given sections of the bot settings, and removes those given
+   * as null, leaving the rest as it is. Answers the sections that changed.
+   */
+  Rpc.make("saveSettings", {
+    payload: { sections: Schema.Record(Schema.String, Schema.Unknown) },
+    success: Schema.Array(Schema.String),
+    error: Schema.Union([Refused, SettingsRejected]),
+  }),
+  /** Replaces all bot settings, like `!settings import`. Answers the sections that changed. */
+  Rpc.make("importSettings", {
+    payload: { document: Schema.Unknown },
+    success: Schema.Array(Schema.String),
+    error: Schema.Union([Refused, SettingsRejected]),
+  }),
+  /** The latest changes to the bot settings, newest first, like `!settings log`. */
+  Rpc.make("settingsLog", { success: Schema.Array(SettingsChangeInfo), error: Refused }),
   /** The Unicode emoji, in Fluxer's categories, for the emoji picker. */
   Rpc.make("unicodeEmoji", { success: Schema.Array(EmojiCategory) }),
   /** The starboard settings, for members with `starboard.config`. */

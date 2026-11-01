@@ -7,7 +7,8 @@ import { type Session, SignInError } from "../rpc.ts";
 import { Api } from "./api.ts";
 import { Header } from "./Header.tsx";
 import { CommandsPage } from "./Commands.tsx";
-import { AdminPage, NotFoundPage, ProfilePage } from "./pages.tsx";
+import { AdminPage, parseAdminPath } from "./admin/AdminPage.tsx";
+import { NotFoundPage, ProfilePage } from "./pages.tsx";
 import { navigate, usePath } from "./router.tsx";
 import { SignIn } from "./SignIn.tsx";
 import { StarboardPage } from "./Starboard.tsx";
@@ -39,7 +40,8 @@ export function App() {
   }, [error]);
   const signInError = Schema.is(SignInError)(error) ? SIGN_IN_ERRORS[error] : undefined;
 
-  const session = useAtomValue(Api.query("session", undefined));
+  // Refreshed when an admin changes the prefix.
+  const session = useAtomValue(Api.query("session", undefined, { reactivityKeys: ["session"] }));
   return AsyncResult.matchWithError(session, {
     onInitial: () => null,
     onError: (error) => {
@@ -100,6 +102,8 @@ function Shell() {
 }
 
 function Page({ path }: { path: string }) {
+  const adminTab = parseAdminPath(path);
+  if (adminTab) return <AdminPage tab={adminTab} />;
   switch (path) {
     case "/":
     case "/starboard":
@@ -108,8 +112,6 @@ function Page({ path }: { path: string }) {
       return <CommandsPage />;
     case "/profile":
       return <ProfilePage />;
-    case "/admin":
-      return <AdminPage />;
     default:
       return <NotFoundPage path={path} />;
   }

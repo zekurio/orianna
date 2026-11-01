@@ -5,7 +5,7 @@ import { type Command, formatUsage, isGroup, mayRun, type UserError } from "../c
 import { CommandList } from "../commands/router.ts";
 import { type ParsedEmoji, parseEmoji } from "../emoji.ts";
 import { Fluxer, type FluxerError, logFailure, request, tagOf } from "../fluxer.ts";
-import { GuildAccess } from "../permissions/rules.ts";
+import { GuildAccess, PERMISSIONS } from "../permissions/rules.ts";
 import { Settings } from "../settings/settings.ts";
 import { currentStarboard, disableStarboard, setStarboard } from "../starboard/manage.ts";
 import { LiveStarboard, StarboardGuild } from "../starboard/starboard.ts";
@@ -19,6 +19,7 @@ import {
   NotMember,
   Refused,
   STARBOARD_PAGE_SIZE,
+  SettingsRejected,
   SignedOut,
   type StarboardEntry,
   WebRpcs,
@@ -31,23 +32,34 @@ import { SESSION_COOKIE, Sessions } from "./sessions.ts";
 
 const PROBLEM = "The bot ran into a problem. Its log says what happened.";
 
+/** As many changes as `!settings log` shows. */
+const LOG_SIZE = 30;
+
 /** Logs why `what` failed and hands the app nothing but {@link PROBLEM}. */
 const hide =
   (what: string) =>
   <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, never, R> =>
     Effect.catchCause(effect, (cause) => logFailure(what)(cause).pipe(Effect.andThen(Effect.die(PROBLEM))));
 
+/** The errors in the schemas, which the member reads. */
+type Answer = Refused | SettingsRejected;
+
 /**
- * Answers with a UserError as {@link Refused}, for the member to read, and
- * hides everything else.
+ * Answers with a UserError as {@link Refused}, and with the errors from the
+ * schemas as they are, for the member to read. Hides everything else.
  */
 const answer =
   (what: string) =>
-  <A, R>(effect: Effect.Effect<A, UserError | FluxerError | Refused, R>): Effect.Effect<A, Refused, R> =>
+  <A, E extends UserError | FluxerError | Answer, R>(
+    effect: Effect.Effect<A, E, R>,
+  ): Effect.Effect<A, Extract<E, Answer> | Refused, R> =>
     effect.pipe(
-      Effect.map((value) => Result.succeed(value)),
-      Effect.catchTag("UserError", (err) => Effect.succeed(Result.fail(new Refused({ message: err.message })))),
-      Effect.catchTag("Refused", (err) => Effect.succeed(Result.fail(err))),
+      Effect.map((value) => Result.succeed<A>(value)),
+      Effect.catch((err: E) => {
+        if (err._tag === "FluxerError") return Effect.fail(err);
+        const readable = err._tag === "UserError" ? new Refused({ message: err.message }) : (err as Extract<E, Answer>);
+        return Effect.succeed(Result.fail(readable));
+      }),
       hide(what),
       Effect.flatMap((result) => (Result.isSuccess(result) ? Effect.succeed(result.success) : Effect.fail(result.failure))),
     );
@@ -86,7 +98,7 @@ export const AuthenticationLive = Layer.effect(
 
 export const HandlersLive = WebRpcs.toLayer(
   Effect.gen(function* () {
-    const { client } = yield* Fluxer;
+    const { client, guildId } = yield* Fluxer;
     const settings = yield* Settings;
     const access = yield* GuildAccess;
     const guild = yield* StarboardGuild;
@@ -110,6 +122,20 @@ export const HandlersLive = WebRpcs.toLayer(
       if (!board || !(yield* access.canView(userId, board.channelId))) return undefined;
       return { starboard, board };
     });
+
+    /** Refuses members who may not change the bot settings, as `!settings` does. */
+    const mayAdmin = Effect.gen(function* () {
+      const { userId, admin } = yield* CurrentMember;
+      if (!admin) {
+        return yield* new Refused({
+          message: "Only the server owner and members with Administrator may change the bot settings.",
+        });
+      }
+      return userId;
+    });
+
+    /** Turns settings that don't validate into the problems the app shows next to each field. */
+    const rejected = (err: { problems: readonly string[] }) => new SettingsRejected({ problems: [...err.problems] });
 
     /** Refuses members without `starboard.config`. */
     const mayConfig = Effect.gen(function* () {
@@ -164,8 +190,10 @@ export const HandlersLive = WebRpcs.toLayer(
         Effect.gen(function* () {
           const { userId, admin } = yield* CurrentMember;
           const user = yield* request("fetching a user", () => client.users.fetch(userId));
+          const guild = yield* request("fetching the guild", () => client.guilds.resolve(guildId));
           const { prefix } = yield* settings.get;
           return {
+            guild: { id: guild.id, name: guild.name, iconUrl: guild.iconURL({ size: 64 }) },
             user: {
               id: user.id,
               name: user.globalName ?? user.username,
@@ -178,6 +206,75 @@ export const HandlersLive = WebRpcs.toLayer(
             emojiImages: `${client.instance.endpoints.static_cdn.replace(/\/+$/, "")}/emoji`,
           };
         }).pipe(hide("loading the session")),
+
+      adminSetup: () =>
+        Effect.gen(function* () {
+          yield* mayAdmin;
+          const fluxerGuild = yield* request("fetching the guild", () => client.guilds.resolve(guildId));
+          const roles = yield* request("fetching roles", () => fluxerGuild.fetchRoles());
+          const channels = yield* guild.textChannels;
+          const emojis = yield* guild.emojis;
+          return {
+            settings: yield* settings.get,
+            channels: channels.map(({ id, name, nsfw }) => ({ id, name, nsfw })),
+            roles: roles
+              .filter((r) => r.id !== guildId)
+              .sort((a, b) => b.position - a.position)
+              .map(({ id, name, color }) => ({ id, name, color })),
+            emojis: emojis.map((e) => ({
+              text: `<${e.animated ? "a" : ""}:${e.name}:${e.id}>`,
+              name: e.name,
+              url: emojiUrl(e.id, e.animated),
+            })),
+            permissions: [...PERMISSIONS],
+          };
+        }).pipe(answer("loading the bot settings")),
+
+      saveSettings: ({ sections }) =>
+        Effect.gen(function* () {
+          const userId = yield* mayAdmin;
+          const changed = yield* settings
+            .update((current) => {
+              const next: Record<string, unknown> = { ...current };
+              for (const [key, value] of Object.entries(sections)) {
+                if (value === null) delete next[key];
+                else next[key] = value;
+              }
+              return Effect.succeed(next);
+            }, userId)
+            .pipe(Effect.mapError(rejected));
+          return changed;
+        }).pipe(answer("saving the bot settings")),
+
+      importSettings: ({ document }) =>
+        Effect.gen(function* () {
+          const userId = yield* mayAdmin;
+          return yield* settings.replace(document, userId).pipe(Effect.mapError(rejected));
+        }).pipe(answer("importing the bot settings")),
+
+      settingsLog: () =>
+        Effect.gen(function* () {
+          yield* mayAdmin;
+          const changes = yield* settings.history(LOG_SIZE);
+          const names = new Map<string, string>();
+          yield* Effect.forEach(
+            new Set(changes.flatMap((c) => (c.changedBy ? [c.changedBy] : []))),
+            (id) =>
+              request("fetching a user", () => client.users.fetch(id)).pipe(
+                Effect.map((user) => {
+                  names.set(id, user.globalName ?? user.username);
+                }),
+                Effect.ignore,
+              ),
+            { concurrency: 4, discard: true },
+          );
+          return changes.map((c) => ({
+            at: c.changedAt.getTime(),
+            by: c.changedBy ? { id: c.changedBy, name: names.get(c.changedBy) ?? null } : null,
+            source: c.source,
+            sections: c.sections,
+          }));
+        }).pipe(answer("loading the settings log")),
 
       commands: () =>
         Effect.gen(function* () {

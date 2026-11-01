@@ -37,11 +37,19 @@ latest or top posts first, with their images and files, to members who can
 see the starboard channel. Members with `starboard.config` change the
 starboard's settings on that page too.
 
+The header shows the server the bot serves next to its name. A deployment
+serves the one server its `guildId` names, so there's nothing to switch to.
 Each member has a profile page, under their name in the top corner, for
-their own settings, like opting out from the starboard. The guild
-owner and members with Administrator get an Admin tab for the settings of
-the whole server. The commands page lists the commands each member may run,
-like `!help`, with their options and a search. The Admin tab is still empty.
+their own settings, like opting out from the starboard. The commands page
+lists the commands each member may run, like `!help`, with their options and
+a search.
+
+The guild owner and members with Administrator get an Admin tab for the
+settings of the whole server: the prefix, permission rules, the polls
+channel, emoji and sticker proposals, polls and role menus, each saved on
+its own and checked like `!settings import`. It also exports and imports the
+settings file and shows the settings log, like `!settings export`, `import`
+and `log`. The starboard's settings are on the starboard page.
 
 Like shinpuru, the web interface also has an image store: images the bot
 makes for its embeds, like blurred NSFW images on the starboard, are kept in

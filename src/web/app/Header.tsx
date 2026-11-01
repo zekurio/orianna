@@ -29,13 +29,19 @@ export function Header({ path }: { path: string }) {
     <header className="sticky top-0 z-10 border-b bg-background">
       {/* The full width, unlike the pages, so the tabs have room to grow. */}
       <div className="flex h-16 w-full items-center gap-x-4 px-4 sm:gap-x-10 sm:px-6 max-sm:h-auto max-sm:flex-wrap max-sm:gap-y-1 max-sm:pt-3">
-        <Link
-          to="/starboard"
-          className="flex items-center gap-2 font-heading text-[1.375rem] leading-none font-semibold text-foreground no-underline"
-        >
-          <img src={portrait} alt="" width={36} height={36} />
-          Orianna
-        </Link>
+        <div className="flex min-w-0 items-center gap-3">
+          <Link
+            to="/starboard"
+            className="flex shrink-0 items-center gap-2 font-heading text-[1.375rem] leading-none font-semibold text-foreground no-underline"
+          >
+            <img src={portrait} alt="" width={36} height={36} />
+            Orianna
+          </Link>
+          <span aria-hidden="true" className="text-2xl font-light text-border">
+            /
+          </span>
+          <GuildChip />
+        </div>
         <nav
           className="flex gap-1 self-stretch max-sm:order-1 max-sm:-mx-3.5 max-sm:h-12 max-sm:basis-full"
           aria-label="Pages"
@@ -64,6 +70,32 @@ export function Header({ path }: { path: string }) {
       </div>
     </header>
   );
+}
+
+/**
+ * The guild the bot serves. A deployment serves one, so there's nothing to
+ * switch to; this is where a switcher goes if that changes.
+ */
+function GuildChip() {
+  const { guild } = useSession();
+  return (
+    <span className="flex min-w-0 items-center gap-2 font-medium text-foreground" title={`Orianna serves ${guild.name}`}>
+      <Avatar className="size-7 rounded-lg after:rounded-lg">
+        {guild.iconUrl && <AvatarImage src={guild.iconUrl} alt="" className="rounded-lg" />}
+        <AvatarFallback className="rounded-lg text-xs">{initials(guild.name)}</AvatarFallback>
+      </Avatar>
+      <span className="truncate max-sm:max-w-[10rem]">{guild.name}</span>
+    </span>
+  );
+}
+
+/** What Fluxer shows for a server without an icon: the first letter of each word. */
+function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .map((word) => [...word][0] ?? "")
+    .join("")
+    .slice(0, 3);
 }
 
 function UserMenu() {
