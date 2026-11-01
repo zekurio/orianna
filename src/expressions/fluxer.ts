@@ -13,6 +13,19 @@ export const FluxerExpressionGuild = Layer.effect(
     const { id: guildId } = yield* CurrentGuild;
     const guild = request("fetching the guild", () => client.guilds.resolve(guildId));
 
+    /**
+     * fluxer.js HTTP errors carry `isRetryable` (429 and 5xx). Anything else from
+     * the API is final, so trying again won't help. The member only sees the
+     * reply, so the refusal is logged too: a missing permission is for the
+     * server's admins to fix.
+     */
+    const rejected = (err: FluxerError) =>
+      Effect.logWarning(
+        `guild ${guildId}: Fluxer refused ${err.action}` +
+          (err.status === undefined ? "" : ` (HTTP ${err.status})`) +
+          `: ${err.reason}`,
+      ).pipe(Effect.andThen(Effect.fail(new ExpressionRejected({ message: err.reason }))));
+
     return {
       list: (type) =>
         Effect.gen(function* () {
@@ -48,10 +61,10 @@ export const FluxerExpressionGuild = Layer.effect(
         Effect.gen(function* () {
           const g = yield* guild;
           if (type === "emoji") {
-            const emoji = yield* request("adding an emoji", () => g.createEmoji({ name, image, reason }));
+            const emoji = yield* request(`adding the emoji :${name}:`, () => g.createEmoji({ name, image, reason }));
             return { id: emoji.id, mention: emoji.toString() };
           }
-          const sticker = yield* request("adding a sticker", () =>
+          const sticker = yield* request(`adding the sticker ${name}`, () =>
             g.createSticker({ name, image, description, tags, reason }),
           );
           return { id: sticker.id };
@@ -63,7 +76,7 @@ export const FluxerExpressionGuild = Layer.effect(
           const expression = yield* request(`fetching the ${type}`, (): Promise<{
             delete(reason: string): Promise<void>;
           }> => (type === "emoji" ? g.fetchEmoji(id) : g.fetchSticker(id)));
-          yield* request(`deleting the ${type}`, () => expression.delete(reason));
+          yield* request(`deleting the ${type} ${id}`, () => expression.delete(reason));
         }).pipe(
           orNotFound(() => undefined),
           Effect.catchIf((err) => err.refused, rejected),
@@ -80,9 +93,3 @@ export const FluxerExpressionGuild = Layer.effect(
     };
   }),
 );
-
-/**
- * fluxer.js HTTP errors carry `isRetryable` (429 and 5xx). Anything else from
- * the API is final, so trying again won't help.
- */
-const rejected = (err: FluxerError) => Effect.fail(new ExpressionRejected({ message: err.reason }));

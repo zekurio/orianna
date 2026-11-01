@@ -97,6 +97,7 @@ function ProposalsCard({ setup, settings }: SectionProps) {
 
       <ProposalFields
         legend="Emoji proposals"
+        label="Members can propose emoji"
         path="/emoji"
         value={draft.emoji}
         problems={problems}
@@ -104,6 +105,7 @@ function ProposalsCard({ setup, settings }: SectionProps) {
       />
       <ProposalFields
         legend="Sticker proposals"
+        label="Members can propose stickers"
         path="/sticker"
         value={draft.sticker}
         problems={problems}
@@ -132,12 +134,14 @@ function proposalProblems(p: Proposal): string[] {
 
 function ProposalFields({
   legend,
+  label,
   path,
   value,
   problems,
   onChange,
 }: {
   legend: string;
+  label: string;
   path: string;
   value: Proposal | undefined;
   problems: Problems;
@@ -150,55 +154,61 @@ function ProposalFields({
   const set = (change: Partial<Proposal>) => value && onChange({ ...value, ...change });
 
   return (
-    <FieldSet className="gap-4 border-t pt-5">
-      <div className="flex items-center justify-between gap-4">
-        <FieldLegend className="mb-0">{legend}</FieldLegend>
-        <Switch
-          checked={value !== undefined}
-          onCheckedChange={(on) => onChange(on ? PROPOSAL_DEFAULTS : undefined)}
-          aria-label={`${legend} on`}
-        />
-      </div>
-      {value && (
-        <FieldGroup className="grid gap-x-6 gap-y-5 sm:grid-cols-2">
-          <NumberField
-            id={`${id}-hours`}
-            label="Voting time, in hours"
-            value={value.votingHours}
-            min={1}
-            onChange={(votingHours) => set({ votingHours })}
-            problem={problem("votingHours", "More than 0 hours.")}
+    // The border goes on a wrapper: a fieldset draws its legend into its own top border.
+    // The legend also sits outside the fieldset's flex layout, so it takes a margin for
+    // the gap a card leaves under its title.
+    <div className="border-t pt-5">
+      <FieldSet className="gap-4">
+        <FieldLegend className="mb-4">{legend}</FieldLegend>
+        <Field orientation="horizontal">
+          <Switch
+            id={`${id}-on`}
+            checked={value !== undefined}
+            onCheckedChange={(on) => onChange(on ? PROPOSAL_DEFAULTS : undefined)}
           />
-          <NumberField
-            id={`${id}-open`}
-            label="Open proposals per member"
-            value={value.maxOpenPerUser}
-            min={1}
-            onChange={(maxOpenPerUser) => set({ maxOpenPerUser })}
-            problem={problem("maxOpenPerUser", "A whole number, 1 or more.")}
-          />
-          <NumberField
-            id={`${id}-size`}
-            label="Largest upload, in KiB"
-            hint="The instance's limit, 512 KiB by default."
-            value={value.maxImageBytes / 1024}
-            min={1}
-            onChange={(kib) => set({ maxImageBytes: Math.round(kib * 1024) })}
-            problem={problem("maxImageBytes", "1 KiB or more.")}
-          />
-          <NumberField
-            id={`${id}-threshold`}
-            label="Votes needed, in percent"
-            hint="Of members who can see the polls channel. It also needs more ✅ than ❌."
-            value={Math.round(value.threshold * 1000) / 10}
-            min={1}
-            max={100}
-            onChange={(percent) => set({ threshold: percent / 100 })}
-            problem={problem("threshold", "More than 0 and at most 100 percent.")}
-          />
-        </FieldGroup>
-      )}
-    </FieldSet>
+          <FieldLabel htmlFor={`${id}-on`}>{label}</FieldLabel>
+        </Field>
+        {value && (
+          <FieldGroup className="grid gap-x-6 gap-y-5 sm:grid-cols-2">
+            <NumberField
+              id={`${id}-hours`}
+              label="Voting time, in hours"
+              value={value.votingHours}
+              min={1}
+              onChange={(votingHours) => set({ votingHours })}
+              problem={problem("votingHours", "More than 0 hours.")}
+            />
+            <NumberField
+              id={`${id}-open`}
+              label="Open proposals per member"
+              value={value.maxOpenPerUser}
+              min={1}
+              onChange={(maxOpenPerUser) => set({ maxOpenPerUser })}
+              problem={problem("maxOpenPerUser", "A whole number, 1 or more.")}
+            />
+            <NumberField
+              id={`${id}-size`}
+              label="Largest upload, in KiB"
+              hint="The instance's limit, 512 KiB by default."
+              value={value.maxImageBytes / 1024}
+              min={1}
+              onChange={(kib) => set({ maxImageBytes: Math.round(kib * 1024) })}
+              problem={problem("maxImageBytes", "1 KiB or more.")}
+            />
+            <NumberField
+              id={`${id}-threshold`}
+              label="Votes needed, in percent"
+              hint="Of members who can see the polls channel. It also needs more ✅ than ❌."
+              value={Math.round(value.threshold * 1000) / 10}
+              min={1}
+              max={100}
+              onChange={(percent) => set({ threshold: percent / 100 })}
+              problem={problem("threshold", "More than 0 and at most 100 percent.")}
+            />
+          </FieldGroup>
+        )}
+      </FieldSet>
+    </div>
   );
 }
 
