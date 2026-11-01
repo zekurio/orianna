@@ -1,17 +1,22 @@
 import { Effect } from "effect";
 import { type CommandGroup, defineCommand, refuse } from "../commands/command.ts";
 import type { StarboardConfig } from "../config.ts";
+import type { Database } from "../db/index.ts";
+import type { Guilds } from "../guilds.ts";
 import { disableStarboard, type StarboardChanges, setStarboard } from "./manage.ts";
-import { type Starboard, StarboardGuild } from "./starboard.ts";
+import { optIn, optOut } from "./optout.ts";
+import { StarboardGuild } from "./starboard.ts";
 
 // `!starboard`, like shinpuru's `/starboard`, with `optout` and `optin` from
 // its privacy settings.
 
 /** `!starboard set`, `disable`, `optout` and `optin`. */
-export const starboardCommands = Effect.fnUntraced(function* (starboard: Starboard) {
+export const starboardCommands = Effect.fnUntraced(function* () {
   // Commands only get the services every command gets, so this one comes along.
   const guild = yield* StarboardGuild;
   const withGuild = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.provideService(effect, StarboardGuild, guild);
+  // The opt-out holds in every guild, so it needs them all.
+  const everywhere = yield* Effect.context<Guilds | Database>();
 
   const set = defineCommand({
     name: "set",
@@ -62,23 +67,23 @@ export const starboardCommands = Effect.fnUntraced(function* (starboard: Starboa
       }),
   });
 
-  const optOut = defineCommand({
+  const optOutCommand = defineCommand({
     name: "optout",
     description: "Opt-out from starboard, and take down your messages already in it.",
     run: (ctx) =>
       Effect.gen(function* () {
-        const removed = yield* starboard.optOut(ctx.userId);
+        const removed = yield* optOut(ctx.userId).pipe(Effect.provideContext(everywhere));
         const taken = removed === 0 ? "" : ` Took down ${removed} ${removed === 1 ? "post" : "posts"}.`;
         yield* ctx.reply(`Your messages stay out of the starboard now.${taken} \`optin\` undoes it.`);
       }),
   });
 
-  const optIn = defineCommand({
+  const optInCommand = defineCommand({
     name: "optin",
     description: "Let your messages into the starboard again.",
     run: (ctx) =>
       Effect.gen(function* () {
-        const changed = yield* starboard.optIn(ctx.userId);
+        const changed = yield* optIn(ctx.userId).pipe(Effect.provideContext(everywhere));
         yield* ctx.reply(changed ? "Your messages can get into the starboard again." : "You hadn't opted out.");
       }),
   });
@@ -86,7 +91,7 @@ export const starboardCommands = Effect.fnUntraced(function* (starboard: Starboa
   const group: CommandGroup = {
     name: "starboard",
     description: "Set guild starboard settings.",
-    subcommands: [set, disable, optOut, optIn],
+    subcommands: [set, disable, optOutCommand, optInCommand],
   };
   return group;
 });

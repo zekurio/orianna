@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Spinner } from "@/components/ui/spinner";
 import { StarboardInput, type StarboardSetup } from "../rpc.ts";
 import { Api, failureMessage, STARBOARD_KEYS } from "./api.ts";
+import { useGuild } from "./guild.tsx";
 
 // The starboard settings, for members with `starboard.config`, in a dialog
 // on the starboard page: the same as `!starboard set` and `disable` in chat.
@@ -44,11 +45,12 @@ function check(draft: StarboardInput): Result.Result<StarboardInput, Problems> {
 }
 
 /** What the form offers. Mount it ahead with `useAtomMount`, so the form is ready when it opens. */
-export const setupQuery = Api.query("starboardSetup", undefined, { reactivityKeys: STARBOARD_KEYS });
+export const setupQuery = (guildId: string) =>
+  Api.query("starboardSetup", { guildId }, { reactivityKeys: STARBOARD_KEYS });
 
 /** The form, once the channels and emoji it offers are in. */
 export function StarboardSettings({ onCancel, onDone }: { onCancel: () => void; onDone: () => void }) {
-  const setup = useAtomValue(setupQuery);
+  const setup = useAtomValue(setupQuery(useGuild().id));
   return AsyncResult.matchWithError(setup, {
     // The form's fields, so the dialog doesn't jump when they come in.
     onInitial: () => (
@@ -75,6 +77,7 @@ function StarboardForm({
   onCancel: () => void;
   onDone: () => void;
 }) {
+  const { id: guildId } = useGuild();
   const save = useAtomSet(Api.mutation("setStarboard"), { mode: "promiseExit" });
   const disable = useAtomSet(Api.mutation("disableStarboard"), { mode: "promiseExit" });
   const { config } = setup;
@@ -114,7 +117,7 @@ function StarboardForm({
     }
     const config = checked.success;
     setBusy(true);
-    const exit = await save({ payload: { starboard: config }, reactivityKeys: STARBOARD_KEYS });
+    const exit = await save({ payload: { guildId, starboard: config }, reactivityKeys: STARBOARD_KEYS });
     setBusy(false);
     if (Exit.isFailure(exit)) return toast.error(failureMessage(exit.cause));
     // Like shinpuru's reply: the channel, the threshold and the emoji.
@@ -128,7 +131,7 @@ function StarboardForm({
 
   const turnOff = async () => {
     setBusy(true);
-    const exit = await disable({ payload: undefined, reactivityKeys: STARBOARD_KEYS });
+    const exit = await disable({ payload: { guildId }, reactivityKeys: STARBOARD_KEYS });
     setBusy(false);
     if (Exit.isFailure(exit)) return toast.error(failureMessage(exit.cause));
     toast.success("Starboard disabled", {

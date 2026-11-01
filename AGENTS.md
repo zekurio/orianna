@@ -23,15 +23,20 @@ points at its docs and examples.
   so don't retry Fluxer calls on top.
 - Fail with `UserError` (`refuse(...)`) for anything a member should read;
   the router replies with it. Other failures are logged.
-- Platform-facing pieces are `Context.Service`s with a Fluxer layer next to
-  them (`GuildAccess`, `PollTransport`, `RoleGuild`, `ExpressionGuild`);
-  `src/main.ts` wires the layers together.
+- The bot serves every guild it's in. What belongs to a guild runs with
+  that guild's services: `CurrentGuild` names it, and `src/guilds.ts` builds
+  its `Settings` and its platform-facing pieces (`GuildAccess`, `RoleGuild`,
+  `ExpressionGuild`, `StarboardGuild`), which are `Context.Service`s with a
+  Fluxer layer next to them. `src/features.ts` starts each guild's features;
+  `src/main.ts` wires the shared layers together. Rows that belong to a
+  guild carry its `guildId`, and queries filter by it.
 - Use `listen` from `src/fluxer.ts` for gateway events, so handlers run in
-  fibers that stop on shutdown.
+  fibers that stop on shutdown. Every guild's listeners see every guild's
+  events, so a guild's listener ignores the ones from other guilds.
 - bun:sqlite is synchronous, so drizzle queries run inline in effects.
 - Read bot settings through the `Settings` service in
-  `src/settings/settings.ts`, not `AppConfig`; they change while the bot
-  runs. `AppConfig` holds only the deployment keys from the config file.
+  `src/settings/settings.ts`, not `AppConfig`; each guild has its own, and
+  they change while the bot runs. `AppConfig` holds only the deployment keys from the config file.
 - The web interface is a React app in `src/web/app`. `src/web/server.ts`
   imports its `index.html`; run from source, Bun bundles the app on demand and
   reloads open pages, and `bun run build` bundles it into the executable.

@@ -54,7 +54,6 @@ in
       example = lib.literalExpression ''
         {
           instance = "https://chat.example.org";
-          guildId = "1234567890";
           web = {
             publicUrl = "https://orianna.example.org";
             clientId = "1234567890";
@@ -68,10 +67,6 @@ in
             type = lib.types.str;
             example = "https://chat.example.org";
             description = "Origin of the Fluxer instance; the bot reads /.well-known/fluxer from it.";
-          };
-          guildId = lib.mkOption {
-            type = lib.types.str;
-            description = "ID of the guild the bot serves.";
           };
           database = lib.mkOption {
             type = lib.types.str;

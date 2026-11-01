@@ -207,8 +207,6 @@ const WebConfigSchema = Schema.Struct({
 export const ConfigSchema = Schema.Struct({
   /** Origin of the Fluxer instance. The client reads `/.well-known/fluxer` from here. */
   instance: Schema.String.check(Schema.isMinLength(1)),
-  /** The guild this bot serves. Messages from anywhere else are ignored. */
-  guildId: Snowflake,
   /** SQLite file. Relative paths resolve against the working directory. */
   database: Schema.String.check(Schema.isMinLength(1)).pipe(orDefault("./data/orianna.db")),
   /** The web interface is off when this section is missing. */
@@ -218,7 +216,6 @@ export const ConfigSchema = Schema.Struct({
 /** The deployment keys of the config file. */
 export interface Config {
   readonly instance: string;
-  readonly guildId: string;
   readonly database: string;
   readonly web: WebConfig | undefined;
 }
@@ -250,9 +247,8 @@ const decodeOptions = { errors: "all", onExcessProperty: "error" } as const;
 export function parseConfig(raw: unknown): Effect.Effect<Config, ConfigError> {
   return Schema.decodeUnknownEffect(ConfigSchema)(raw, decodeOptions).pipe(
     Effect.mapError((err) => new ConfigError({ message: `invalid config:\n${indent(schemaProblems(err.issue))}` })),
-    Effect.map(({ instance, guildId, database, web }) => ({
+    Effect.map(({ instance, database, web }) => ({
       instance,
-      guildId,
       database,
       // Without the trailing slash, so paths can go straight after it.
       web: web && { ...web, publicUrl: new URL(web.publicUrl).origin },

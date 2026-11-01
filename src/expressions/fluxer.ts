@@ -1,6 +1,7 @@
 import { GuildChannel, type GuildMember, Routes } from "@fluxerjs/core";
 import { Effect, Layer } from "effect";
 import { Fluxer, type FluxerError, orNotFound, request } from "../fluxer.ts";
+import { CurrentGuild } from "../guild.ts";
 import { canView } from "../permissions/fluxer.ts";
 import { ExpressionGuild, ExpressionRejected } from "./proposals.ts";
 
@@ -8,7 +9,8 @@ import { ExpressionGuild, ExpressionRejected } from "./proposals.ts";
 export const FluxerExpressionGuild = Layer.effect(
   ExpressionGuild,
   Effect.gen(function* () {
-    const { client, guildId } = yield* Fluxer;
+    const { client } = yield* Fluxer;
+    const { id: guildId } = yield* CurrentGuild;
     const guild = request("fetching the guild", () => client.guilds.resolve(guildId));
 
     return {

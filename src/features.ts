@@ -1,11 +1,13 @@
-import { Deferred, Effect, Exit, Scope, Stream, SubscriptionRef } from "effect";
+import { Events } from "@fluxerjs/core";
+import { Effect, Exit, FiberMap, Scope, Stream, SubscriptionRef } from "effect";
 import type { CommandEntry } from "./commands/command.ts";
 import type { CommandRouter } from "./commands/router.ts";
-import { AppConfig, type BotSettings } from "./config.ts";
+import type { BotSettings } from "./config.ts";
 import { proposalCommands } from "./expressions/commands.ts";
-import { ImageMagick } from "./expressions/process.ts";
 import { EMOJI, makeExpressionProposals, STICKER } from "./expressions/proposals.ts";
-import { logFailure } from "./fluxer.ts";
+import { listen, logFailure } from "./fluxer.ts";
+import { CurrentGuild } from "./guild.ts";
+import { Guilds } from "./guilds.ts";
 import { GuildAccess } from "./permissions/rules.ts";
 import { pollCommands } from "./polls/commands.ts";
 import { makeCommunityPolls } from "./polls/community.ts";
@@ -17,14 +19,16 @@ import { starboardCommands } from "./starboard/commands.ts";
 import { attachStarboardEvents } from "./starboard/fluxer.ts";
 import { LiveStarboard, makeStarboard } from "./starboard/starboard.ts";
 
-// The features the bot settings turn on, built from the settings and built
-// again when they change. main.ts runs them next to what outlives a change:
-// the client, the command router and the poll service.
+// The features each guild's settings turn on, built from the settings and
+// built again when they change. main.ts runs them for every guild the bot is
+// in, next to what all guilds share: the client, the command router and the
+// poll service.
 
-export const warnUnknownRoles = Effect.gen(function* () {
+const warnUnknownRoles = Effect.gen(function* () {
+  const { id } = yield* CurrentGuild;
   const ids = yield* (yield* GuildAccess).unknownRoles;
-  for (const id of ids) {
-    yield* Effect.logWarning(`permissions.roles: there is no role ${id}, so its rules do nothing`);
+  for (const role of ids) {
+    yield* Effect.logWarning(`guild ${id}: permissions.roles: there is no role ${role}, so its rules do nothing`);
   }
 }).pipe(Effect.catch((err) => Effect.logError(`checking permission roles failed: ${err.message}`)));
 
@@ -58,7 +62,7 @@ const startFeatures = Effect.fnUntraced(function* (
   base: readonly CommandEntry[],
   milestones: Milestones,
 ) {
-  const { guildId } = yield* AppConfig.current;
+  const { id: guildId } = yield* CurrentGuild;
 
   const commands: CommandEntry[] = [...base];
   for (const [kind, section] of [
@@ -74,30 +78,16 @@ const startFeatures = Effect.fnUntraced(function* (
     });
     commands.push(yield* proposalCommands(proposals, settings.pollsChannelId));
   }
-  const imageUsers = [
-    ...(settings.emoji || settings.sticker ? ["emoji and sticker images"] : []),
-    ...(settings.starboard?.channelId ? ["blurring NSFW images on the starboard"] : []),
-  ];
-  if (imageUsers.length > 0) {
-    // Polls and role menus work without ImageMagick, so this only warns.
-    const what = imageUsers.join(" and ");
-    yield* (yield* ImageMagick).check.pipe(
-      Effect.flatMap((problems) =>
-        Effect.forEach(problems, (problem) => Effect.logError(`${what} won't work: ${problem}`)),
-      ),
-      Effect.forkScoped,
-    );
-  }
   const community = settings.polls ? yield* makeCommunityPolls(settings.polls, guildId) : undefined;
   if (community) commands.push(...pollCommands(community));
   // Built while it's off too, so `!starboard set` can turn it on.
   const starboard = yield* makeStarboard(settings.starboard, guildId);
-  commands.push(yield* starboardCommands(starboard));
+  commands.push(yield* starboardCommands());
   yield* LiveStarboard.provide(starboard);
   // Built even without a `roleMenus` section, so removing it takes the menus down.
   const roleMenus = yield* makeRoleMenus(settings.roleMenus);
 
-  yield* Effect.acquireRelease(router.setCommands(commands), () => router.setCommands(base));
+  yield* Effect.acquireRelease(router.setCommands(guildId, commands), () => router.setCommands(guildId, base));
   if (community) yield* attachPollMessageDeletes(community);
   yield* attachRoleMenuEvents(roleMenus);
   if (starboard.board) yield* attachStarboardEvents(starboard);
@@ -114,18 +104,17 @@ const startFeatures = Effect.fnUntraced(function* (
 });
 
 /**
- * Starts the features, and starts them over whenever the settings change in
- * a way that needs it: the old ones are taken down before the new ones are
- * built, so their poll kinds don't clash. `started` is completed once the
- * first ones are up.
+ * Starts the guild's features, and starts them over whenever its settings
+ * change in a way that needs it: the old ones are taken down before the new
+ * ones are built, so their poll kinds don't clash.
  */
-export const applySettings = Effect.fnUntraced(function* (
+const applySettings = Effect.fnUntraced(function* (
   router: CommandRouter["Service"],
   base: readonly CommandEntry[],
   milestones: Milestones,
-  started: Deferred.Deferred<void>,
 ) {
   const settings = yield* Settings;
+  const { id: guildId } = yield* CurrentGuild;
   // Forked once, up front: the features of each change are children of it, so
   // they close where it sits among the caller's finalizers.
   const parent = yield* Scope.fork(yield* Effect.scope);
@@ -136,26 +125,63 @@ export const applySettings = Effect.fnUntraced(function* (
   yield* settings.changes.pipe(
     Stream.runForEach((next) =>
       Effect.gen(function* () {
-        if (permissions && !Bun.deepEquals(permissions, next.permissions)) {
-          if ((yield* SubscriptionRef.get(milestones.logins)) > 0) yield* Effect.forkScoped(warnUnknownRoles);
-        }
+        if (!Bun.deepEquals(permissions, next.permissions)) yield* Effect.forkScoped(warnUnknownRoles);
         permissions = next.permissions;
 
         const wanted = featureSettings(next);
         if (applied && Bun.deepEquals(applied, wanted)) return;
         if (scope) {
-          yield* Effect.logInfo("settings changed, starting the features over");
+          yield* Effect.logInfo(`guild ${guildId}: settings changed, starting the features over`);
           yield* Scope.close(scope, Exit.void);
         }
         scope = yield* Scope.fork(parent);
         applied = wanted;
         yield* startFeatures(next, router, base, milestones).pipe(
           Scope.provide(scope),
-          Effect.catchCause(logFailure("starting the features")),
+          Effect.catchCause(logFailure(`guild ${guildId}: starting the features`)),
         );
-        yield* Deferred.succeed(started, undefined);
       }),
     ),
   );
 });
 
+/**
+ * Runs the features of every guild the bot is in, until the scope closes:
+ * the ones it's in when it logs in, and the ones it joins later. A guild it
+ * leaves has its features taken down and its commands dropped. `base` are
+ * the commands every guild has.
+ */
+export const serveGuilds = Effect.fnUntraced(function* (
+  router: CommandRouter["Service"],
+  base: readonly CommandEntry[],
+  milestones: Milestones,
+) {
+  const guilds = yield* Guilds;
+  const running = yield* FiberMap.make<string>();
+
+  const run = (guildId: string) =>
+    Effect.gen(function* () {
+      const context = yield* guilds.context(guildId);
+      yield* applySettings(router, base, milestones).pipe(Effect.scoped, Effect.provideContext(context));
+    }).pipe(
+      Effect.ensuring(router.removeGuild(guildId)),
+      Effect.catchCause(logFailure(`guild ${guildId}: serving it`)),
+    );
+  const start = (guildId: string) => FiberMap.run(running, guildId, run(guildId), { onlyIfMissing: true });
+  const stop = (guildId: string) =>
+    Effect.gen(function* () {
+      yield* FiberMap.remove(running, guildId);
+      yield* guilds.forget(guildId);
+      yield* Effect.logInfo(`left guild ${guildId}`);
+    });
+
+  // Guilds come in as unavailable stubs with Ready, and become available one by one.
+  yield* listen(Events.Ready, "starting guilds", () =>
+    Effect.flatMap(guilds.ids, (ids) => Effect.forEach(ids, start, { discard: true })),
+  );
+  yield* listen(Events.GuildAvailable, "starting a guild", (guild) => Effect.asVoid(start(guild.id)));
+  yield* listen(Events.GuildCreate, "starting a guild", (guild) =>
+    Effect.logInfo(`joined guild ${guild.id}`).pipe(Effect.andThen(start(guild.id)), Effect.asVoid),
+  );
+  yield* listen(Events.GuildDelete, "stopping a guild", (guild) => stop(guild.id));
+});

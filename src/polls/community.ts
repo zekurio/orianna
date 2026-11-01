@@ -104,7 +104,7 @@ export const makeCommunityPolls = Effect.fnUntraced(function* (config: PollsConf
     return db
       .select()
       .from(polls)
-      .where(and(eq(polls.kind, COMMUNITY_POLL), eq(polls.status, "open")))
+      .where(and(eq(polls.guildId, guildId), eq(polls.kind, COMMUNITY_POLL), eq(polls.status, "open")))
       .orderBy(asc(polls.closesAt))
       .all();
   }
@@ -144,7 +144,7 @@ export const makeCommunityPolls = Effect.fnUntraced(function* (config: PollsConf
   /** A deleted poll message calls the poll off. */
   const messageDeleted = Effect.fnUntraced(function* (messageId: string) {
     const poll = service.byMessage(messageId);
-    if (poll?.kind !== COMMUNITY_POLL) return;
+    if (poll?.kind !== COMMUNITY_POLL || poll.guildId !== guildId) return;
     yield* service.cancel(poll.id, { messageDeleted: true });
   });
 
@@ -226,7 +226,7 @@ export const makeCommunityPolls = Effect.fnUntraced(function* (config: PollsConf
           .pipe(Effect.catch(warn(poll, "could not announce the result")));
       }),
   };
-  yield* service.register(COMMUNITY_POLL, handler);
+  yield* service.register(guildId, COMMUNITY_POLL, handler);
 
   return { open, start, messageDeleted, reconcile, describe };
 });

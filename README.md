@@ -29,11 +29,12 @@ Fluxer has no slash commands or buttons yet, so commands start with a prefix,
 
 ## Running it
 
-You need a bot token from your Fluxer instance and the ID of your guild. The
-config file only says how to reach Fluxer and where to keep the database.
-Everything else is a bot setting, which starts at the defaults. Once the bot
-is running, the guild owner or a member with Administrator turns features on
-with `!settings export` and `!settings import`, as
+You need a bot token from your Fluxer instance. The bot serves every guild
+it's invited to, each with its own settings. The config file only says how to
+reach Fluxer and where to keep the database. Everything else is a bot
+setting, which starts at the defaults in each guild. A guild's owner or a
+member with Administrator turns features on in the web interface's Admin tab,
+or with `!settings export` and `!settings import`, as
 [Configuration](docs/configuration.md#bot-settings) describes.
 
 ### On NixOS
@@ -54,7 +55,6 @@ The flake exports a NixOS module:
             tokenFile = "/run/secrets/orianna-token";
             settings = {
               instance = "https://chat.example.org";
-              guildId = "1234567890";
             };
           };
         }
@@ -91,7 +91,7 @@ echo 'FLUXER_BOT_TOKEN=...' > .env
 ./dist/orianna
 ```
 
-Fill in the instance and guild ID in `config.json` first. Fill in `web` and
+Fill in the instance in `config.json` first. Fill in `web` and
 add `FLUXER_CLIENT_SECRET` to `.env` for the web interface, or remove `web`
 to run without it. The bot reads the config from `ORIANNA_CONFIG`, or from
 `./config.json` when that's unset, and loads `.env` from the working

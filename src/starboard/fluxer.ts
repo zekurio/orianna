@@ -5,6 +5,7 @@ import type { Dns } from "effect/net";
 import { reactionKey } from "../emoji.ts";
 import { downloadImage, SOURCE_MAX_BYTES } from "../expressions/image.ts";
 import { Fluxer, listen, orNotFound, request, tagOf } from "../fluxer.ts";
+import { CurrentGuild } from "../guild.ts";
 import { editOptions, NO_MENTIONS, sendOptions } from "../messages/fluxer.ts";
 import {
   type Starboard,
@@ -18,7 +19,8 @@ import {
 export const FluxerStarboardGuild = Layer.effect(
   StarboardGuild,
   Effect.gen(function* () {
-    const { client, guildId } = yield* Fluxer;
+    const { client } = yield* Fluxer;
+    const { id: guildId } = yield* CurrentGuild;
     const http = yield* Effect.context<HttpClient.HttpClient | Dns.Dns>();
     return {
       message: (channelId, messageId) =>
@@ -123,23 +125,34 @@ function kindOf(contentType: string | null | undefined): StarboardAttachment["ki
 
 /** Feeds reactions, edits and deletes into the starboard, until the scope closes. */
 export const attachStarboardEvents = Effect.fnUntraced(function* (starboard: Starboard) {
+  const { id: guildId } = yield* CurrentGuild;
+  const here = (id: string | null | undefined) => id === guildId;
   const failed = "starboard event handling";
   // Every update counts again, so who reacted doesn't matter, bots included.
-  yield* listen(Events.MessageReactionAdd, failed, (p) => starboard.reacted(p.channelId, p.messageId, p.emoji));
+  yield* listen(Events.MessageReactionAdd, failed, (p) =>
+    here(p.reaction.guildId) ? starboard.reacted(p.channelId, p.messageId, p.emoji) : Effect.void,
+  );
   yield* listen(Events.MessageReactionAddMany, failed, (p) => {
+    if (!here(p.guildId)) return Effect.void;
     const emoji = new Map(p.reactions.map((r) => [reactionKey(r.emoji), r.emoji]));
     return Effect.forEach(emoji.values(), (e) => starboard.reacted(p.channelId, p.messageId, e), { discard: true });
   });
-  yield* listen(Events.MessageReactionRemove, failed, (p) => starboard.reacted(p.channelId, p.messageId, p.emoji));
-  yield* listen(Events.MessageReactionRemoveAll, failed, (p) => starboard.reacted(p.channelId, p.messageId));
+  yield* listen(Events.MessageReactionRemove, failed, (p) =>
+    here(p.reaction.guildId) ? starboard.reacted(p.channelId, p.messageId, p.emoji) : Effect.void,
+  );
+  yield* listen(Events.MessageReactionRemoveAll, failed, (p) =>
+    here(p.guildId) ? starboard.reacted(p.channelId, p.messageId) : Effect.void,
+  );
   yield* listen(Events.MessageReactionRemoveEmoji, failed, (p) =>
-    starboard.reacted(p.channelId, p.messageId, p.emoji),
+    here(p.guildId) ? starboard.reacted(p.channelId, p.messageId, p.emoji) : Effect.void,
   );
   yield* listen(Events.MessageUpdate, failed, (_old, message) =>
-    starboard.messageEdited(message.channelId, message.id),
+    here(message.guildId) ? starboard.messageEdited(message.channelId, message.id) : Effect.void,
   );
-  yield* listen(Events.MessageDelete, failed, (message) => starboard.messageDeleted(message.id));
+  yield* listen(Events.MessageDelete, failed, (message) =>
+    here(message.guildId) ? starboard.messageDeleted(message.id) : Effect.void,
+  );
   yield* listen(Events.MessageDeleteBulk, failed, (p) =>
-    Effect.forEach(p.ids, (id) => starboard.messageDeleted(id), { discard: true }),
+    here(p.guildId) ? Effect.forEach(p.ids, (id) => starboard.messageDeleted(id), { discard: true }) : Effect.void,
   );
 });

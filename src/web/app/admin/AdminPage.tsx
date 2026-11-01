@@ -6,7 +6,7 @@ import { FormCardSkeleton, Placeholder } from "@/components/loading";
 import { PageHeader } from "@/components/page";
 import { Problem } from "@/components/Problem";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useSession } from "../App.tsx";
+import { guildPath, useGuild } from "../guild.tsx";
 import { navigate } from "../router.tsx";
 import { GeneralSection } from "./General.tsx";
 import { HistorySection } from "./History.tsx";
@@ -40,7 +40,8 @@ export function parseAdminPath(path: string): Tab | undefined {
 }
 
 export function AdminPage({ tab }: { tab: Tab }) {
-  const { admin, guild, prefix } = useSession();
+  const guild = useGuild();
+  const { admin, prefix } = guild;
   if (!admin) {
     return (
       <PageHeader
@@ -60,7 +61,7 @@ export function AdminPage({ tab }: { tab: Tab }) {
           </>
         }
       />
-      <Tabs value={tab} onValueChange={(next) => navigate(pathOf(next as Tab))} className="gap-6">
+      <Tabs value={tab} onValueChange={(next) => navigate(guildPath(guild.id, pathOf(next as Tab)))} className="gap-6">
         <TabsList className="max-w-full justify-start overflow-x-auto">
           {TABS.map(({ tab: t, label, icon: TabIcon }) => (
             <TabsTrigger key={t} value={t}>
@@ -79,7 +80,7 @@ export function AdminPage({ tab }: { tab: Tab }) {
 
 /** The settings and what they can name, once they're in. */
 function Loaded({ children }: { children: (props: SectionProps) => ReactNode }) {
-  const setup = useAtomValue(setupQuery);
+  const setup = useAtomValue(setupQuery(useGuild().id));
   return AsyncResult.matchWithError(setup, {
     onInitial: () => (
       <Placeholder label="Loading the settings" className="flex flex-col gap-6">

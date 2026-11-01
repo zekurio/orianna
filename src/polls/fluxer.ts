@@ -1,18 +1,21 @@
-import { Events } from "@fluxerjs/core";
-import { Context, Effect, Layer } from "effect";
+import { type Client, Events } from "@fluxerjs/core";
+import { Effect, Layer } from "effect";
 import { Fluxer, listen, reactionUsers, request } from "../fluxer.ts";
+import { CurrentGuild } from "../guild.ts";
 import { editOptions, EVERYONE_MENTIONS, NO_MENTIONS, sendOptions } from "../messages/fluxer.ts";
 import { CommunityPollChat, type CommunityPolls } from "./community.ts";
 import { PollTransport } from "./transport.ts";
 
-/** Polls through fluxer.js; provides both PollTransport and CommunityPollChat. */
-export const FluxerPollTransport = Layer.effectContext(
-  Effect.gen(function* () {
-    const { client, guildId } = yield* Fluxer;
-    const message = (channelId: string, messageId: string) =>
-      request("fetching a poll message", () => client.channels.fetchMessage(channelId, messageId));
+const pollMessage = (client: Client, channelId: string, messageId: string) =>
+  request("fetching a poll message", () => client.channels.fetchMessage(channelId, messageId));
 
-    const transport: PollTransport["Service"] & CommunityPollChat["Service"] = {
+/** Polls through fluxer.js, for every guild. */
+export const FluxerPollTransport = Layer.effect(
+  PollTransport,
+  Effect.gen(function* () {
+    const { client } = yield* Fluxer;
+    const message = (channelId: string, messageId: string) => pollMessage(client, channelId, messageId);
+    return {
       post: (channelId, body, options = {}) =>
         request("posting a poll", () =>
           client.channels.send(channelId, {
@@ -27,15 +30,6 @@ export const FluxerPollTransport = Layer.effectContext(
           Effect.asVoid,
         ),
 
-      reply: (channelId, messageId, content, notify) =>
-        request("replying to a poll", () =>
-          client.channels.send(channelId, {
-            content,
-            replyTo: { channelId, messageId, guildId },
-            allowedMentions: { parse: [], users: [...notify] },
-          }),
-        ).pipe(Effect.asVoid),
-
       react: (channelId, messageId, emoji) =>
         message(channelId, messageId).pipe(
           Effect.flatMap((m) => request("adding a reaction", () => m.react(emoji))),
@@ -46,13 +40,38 @@ export const FluxerPollTransport = Layer.effectContext(
           Effect.flatMap((m) => request("removing a reaction", () => m.removeReaction(emoji, userId))),
         ),
 
+      reactionUsers: (channelId, messageId, emoji) =>
+        message(channelId, messageId).pipe(Effect.flatMap((m) => reactionUsers(m, emoji))),
+    };
+  }),
+);
+
+/** Community polls of the current guild through fluxer.js, on top of the poll transport. */
+export const FluxerCommunityPollChat = Layer.effect(
+  CommunityPollChat,
+  Effect.gen(function* () {
+    const { client } = yield* Fluxer;
+    const { id: guildId } = yield* CurrentGuild;
+    const transport = yield* PollTransport;
+    const message = (channelId: string, messageId: string) => pollMessage(client, channelId, messageId);
+    return {
+      react: transport.react,
+      removeReaction: transport.removeReaction,
+      reactionUsers: transport.reactionUsers,
+
+      reply: (channelId, messageId, content, notify) =>
+        request("replying to a poll", () =>
+          client.channels.send(channelId, {
+            content,
+            replyTo: { channelId, messageId, guildId },
+            allowedMentions: { parse: [], users: [...notify] },
+          }),
+        ).pipe(Effect.asVoid),
+
       clearReaction: (channelId, messageId, emoji) =>
         message(channelId, messageId).pipe(
           Effect.flatMap((m) => request("clearing a reaction", () => m.removeReactionEmoji(emoji))),
         ),
-
-      reactionUsers: (channelId, messageId, emoji) =>
-        message(channelId, messageId).pipe(Effect.flatMap((m) => reactionUsers(m, emoji))),
 
       emojiIds: Effect.gen(function* () {
         const guild = yield* request("fetching the guild", () => client.guilds.resolve(guildId));
@@ -66,15 +85,17 @@ export const FluxerPollTransport = Layer.effectContext(
         return `${webapp}/channels/${guildId}/${channelId}/${messageId}`;
       },
     };
-    return Context.make(PollTransport, transport).pipe(Context.add(CommunityPollChat, transport));
   }),
 );
 
 /** Calls off community polls whose message is deleted, until the scope closes. */
 export const attachPollMessageDeletes = Effect.fnUntraced(function* (community: CommunityPolls) {
+  const { id: guildId } = yield* CurrentGuild;
   const failed = "poll message delete handling";
-  yield* listen(Events.MessageDelete, failed, (message) => community.messageDeleted(message.id));
+  yield* listen(Events.MessageDelete, failed, (message) =>
+    message.guildId === guildId ? community.messageDeleted(message.id) : Effect.void,
+  );
   yield* listen(Events.MessageDeleteBulk, failed, (p) =>
-    Effect.forEach(p.ids, (id) => community.messageDeleted(id), { discard: true }),
+    p.guildId === guildId ? Effect.forEach(p.ids, (id) => community.messageDeleted(id), { discard: true }) : Effect.void,
   );
 });

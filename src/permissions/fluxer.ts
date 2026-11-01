@@ -2,6 +2,7 @@ import { GuildChannel, type GuildMember, OverwriteType, PermissionFlags } from "
 import { Effect, Layer } from "effect";
 import { UserError } from "../commands/command.ts";
 import { Fluxer, orNotFound, request } from "../fluxer.ts";
+import { CurrentGuild } from "../guild.ts";
 import { Settings } from "../settings/settings.ts";
 import { GuildAccess, MemberPermissions, ruleSets } from "./rules.ts";
 
@@ -9,7 +10,8 @@ import { GuildAccess, MemberPermissions, ruleSets } from "./rules.ts";
 export const FluxerGuildAccess = Layer.effect(
   GuildAccess,
   Effect.gen(function* () {
-    const { client, guildId } = yield* Fluxer;
+    const { client } = yield* Fluxer;
+    const { id: guildId } = yield* CurrentGuild;
     const settings = yield* Settings;
     const guild = request("fetching the guild", () => client.guilds.resolve(guildId));
 

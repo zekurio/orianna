@@ -1,7 +1,7 @@
 import { useAtomMount, useAtomRefresh, useAtomValue } from "@effect/atom-react";
 import { ArrowClockwise, EyeSlash, File, GearSix, SortDescending, Star } from "@phosphor-icons/react";
 import { AsyncResult } from "effect/reactivity";
-import { type MouseEvent, type ReactNode, useRef } from "react";
+import { type MouseEvent, type ReactNode, useEffect, useRef } from "react";
 import { Placeholder, TextSkeleton } from "@/components/loading";
 import { PageHeader } from "@/components/page";
 import { Problem } from "@/components/Problem";
@@ -21,6 +21,7 @@ import {
 } from "../rpc.ts";
 import { Api, STARBOARD_KEYS } from "./api.ts";
 import { useSession } from "./App.tsx";
+import { useGuild } from "./guild.tsx";
 import { inlineEmoji, MessageText } from "./MessageText.tsx";
 import { StarboardSettings, setupQuery } from "./StarboardForm.tsx";
 import { useStarboardView } from "./starboardView.ts";
@@ -31,14 +32,15 @@ import { useStarboardView } from "./starboardView.ts";
 
 const SORT_LABELS: Record<StarboardSort, string> = { latest: "Latest first", top: "Top posts first" };
 
-const entriesQuery = (sort: StarboardSort, offset: number) =>
-  Api.query("starboardEntries", { sort, offset }, { reactivityKeys: STARBOARD_KEYS });
+const entriesQuery = (guildId: string, sort: StarboardSort, offset: number) =>
+  Api.query("starboardEntries", { guildId, sort, offset }, { reactivityKeys: STARBOARD_KEYS });
 
 export function StarboardPage() {
-  const { configStarboard } = useSession();
-  const starboard = useAtomValue(Api.query("starboard", undefined, { reactivityKeys: STARBOARD_KEYS }));
-  const { sort, pages, toggleSort, loadMore, firstPage, setSettingsOpen } = useStarboardView();
-  const refresh = useAtomRefresh(entriesQuery(sort, 0));
+  const { id: guildId, configStarboard } = useGuild();
+  const starboard = useAtomValue(Api.query("starboard", { guildId }, { reactivityKeys: STARBOARD_KEYS }));
+  const { sort, pages, toggleSort, loadMore, firstPage, setSettingsOpen, enter } = useStarboardView();
+  useEffect(() => enter(guildId), [guildId]);
+  const refresh = useAtomRefresh(entriesQuery(guildId, sort, 0));
 
   const info = AsyncResult.isSuccess(starboard) ? starboard.value : null;
 
@@ -103,10 +105,10 @@ export function StarboardPage() {
 
 /** The starboard settings, over the page. */
 function SettingsDialog() {
-  const { prefix } = useSession();
+  const { prefix } = useGuild();
   const { settingsOpen, setSettingsOpen } = useStarboardView();
   // Loaded with the page, so the form is there as soon as the dialog opens.
-  useAtomMount(setupQuery);
+  useAtomMount(setupQuery(useGuild().id));
   return (
     <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
       <DialogContent className="sm:max-w-xl">
@@ -149,7 +151,7 @@ function EntriesSkeleton({ count = 3 }: { count?: number }) {
 
 /** shinpuru's empty starboard; while it's `off`, with a way to set it up for members who may. */
 function NothingHere({ off = false }: { off?: boolean }) {
-  const { prefix, configStarboard } = useSession();
+  const { prefix, configStarboard } = useGuild();
   const setSettingsOpen = useStarboardView((view) => view.setSettingsOpen);
   return (
     <Empty>
@@ -187,7 +189,8 @@ function EntryPage({
   last: boolean;
   onMore: () => void;
 }) {
-  const page = useAtomValue(entriesQuery(sort, offset));
+  const { id: guildId } = useGuild();
+  const page = useAtomValue(entriesQuery(guildId, sort, offset));
   // The last page that came in, to show until the next one does instead of a spinner.
   const shown = useRef<typeof page>(undefined);
   if (!AsyncResult.isInitial(page)) shown.current = page;

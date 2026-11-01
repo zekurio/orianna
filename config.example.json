@@ -1,6 +1,5 @@
 {
   "instance": "https://chat.example.org",
-  "guildId": "000000000000000000",
   "database": "./data/orianna.db",
   "web": {
     "publicUrl": "https://orianna.example.org",

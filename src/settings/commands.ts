@@ -121,8 +121,7 @@ function problemBlock(problems: readonly string[]): string {
 /** e.g. "<t:…:R> <@123> changed `emoji` and `starboard`" */
 function describe(change: SettingsChange): string {
   const when = timestamp(change.changedAt);
-  if (change.source === "config-file") return `${when} imported from the config file on the first start`;
-  if (change.source === "defaults") return `${when} set to the defaults on the first start`;
+  if (change.source === "defaults") return `${when} set to the defaults when the bot joined`;
   return `${when} <@${change.changedBy}> changed ${list(change.sections as SettingsSection[])}`;
 }
 

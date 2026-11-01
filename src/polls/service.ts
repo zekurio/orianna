@@ -76,6 +76,7 @@ const makePollService = Effect.gen(function* () {
   const transport = yield* PollTransport;
   const scope = yield* Effect.scope;
 
+  /** By {@link handlerKey}: each guild registers its own. */
   const handlers = new Map<string, PollHandler>();
   const resolving = new Set<number>();
   /** Polls past their deadline whose kind has no handler, already logged. */
@@ -93,23 +94,28 @@ const makePollService = Effect.gen(function* () {
   const schedule = Queue.offer(wake, undefined).pipe(Effect.asVoid);
 
   /**
-   * Handles polls of `kind` until the scope closes. Polls of a kind without a
-   * handler stay open past their deadline, and closed ones stay unresolved,
-   * until a handler for it is registered again.
+   * Handles the guild's polls of `kind` until the scope closes. Polls without
+   * a handler stay open past their deadline, and closed ones stay unresolved,
+   * until a handler for them is registered again.
    */
-  function register(kind: string, handler: PollHandler): Effect.Effect<void, never, Scope.Scope> {
+  function register(guildId: string, kind: string, handler: PollHandler): Effect.Effect<void, never, Scope.Scope> {
+    const key = handlerKey({ guildId, kind });
     return Effect.acquireRelease(
       Effect.suspend(() => {
-        if (handlers.has(kind)) return Effect.die(new Error(`duplicate poll kind: ${kind}`));
-        handlers.set(kind, handler);
+        if (handlers.has(key)) return Effect.die(new Error(`duplicate poll kind: ${key}`));
+        handlers.set(key, handler);
         return schedule;
       }),
       () =>
         Effect.suspend(() => {
-          handlers.delete(kind);
+          handlers.delete(key);
           return schedule;
         }),
     );
+  }
+
+  function handlerOf(poll: { guildId: string; kind: string }): PollHandler | undefined {
+    return handlers.get(handlerKey(poll));
   }
 
   function get(id: number): Poll | undefined {
@@ -233,7 +239,7 @@ const makePollService = Effect.gen(function* () {
     if (!poll) return;
     const option = findOption(poll, emoji);
     if (!option) {
-      const onOther = handlers.get(poll.kind)?.onOtherReaction;
+      const onOther = handlerOf(poll)?.onOtherReaction;
       if (poll.status === "open" && onOther) yield* onOther(poll, userId, emoji);
       return;
     }
@@ -299,7 +305,7 @@ const makePollService = Effect.gen(function* () {
 
   /** Closes an open poll early when its handler says the outcome is settled. */
   const closeIfDecided = Effect.fnUntraced(function* (poll: Poll) {
-    const handler = handlers.get(poll.kind);
+    const handler = handlerOf(poll);
     if (!handler?.isDecided || !(yield* acceptsVotes(poll))) return;
     if (handler.isDecided(poll, tally(poll))) yield* close(poll.id);
   });
@@ -416,14 +422,14 @@ const makePollService = Effect.gen(function* () {
       .from(polls)
       .where(eq(polls.status, "closed"))
       .all()
-      .filter((poll) => handlers.has(poll.kind));
+      .filter((poll) => handlerOf(poll) !== undefined);
     const due = db
-      .select({ id: polls.id, kind: polls.kind })
+      .select({ id: polls.id, guildId: polls.guildId, kind: polls.kind })
       .from(polls)
       .where(and(eq(polls.status, "open"), lte(polls.closesAt, now)))
       .all();
-    for (const { id, kind } of due) {
-      if (!handlers.has(kind)) {
+    for (const { id, guildId, kind } of due) {
+      if (!handlerOf({ guildId, kind })) {
         if (!waiting.has(id)) {
           waiting.add(id);
           yield* Effect.logWarning(
@@ -444,7 +450,7 @@ const makePollService = Effect.gen(function* () {
    * the loop.
    */
   const nextDelay = Effect.gen(function* () {
-    const handled = inArray(polls.kind, [...handlers.keys()]);
+    const handled = inArray(sql<string>`${polls.guildId} || '/' || ${polls.kind}`, [...handlers.keys()]);
     const next = db
       .select({ closesAt: polls.closesAt })
       .from(polls)
@@ -512,7 +518,7 @@ const makePollService = Effect.gen(function* () {
    */
   function runHandler(poll: Poll): Effect.Effect<void> {
     return Effect.gen(function* () {
-      const handler = handlers.get(poll.kind);
+      const handler = handlerOf(poll);
       if (!handler) {
         return yield* Effect.logWarning(
           `poll ${poll.id}: nothing handles ${poll.kind} polls right now; it's resolved once something does`,
@@ -531,7 +537,7 @@ const makePollService = Effect.gen(function* () {
 
   /** The poll message, from the kind's renderer when it has one. */
   function body(poll: Poll, pollTally?: Tally): MessageBody {
-    const handler = handlers.get(poll.kind);
+    const handler = handlerOf(poll);
     if (handler?.render) return handler.render(poll, pollTally ?? tally(poll));
     return renderPoll(poll, pollTally);
   }
@@ -542,7 +548,7 @@ const makePollService = Effect.gen(function* () {
    */
   function refreshSoon(poll: Poll): Effect.Effect<void> {
     return Effect.suspend(() => {
-      if (poll.status !== "open" || !handlers.get(poll.kind)?.render) return Effect.void;
+      if (poll.status !== "open" || !handlerOf(poll)?.render) return Effect.void;
       stale.add(poll.id);
       return Effect.asVoid(
         FiberMap.run(refreshers, poll.id, refresher(poll.id), { onlyIfMissing: true }),
@@ -610,6 +616,11 @@ export class PollService extends Context.Service<PollService>()("orianna/PollSer
   make: makePollService,
 }) {
   static readonly layer = Layer.effect(PollService, makePollService);
+}
+
+/** What a poll's handler is registered as: its guild and kind. */
+function handlerKey({ guildId, kind }: { guildId: string; kind: string }): string {
+  return `${guildId}/${kind}`;
 }
 
 /** Matches a reaction to an option. Custom emoji match by ID. */

@@ -5,50 +5,8 @@
     {
       "idx": 0,
       "version": "6",
-      "when": 1792972377982,
+      "when": 1793492190834,
       "tag": "0000_init",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1793140889633,
-      "tag": "0001_proposal_images",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1793467662229,
-      "tag": "0002_boards",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1793470372422,
-      "tag": "0003_settings",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "6",
-      "when": 1793473191576,
-      "tag": "0004_web_sessions",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "6",
-      "when": 1793487981221,
-      "tag": "0005_starboard",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "6",
-      "when": 1793489245619,
-      "tag": "0006_image_store",
       "breakpoints": true
     }
   ]

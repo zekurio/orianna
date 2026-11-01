@@ -10,6 +10,7 @@ import { Spinner } from "@/components/ui/spinner";
 import type { BotSettings } from "../../../config.ts";
 import type { AdminSetup } from "../../rpc.ts";
 import { Api, failureMessage, STARBOARD_KEYS } from "../api.ts";
+import { useGuild } from "../guild.tsx";
 
 // What the Admin tab's sections share. Each section edits a few top-level
 // keys of the bot settings and saves just those; the bot checks the whole
@@ -27,7 +28,7 @@ export interface SectionProps {
 /** Everything the Admin tab shows, refreshed after each save. */
 export const ADMIN_KEYS = ["admin"];
 
-export const setupQuery = Api.query("adminSetup", undefined, { reactivityKeys: ADMIN_KEYS });
+export const setupQuery = (guildId: string) => Api.query("adminSetup", { guildId }, { reactivityKeys: ADMIN_KEYS });
 
 /** Saving can change the prefix in the session, and the starboard if its section changed. */
 const SAVE_KEYS = [...ADMIN_KEYS, "session", ...STARBOARD_KEYS];
@@ -51,13 +52,14 @@ export function problemsUnder(problems: Problems, path: string): string[] {
  * it went in a toast, and keeps the bot's problems for the form to show.
  */
 export function useSave(label: string) {
+  const { id: guildId } = useGuild();
   const save = useAtomSet(Api.mutation("saveSettings"), { mode: "promiseExit" });
   const [busy, setBusy] = useState(false);
   const [problems, setProblems] = useState<Problems>([]);
 
   const run = async (sections: Record<string, unknown>): Promise<boolean> => {
     setBusy(true);
-    const exit = await save({ payload: { sections }, reactivityKeys: SAVE_KEYS });
+    const exit = await save({ payload: { guildId, sections }, reactivityKeys: SAVE_KEYS });
     setBusy(false);
     if (Exit.isFailure(exit)) {
       const failure = Cause.squash(exit.cause) as { _tag?: string; problems?: readonly string[] };

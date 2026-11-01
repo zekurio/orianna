@@ -3,7 +3,7 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel, FieldSet, 
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { useSession } from "../App.tsx";
+import { useGuild } from "../guild.tsx";
 import {
   differs,
   numberValue,
@@ -39,7 +39,7 @@ export function ProposalsSection(props: SectionProps) {
 }
 
 function ProposalsCard({ setup, settings }: SectionProps) {
-  const { prefix } = useSession();
+  const { prefix } = useGuild();
   const { save, busy, problems } = useSave("proposals");
   const saved = { pollsChannelId: settings.pollsChannelId, emoji: settings.emoji, sticker: settings.sticker };
   const [draft, setDraft] = useState(saved);
@@ -214,7 +214,7 @@ function ProposalFields({
 }
 
 function PollsCard({ settings }: SectionProps) {
-  const { prefix } = useSession();
+  const { prefix } = useGuild();
   const { save, busy, problems } = useSave("polls");
   const [draft, setDraft] = useState(settings.polls);
   const id = useId();

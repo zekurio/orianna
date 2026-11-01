@@ -56,12 +56,11 @@ export const orNotFound =
   <A, E, R>(self: Effect.Effect<A, E, R>): Effect.Effect<A | B, E, R> =>
     Effect.catchIf(self, isNotFound, () => Effect.sync(fallback));
 
-/** The client and the guild the bot serves. */
+/** The client. */
 export class Fluxer extends Context.Service<
   Fluxer,
   {
     readonly client: Client;
-    readonly guildId: string;
     readonly token: Redacted.Redacted<string>;
   }
 >()("orianna/Fluxer") {
@@ -72,7 +71,7 @@ export class Fluxer extends Context.Service<
   static readonly layer = Layer.effect(
     Fluxer,
     Effect.gen(function* () {
-      const { instance, guildId } = yield* AppConfig.current;
+      const { instance } = yield* AppConfig.current;
       const token = yield* readToken;
       const client = yield* Effect.acquireRelease(
         request(`reaching ${instance}`, () => Client.fromDiscovery(instance)),
@@ -81,7 +80,7 @@ export class Fluxer extends Context.Service<
             Effect.catch((err) => Effect.logWarning(err.message)),
           ),
       );
-      return { client, guildId, token };
+      return { client, token };
     }),
   );
 }

@@ -22,7 +22,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Spinner } from "@/components/ui/spinner";
 import type { SettingsChangeInfo } from "../../rpc.ts";
 import { Api, failureMessage, STARBOARD_KEYS } from "../api.ts";
-import { useSession } from "../App.tsx";
+import { useGuild } from "../guild.tsx";
 import { ADMIN_KEYS, type SectionProps } from "./shared.tsx";
 
 // The settings as a file, like `!settings export` and `import`, and who
@@ -41,7 +41,7 @@ export function HistorySection({ settings }: SectionProps) {
 }
 
 function SettingsFile({ settings }: Pick<SectionProps, "settings">) {
-  const { prefix } = useSession();
+  const { id: guildId, prefix } = useGuild();
   const importSettings = useAtomSet(Api.mutation("importSettings"), { mode: "promiseExit" });
   const input = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState<{ name: string; document: unknown }>();
@@ -73,7 +73,7 @@ function SettingsFile({ settings }: Pick<SectionProps, "settings">) {
     if (!pending) return;
     setBusy(true);
     const exit = await importSettings({
-      payload: { document: pending.document },
+      payload: { guildId, document: pending.document },
       reactivityKeys: [...ADMIN_KEYS, "session", ...STARBOARD_KEYS],
     });
     setBusy(false);
@@ -145,7 +145,7 @@ function SettingsFile({ settings }: Pick<SectionProps, "settings">) {
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 
 function ChangeLog() {
-  const log = useAtomValue(Api.query("settingsLog", undefined, { reactivityKeys: ADMIN_KEYS }));
+  const log = useAtomValue(Api.query("settingsLog", { guildId: useGuild().id }, { reactivityKeys: ADMIN_KEYS }));
   return (
     <Card>
       <CardHeader>
@@ -181,11 +181,7 @@ function ChangeLog() {
 
 function ChangeRow({ change }: { change: SettingsChangeInfo }) {
   const who =
-    change.source === "config-file"
-      ? "Imported from the config file on the first start"
-      : change.source === "defaults"
-        ? "Set to the defaults on the first start"
-        : `${change.by?.name ?? "A member"} changed`;
+    change.source === "defaults" ? "Set to the defaults when the bot joined" : `${change.by?.name ?? "A member"} changed`;
   return (
     <li className="flex flex-wrap items-center gap-x-3 gap-y-1.5 py-3 first:pt-0 last:pb-0">
       <time dateTime={new Date(change.at).toISOString()} className="w-40 shrink-0 text-sm text-muted-foreground">

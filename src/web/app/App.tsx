@@ -8,7 +8,8 @@ import { Api } from "./api.ts";
 import { Header } from "./Header.tsx";
 import { CommandsPage } from "./Commands.tsx";
 import { AdminPage, parseAdminPath } from "./admin/AdminPage.tsx";
-import { NotFoundPage, ProfilePage } from "./pages.tsx";
+import { GuildContext, guildPath, homeGuild, parseGuildPath, useLastGuild } from "./guild.tsx";
+import { NoGuildsPage, NotFoundPage, ProfilePage } from "./pages.tsx";
 import { navigate, usePath } from "./router.tsx";
 import { SignIn } from "./SignIn.tsx";
 import { StarboardPage } from "./Starboard.tsx";
@@ -20,7 +21,6 @@ const SIGN_IN_ERRORS: Record<SignInError, string> = {
   denied: "Signing in was cancelled on Fluxer.",
   expired: "That sign-in took too long, or started in another browser. Try again.",
   failed: "Fluxer couldn't sign you in. Try again in a moment.",
-  "not-member": "Your Fluxer account isn't a member of the server.",
 };
 
 const SessionContext = createContext<Session | null>(null);
@@ -49,7 +49,7 @@ export function App() {
         case "SignedOut":
           return <SignIn message={signInError} />;
         case "NotMember":
-          return <SignIn message={SIGN_IN_ERRORS["not-member"]} />;
+          return <Unavailable message="The bot ran into a problem. Its log says what happened." />;
         case "RpcClientError":
           return <Unavailable message="The bot didn't answer. Check that it's running, then reload the page." />;
       }
@@ -76,42 +76,49 @@ function Unavailable({ message }: { message: string }) {
   );
 }
 
-/** Where pages that moved went. */
-const MOVED: Record<string, string> = {
-  "/settings": "/profile",
-  "/settings/personal": "/profile",
-  "/settings/server": "/admin",
-};
-
 function Shell() {
   const path = usePath();
+  const { guilds } = useSession();
+  const { guildId: last, remember } = useLastGuild();
+  const inGuild = parseGuildPath(path);
+  const guild = inGuild && guilds.find((g) => g.id === inGuild.guildId);
 
   useEffect(() => {
-    const to = path === "/" ? "/starboard" : MOVED[path];
-    if (to) navigate(to, { replace: true });
+    if (guild) remember(guild.id);
+  }, [guild?.id]);
+  useEffect(() => {
+    const home = homeGuild(guilds, last);
+    if (path === "/" && home) navigate(guildPath(home.id), { replace: true });
+    else if (inGuild?.page === "/") navigate(guildPath(inGuild.guildId), { replace: true });
   }, [path]);
 
   return (
-    <>
+    <GuildContext value={guild ?? null}>
       <Header path={path} />
       <main className={cn(container, "flex flex-col gap-6 py-8 sm:py-12")}>
         <Page path={path} />
       </main>
-    </>
+    </GuildContext>
   );
 }
 
 function Page({ path }: { path: string }) {
-  const adminTab = parseAdminPath(path);
-  if (adminTab) return <AdminPage tab={adminTab} />;
-  switch (path) {
-    case "/":
+  const { guilds } = useSession();
+  if (path === "/profile") return <ProfilePage />;
+  if (path === "/" && guilds.length === 0) return <NoGuildsPage />;
+  const inGuild = parseGuildPath(path);
+  if (!inGuild) return <NotFoundPage path={path} />;
+  const guild = guilds.find((g) => g.id === inGuild.guildId);
+  if (!guild) return <NotFoundPage path={path} />;
+
+  const adminTab = parseAdminPath(inGuild.page);
+  // Keyed by guild, so a page starts over in another guild.
+  if (adminTab) return <AdminPage key={guild.id} tab={adminTab} />;
+  switch (inGuild.page) {
     case "/starboard":
-      return <StarboardPage />;
+      return <StarboardPage key={guild.id} />;
     case "/commands":
-      return <CommandsPage />;
-    case "/profile":
-      return <ProfilePage />;
+      return <CommandsPage key={guild.id} />;
     default:
       return <NotFoundPage path={path} />;
   }

@@ -12,13 +12,14 @@ import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/in
 import type { CommandInfo, CommandSection } from "../rpc.ts";
 import { Api } from "./api.ts";
 import { useSession } from "./App.tsx";
+import { useGuild } from "./guild.tsx";
 
 // The commands page: what `!help` lists for the member, with every option
 // explained, and a search across all of it.
 
 export function CommandsPage() {
-  const { prefix } = useSession();
-  const commands = useAtomValue(Api.query("commands", undefined));
+  const { id: guildId, prefix } = useGuild();
+  const commands = useAtomValue(Api.query("commands", { guildId }));
   const [query, setQuery] = useState("");
   return (
     <>
@@ -63,7 +64,7 @@ export function CommandsPage() {
 }
 
 function CommandList({ sections, query }: { sections: readonly CommandSection[]; query: string }) {
-  const { prefix } = useSession();
+  const { prefix } = useGuild();
   // Typing stays quick however long the list is.
   const deferred = useDeferredValue(query);
   const shown = useMemo(() => {
@@ -111,7 +112,7 @@ function CommandList({ sections, query }: { sections: readonly CommandSection[];
 }
 
 function CommandRow({ command }: { command: CommandInfo }) {
-  const { prefix } = useSession();
+  const { prefix } = useGuild();
   return (
     <li className="flex flex-col gap-2 px-5 py-4">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">

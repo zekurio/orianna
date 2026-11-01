@@ -3,7 +3,7 @@ import { type ReactNode, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldError, FieldLegend, FieldSet } from "@/components/ui/field";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useSession } from "../App.tsx";
+import { useGuild } from "../guild.tsx";
 import { differs, problemAt, problemsUnder, type SectionProps, type Settings, SettingsCard, useSave } from "./shared.tsx";
 
 // Who may do what: rules like `+emoji.add` or `-polls.*` for everyone and per
@@ -30,7 +30,7 @@ function targetsOf(permissions: readonly string[]): Target[] {
 }
 
 export function PermissionsSection({ setup, settings }: SectionProps) {
-  const { prefix } = useSession();
+  const { prefix } = useGuild();
   const { save, busy, problems } = useSave("permissions");
   const [draft, setDraft] = useState<Permissions>(settings.permissions);
   const targets = targetsOf(setup.permissions);

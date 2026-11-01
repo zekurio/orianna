@@ -137,7 +137,11 @@ export const makeStarboard = Effect.fnUntraced(function* (config: StarboardConfi
   }
 
   function entry(messageId: string): Entry | undefined {
-    return db.select().from(starboardEntries).where(eq(starboardEntries.messageId, messageId)).get();
+    return db
+      .select()
+      .from(starboardEntries)
+      .where(and(eq(starboardEntries.guildId, guildId), eq(starboardEntries.messageId, messageId)))
+      .get();
   }
 
   function optedOut(userId: string): boolean {
@@ -204,6 +208,7 @@ export const makeStarboard = Effect.fnUntraced(function* (config: StarboardConfi
           db.insert(starboardEntries)
             .values({
               messageId,
+              guildId,
               channelId,
               authorId: message.authorId,
               postChannelId: board.channelId,
@@ -260,7 +265,13 @@ export const makeStarboard = Effect.fnUntraced(function* (config: StarboardConfi
     const rows = db
       .select()
       .from(starboardEntries)
-      .where(and(isNull(starboardEntries.content), isNotNull(starboardEntries.postId)))
+      .where(
+        and(
+          eq(starboardEntries.guildId, guildId),
+          isNull(starboardEntries.content),
+          isNotNull(starboardEntries.postId),
+        ),
+      )
       .all();
     for (const { messageId } of rows) {
       yield* enqueue(
@@ -314,39 +325,39 @@ export const makeStarboard = Effect.fnUntraced(function* (config: StarboardConfi
         Effect.gen(function* () {
           const source = entry(messageId);
           if (source) yield* takeDown(source);
-          const post = db.select().from(starboardEntries).where(eq(starboardEntries.postId, messageId)).get();
+          const post = db
+            .select()
+            .from(starboardEntries)
+            .where(and(eq(starboardEntries.guildId, guildId), eq(starboardEntries.postId, messageId)))
+            .get();
           if (post) yield* markRemoved(post);
         }),
       ),
 
-    /** Keeps the member's messages out of the starboard and takes down their posts. Returns how many. */
-    optOut: (userId: string) =>
+    /** Takes down the member's posts, once they opted out. Returns how many. */
+    takeDownAuthor: (userId: string) =>
       lock.withPermits(1)(
         Effect.gen(function* () {
-          db.insert(starboardOptOuts).values({ userId, optedOutAt: new Date() }).onConflictDoNothing().run();
           const rows = db
             .select()
             .from(starboardEntries)
-            .where(and(eq(starboardEntries.authorId, userId), isNotNull(starboardEntries.postId)))
+            .where(
+              and(
+                eq(starboardEntries.guildId, guildId),
+                eq(starboardEntries.authorId, userId),
+                isNotNull(starboardEntries.postId),
+              ),
+            )
             .all();
           for (const row of rows) yield* takeDown(row);
           return rows.length;
         }),
       ),
 
-    /** Whether the member keeps their messages out of the starboard. */
-    optedOut: (userId: string) => Effect.sync(() => optedOut(userId)),
-
-    /** Returns false when the member hadn't opted out. */
-    optIn: (userId: string) =>
-      Effect.sync(
-        () => db.delete(starboardOptOuts).where(eq(starboardOptOuts.userId, userId)).returning().all().length > 0,
-      ),
-
     /** A page of the posts, newest or most voted first, and how many there are. */
     posts: (sort: "latest" | "top", offset: number, limit: number) =>
       Effect.sync(() => {
-        const where = isNotNull(starboardEntries.postId);
+        const where = and(eq(starboardEntries.guildId, guildId), isNotNull(starboardEntries.postId));
         const order =
           sort === "top"
             ? [desc(starboardEntries.count), desc(starboardEntries.postedAt)]
@@ -366,9 +377,9 @@ export const makeStarboard = Effect.fnUntraced(function* (config: StarboardConfi
 });
 
 /**
- * The starboard as the settings have it now. The features set it when they
- * start and clear it when they stop, so what outlives a settings change,
- * like the web interface, finds the current one.
+ * The current guild's starboard as its settings have it now. The features
+ * set it when they start and clear it when they stop, so what outlives a
+ * settings change, like the web interface, finds the current one.
  */
 export class LiveStarboard extends Context.Service<
   LiveStarboard,

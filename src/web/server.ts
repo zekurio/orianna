@@ -5,7 +5,6 @@ import { RpcSerialization, RpcServer } from "effect/rpc";
 import { AppConfig, ConfigError, type WebConfig } from "../config.ts";
 import { type FluxerError, logFailure } from "../fluxer.ts";
 import { IMAGE_STORE_PATH, ImageStore } from "../imagestore.ts";
-import { GuildAccess } from "../permissions/rules.ts";
 import app from "./app/index.html";
 import { FluxerOAuth } from "./fluxer.ts";
 import { AuthenticationLive, HandlersLive } from "./handlers.ts";
@@ -25,7 +24,7 @@ const CALLBACK_PATH = "/auth/callback";
 const LOGIN_TTL = Duration.minutes(10);
 const PROBLEM = "The bot ran into a problem. Its log says what happened.";
 
-type Services = OAuth | Sessions | GuildAccess | ImageStore;
+type Services = OAuth | Sessions | ImageStore;
 type Handler = (req: BunRequest) => Effect.Effect<Response, FluxerError, Services>;
 
 /** Serves the web interface when the config file has a `web` section. */
@@ -106,12 +105,8 @@ const serve = (web: WebConfig) =>
             yield* Effect.logWarning(`signing in to the web interface failed: ${identified.failure.message}`);
             return backToApp("failed");
           }
+          // Anyone may sign in; the app shows the guilds they share with the bot.
           const userId = identified.success;
-          const joined = yield* Effect.result((yield* GuildAccess).permissionsOf(userId));
-          if (Result.isFailure(joined)) {
-            if (joined.failure._tag === "UserError") return backToApp("not-member");
-            return yield* joined.failure;
-          }
 
           const token = yield* (yield* Sessions).create(userId);
           req.cookies.set(SESSION_COOKIE, token, {

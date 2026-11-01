@@ -1,53 +1,44 @@
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import * as BunDns from "@effect/platform-bun/BunDns";
 import { Events } from "@fluxerjs/core";
-import { Cause, Console, Deferred, Effect, Exit, Layer, Queue, SubscriptionRef } from "effect";
+import { Cause, Console, Effect, Exit, Layer, Queue, SubscriptionRef } from "effect";
 import { FetchHttpClient } from "effect/http";
 import type { CommandEntry } from "./commands/command.ts";
 import { help, ping } from "./commands/general.ts";
 import { CommandList, makeCommandRouter } from "./commands/router.ts";
 import { AppConfig, ConfigError } from "./config.ts";
 import { Database } from "./db/index.ts";
-import { FluxerExpressionGuild } from "./expressions/fluxer.ts";
 import { ImageMagick } from "./expressions/process.ts";
-import { applySettings, type Milestones, warnUnknownRoles } from "./features.ts";
+import { type Milestones, serveGuilds } from "./features.ts";
 import { Fluxer, listen, logFailure, login } from "./fluxer.ts";
+import { Guilds } from "./guilds.ts";
 import { ImageStore } from "./imagestore.ts";
 import { perms } from "./permissions/commands.ts";
-import { FluxerGuildAccess } from "./permissions/fluxer.ts";
 import { FluxerPollTransport } from "./polls/fluxer.ts";
 import { PollService } from "./polls/service.ts";
 import { attachReactions } from "./reactions.ts";
-import { FluxerRoleGuild } from "./roles/fluxer.ts";
 import { settingsCommands } from "./settings/commands.ts";
-import { Settings } from "./settings/settings.ts";
-import { FluxerStarboardGuild } from "./starboard/fluxer.ts";
-import { LiveStarboard } from "./starboard/starboard.ts";
+import { SettingsStore } from "./settings/settings.ts";
 import { WebServer } from "./web/server.ts";
 
 const Platform = Layer.mergeAll(BunServices.layer, BunDns.layer, FetchHttpClient.layer);
 
-// The settings load, and a bad import stops the bot, before it reaches out to Fluxer.
 const Core = Fluxer.layer.pipe(
-  Layer.provideMerge(Settings.layer),
+  Layer.provideMerge(SettingsStore.layer),
   Layer.provideMerge(Database.layer),
   Layer.provideMerge(AppConfig.layer),
   Layer.provideMerge(Platform),
 );
 
-const Adapters = Layer.mergeAll(
-  LiveStarboard.layer,
-  CommandList.layer,
-  FluxerGuildAccess,
-  FluxerPollTransport,
-  FluxerRoleGuild,
-  FluxerExpressionGuild,
-  FluxerStarboardGuild,
-  ImageMagick.layer,
-  ImageStore.layer,
-).pipe(Layer.provideMerge(Core));
+/** What every guild shares; each guild's own services come from Guilds. */
+const Shared = Layer.mergeAll(CommandList.layer, FluxerPollTransport, ImageMagick.layer, ImageStore.layer).pipe(
+  Layer.provideMerge(Core),
+);
 
-const App = Layer.mergeAll(PollService.layer, WebServer).pipe(Layer.provideMerge(Adapters));
+const App = Layer.mergeAll(PollService.layer, WebServer).pipe(
+  Layer.provideMerge(Guilds.layer),
+  Layer.provideMerge(Shared),
+);
 
 /**
  * Without a handler SIGHUP would end the process, and systemd doesn't restart
@@ -71,10 +62,11 @@ const run = Effect.fnUntraced(function* (hangups: Queue.Queue<void>) {
     pollCatchUps: yield* SubscriptionRef.make(0),
   };
 
-  // The router, the poll service and its reactions outlive changes to the
-  // settings; the features come and go with them.
+  // The router, the poll service and its reactions serve every guild and
+  // outlive changes to the settings; each guild's features come and go with
+  // its settings, and with the guild.
   const base: CommandEntry[] = [ping, help, perms, yield* settingsCommands()];
-  const router = yield* makeCommandRouter(base);
+  const router = yield* makeCommandRouter();
 
   // Catch up on votes from while offline before deadlines are processed.
   const catchUpPolls = polls.reconcile().pipe(
@@ -88,16 +80,24 @@ const run = Effect.fnUntraced(function* (hangups: Queue.Queue<void>) {
       const { client } = yield* Fluxer;
       yield* Effect.logInfo(`logged in as ${client.user?.username} on ${instance}`);
       yield* SubscriptionRef.update(milestones.logins, (n) => n + 1);
-      yield* Effect.all([catchUpPolls, warnUnknownRoles], { concurrency: "unbounded", discard: true });
+      yield* catchUpPolls;
     }),
   );
   yield* listen(Events.MessageCreate, "handling a message", router.handleMessage);
   yield* attachReactions(polls, "poll");
 
-  // The first features attach their listeners before the bot logs in.
-  const started = yield* Deferred.make<void>();
-  yield* applySettings(router, base, milestones, started).pipe(Effect.forkScoped);
-  yield* Deferred.await(started);
+  // Each guild's features start once Fluxer says the bot is in it.
+  yield* serveGuilds(router, base, milestones);
+
+  // Polls and role menus work without ImageMagick, so this only warns.
+  yield* (yield* ImageMagick).check.pipe(
+    Effect.flatMap((problems) =>
+      Effect.forEach(problems, (problem) =>
+        Effect.logError(`emoji and sticker images and blurring NSFW images on the starboard won't work: ${problem}`),
+      ),
+    ),
+    Effect.forkScoped,
+  );
 
   // Bot settings apply as soon as they change, and the config file only has
   // what takes a restart, so there's nothing left to reload.

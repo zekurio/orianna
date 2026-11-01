@@ -5,9 +5,10 @@ Orianna keeps two kinds of configuration apart:
 - The [config file](#the-config-file) says how to reach Fluxer, where to
   keep the database, and whether to serve the web interface. The bot reads it
   once, when it starts.
-- The [bot settings](#bot-settings) say what the bot does in the guild: the
-  prefix, permissions and every feature. They live in the database, and
-  changes apply while the bot runs.
+- The [bot settings](#bot-settings) say what the bot does in a guild: the
+  prefix, permissions and every feature. The bot serves every guild it's in,
+  and each has its own, starting at the defaults when the bot joins. They
+  live in the database, and changes apply while the bot runs.
 
 ## The config file
 
@@ -19,27 +20,25 @@ the same keys go under `services.orianna.settings`.
 | Key | Default | What it does |
 |---|---|---|
 | `instance` | Required | Origin of the Fluxer instance, like `https://chat.example.org`. The bot reads `/.well-known/fluxer` from it. |
-| `guildId` | Required | The guild the bot serves. It ignores messages from anywhere else. |
 | `database` | `"./data/orianna.db"` | The SQLite file, which holds the bot settings too. A relative path starts from the working directory. The NixOS module sets `/var/lib/orianna/orianna.db`. |
 | `web` | Off | The [web interface](#the-web-interface) |
 
 The bot refuses to start when the file has a key it doesn't know or a value
 of the wrong type. The error names each problem with its path, like
-`/guildId`.
+`/web/port`.
 
 The bot token doesn't go in the file; see [Environment](#environment).
 
 ### The web interface
 
-The bot can serve a web interface, where members of the guild sign in with
-their Fluxer account. Its starboard page lists the starboard's entries,
+The bot can serve a web interface, where people sign in with their Fluxer
+account and pick one of the guilds they share with the bot. Its starboard page lists the starboard's entries,
 latest or top posts first, with their images and files, to members who can
 see the starboard channel. Members with `starboard.config` change the
 starboard's settings on that page too.
 
-The header shows the server the bot serves next to its name. A deployment
-serves the one server its `guildId` names, so there's nothing to switch to.
-Each member has a profile page, under their name in the top corner, for
+The header shows the guild being looked at next to the bot's name, and
+switches to another guild the member shares with the bot. Each member has a profile page, under their name in the top corner, for
 their own settings, like opting out from the starboard. The commands page
 lists the commands each member may run, like `!help`, with their options and
 a search.
@@ -83,15 +82,16 @@ To turn it on:
 | `port` | `8080` | The port the bot listens on |
 
 Signing in asks Fluxer for the `identify` scope only, and the bot keeps just
-the member's ID. Only members of the guild get in. A member stays signed in
-for 30 days, and the guild owner and members with Administrator see the
-server's settings too. When `publicUrl` starts with `https://`, the session
+the member's ID. A member stays signed in for 30 days and sees the guilds
+they share with the bot; a guild's owner and members with Administrator see
+its settings too. When `publicUrl` starts with `https://`, the session
 cookie is only sent over HTTPS.
 
 ## Bot settings
 
-The bot settings are one JSON document in the database. The guild owner and
-members with Administrator edit it in chat:
+The bot settings are one JSON document per guild in the database. A guild's
+owner and members with Administrator edit its settings on the web
+interface's Admin tab, or in chat:
 
 1. `!settings export` replies with the settings as `settings.json`.
 2. Edit the file.

@@ -19,7 +19,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { Api, failureMessage, STARBOARD_KEYS } from "./api.ts";
-import { useSession } from "./App.tsx";
 
 // The starboard opt-out from shinpuru's privacy settings, like
 // `!starboard optout` and `optin`, as a row of the profile page's privacy
@@ -28,7 +27,6 @@ import { useSession } from "./App.tsx";
 const KEYS = ["starboard-opt-out"];
 
 export function StarboardOptOut() {
-  const { prefix } = useSession();
   const id = useId();
   const optedOut = useAtomValue(Api.query("starboardOptOut", undefined, { reactivityKeys: KEYS }));
   return (
@@ -45,7 +43,7 @@ export function StarboardOptOut() {
       }
       hint={
         <>
-          In chat: <code>{prefix}starboard optout</code> and <code>{prefix}starboard optin</code>.
+          In chat, in any server: <code>starboard optout</code> and <code>starboard optin</code> after its prefix.
         </>
       }
       control={AsyncResult.matchWithError(optedOut, {

@@ -9,35 +9,54 @@ import { parseEmoji } from "../emoji.ts";
 /** The browser has no session, or it ran out. */
 export class SignedOut extends Schema.TaggedError<SignedOut>()("SignedOut", {}) {}
 
-/** The member signed in, but has left the guild since. */
+/** The call is about a guild the member isn't in, or the bot isn't in anymore. */
 export class NotMember extends Schema.TaggedError<NotMember>()("NotMember", {}) {}
 
-/** The member making a call, for the handlers. */
+/** Who's making a call, for the handlers. */
 export class CurrentMember extends Context.Service<
   CurrentMember,
   {
     readonly userId: string;
-    /** The guild owner or a member with Administrator. */
-    readonly admin: boolean;
+    /** The guild a call is about, from its `guildId`; unset for calls about no guild. */
+    readonly guild:
+      | {
+          readonly id: string;
+          /** The guild owner or a member with Administrator. */
+          readonly admin: boolean;
+        }
+      | undefined;
   }
 >()("orianna/web/CurrentMember") {}
 
-/** Every call needs a member of the guild who is signed in. */
+/**
+ * Every call needs someone signed in. A call with a `guildId` in its payload
+ * is about that guild, and needs them to be a member of it.
+ */
 export class Authentication extends RpcMiddleware.Service<Authentication, { provides: CurrentMember }>()(
   "orianna/web/Authentication",
   { error: Schema.Union([SignedOut, NotMember]) },
 ) {}
 
-/** The guild the bot serves. A deployment serves one, set by `guildId` in its config file. */
+/** Which guild a call is about. */
+const GuildId = Schema.String.check(Schema.isPattern(/^[0-9]+$/));
+
+/** A guild the bot and the member are both in, and what the member may do there. */
 export const GuildInfo = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
   iconUrl: Schema.NullOr(Schema.String),
+  /** The guild owner or a member with Administrator, who may change the bot settings. */
+  admin: Schema.Boolean,
+  /** The member has `starboard.config` there, so may change the starboard. */
+  configStarboard: Schema.Boolean,
+  /** What commands start with there. */
+  prefix: Schema.String,
 });
 export type GuildInfo = typeof GuildInfo.Type;
 
 export const Session = Schema.Struct({
-  guild: GuildInfo,
+  /** The guilds the bot and the member share, by name. */
+  guilds: Schema.Array(GuildInfo),
   user: Schema.Struct({
     id: Schema.String,
     /** The display name, or the username without one. */
@@ -46,12 +65,6 @@ export const Session = Schema.Struct({
     tag: Schema.String,
     avatarUrl: Schema.String,
   }),
-  /** The guild owner or a member with Administrator, who may change the bot settings. */
-  admin: Schema.Boolean,
-  /** The member has `starboard.config`, so may change the starboard. */
-  configStarboard: Schema.Boolean,
-  /** What commands start with. */
-  prefix: Schema.String,
   /**
    * Where the instance serves its pictures of Unicode emoji, as
    * `<emojiImages>/<codepoints>.svg`, the way Fluxer's own client draws them.
@@ -187,7 +200,7 @@ export const SettingsChangeInfo = Schema.Struct({
   at: Schema.Number,
   /** Null when the bot stored the first settings itself. */
   by: Schema.NullOr(Schema.Struct({ id: Schema.String, name: Schema.NullOr(Schema.String) })),
-  source: Schema.Literals(["config-file", "defaults", "command"]),
+  source: Schema.Literals(["defaults", "command"]),
   sections: Schema.Array(Schema.String),
 });
 export type SettingsChangeInfo = typeof SettingsChangeInfo.Type;
@@ -242,12 +255,12 @@ export const WebRpcs = RpcGroup.make(
   /** Who is signed in, and what the app needs to show them. */
   Rpc.make("session", { success: Session }),
   /** The commands the member may run, like `!help` lists them, in the order the bot has them. */
-  Rpc.make("commands", { success: Schema.Array(CommandSection) }),
+  Rpc.make("commands", { payload: { guildId: GuildId }, success: Schema.Array(CommandSection) }),
   /** The starboard, null while it's off or its channel is hidden from the member. */
-  Rpc.make("starboard", { success: Schema.NullOr(StarboardInfo) }),
+  Rpc.make("starboard", { payload: { guildId: GuildId }, success: Schema.NullOr(StarboardInfo) }),
   /** A page of the starboard's entries, and how many there are. */
   Rpc.make("starboardEntries", {
-    payload: { sort: StarboardSort, offset: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)) },
+    payload: { guildId: GuildId, sort: StarboardSort, offset: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)) },
     success: Schema.Struct({ entries: Schema.Array(StarboardEntry), total: Schema.Number, names: Names }),
   }),
   /** Whether the member opted out from the starboard, like `!starboard optout`. */
@@ -258,37 +271,41 @@ export const WebRpcs = RpcGroup.make(
    */
   Rpc.make("setStarboardOptOut", { payload: { optedOut: Schema.Boolean }, success: Schema.Number }),
   /** The bot settings and what they can name, for the Admin tab. */
-  Rpc.make("adminSetup", { success: AdminSetup, error: Refused }),
+  Rpc.make("adminSetup", { payload: { guildId: GuildId }, success: AdminSetup, error: Refused }),
   /**
    * Replaces the given sections of the bot settings, and removes those given
    * as null, leaving the rest as it is. Answers the sections that changed.
    */
   Rpc.make("saveSettings", {
-    payload: { sections: Schema.Record(Schema.String, Schema.Unknown) },
+    payload: { guildId: GuildId, sections: Schema.Record(Schema.String, Schema.Unknown) },
     success: Schema.Array(Schema.String),
     error: Schema.Union([Refused, SettingsRejected]),
   }),
   /** Replaces all bot settings, like `!settings import`. Answers the sections that changed. */
   Rpc.make("importSettings", {
-    payload: { document: Schema.Unknown },
+    payload: { guildId: GuildId, document: Schema.Unknown },
     success: Schema.Array(Schema.String),
     error: Schema.Union([Refused, SettingsRejected]),
   }),
   /** The latest changes to the bot settings, newest first, like `!settings log`. */
-  Rpc.make("settingsLog", { success: Schema.Array(SettingsChangeInfo), error: Refused }),
+  Rpc.make("settingsLog", {
+    payload: { guildId: GuildId },
+    success: Schema.Array(SettingsChangeInfo),
+    error: Refused,
+  }),
   /** The Unicode emoji, in Fluxer's categories, for the emoji picker. */
   Rpc.make("unicodeEmoji", { success: Schema.Array(EmojiCategory) }),
   /** The starboard settings, for members with `starboard.config`. */
-  Rpc.make("starboardSetup", { success: StarboardSetup, error: Refused }),
+  Rpc.make("starboardSetup", { payload: { guildId: GuildId }, success: StarboardSetup, error: Refused }),
   /** Sets the starboard, like `!starboard set`. */
-  Rpc.make("setStarboard", { payload: { starboard: StarboardInput }, error: Refused }),
+  Rpc.make("setStarboard", { payload: { guildId: GuildId, starboard: StarboardInput }, error: Refused }),
   /** Disables the starboard, like `!starboard disable`. */
-  Rpc.make("disableStarboard", { error: Refused }),
+  Rpc.make("disableStarboard", { payload: { guildId: GuildId }, error: Refused }),
 ).middleware(Authentication);
 
 /**
  * Why a sign-in failed, in the `error` query parameter the callback sends the
  * browser back to the app with.
  */
-export const SignInError = Schema.Literals(["denied", "expired", "failed", "not-member"]);
+export const SignInError = Schema.Literals(["denied", "expired", "failed"]);
 export type SignInError = typeof SignInError.Type;

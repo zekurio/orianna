@@ -3,13 +3,13 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent } from "@/components/ui/card";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { useSession } from "../App.tsx";
+import { useGuild } from "../guild.tsx";
 import { differs, problemAt, problemsUnder, type SectionProps, SettingsCard, useSave } from "./shared.tsx";
 
-// The server the bot serves, and the prefix.
+// Which server these settings are for, and its prefix.
 
 export function GeneralSection({ settings }: SectionProps) {
-  const { guild } = useSession();
+  const guild = useGuild();
   const { save, busy, problems } = useSave("the prefix");
   const [prefix, setPrefix] = useState(settings.prefix);
   const id = useId();
@@ -26,7 +26,7 @@ export function GeneralSection({ settings }: SectionProps) {
           <div className="grid gap-0.5">
             <strong className="font-heading text-xl leading-tight">{guild.name}</strong>
             <span className="text-sm text-muted-foreground">
-              This bot serves this one server, set by <code>guildId</code> in its config file.
+              These settings are this server's own. Switch servers in the header.
             </span>
           </div>
         </CardContent>
