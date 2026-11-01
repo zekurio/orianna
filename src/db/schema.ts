@@ -169,6 +169,13 @@ export type StarboardMedia = {
    * starboard that isn't NSFW.
    */
   blurred?: boolean;
+  /**
+   * For a blurred copy, a hash of the image's URL, so an edit that swaps the
+   * image blurs the new one. The web interface never gets it.
+   */
+  source?: string;
+  /** A blurred copy sent with the post, for want of an image store. */
+  attached?: boolean;
   /** An image from a link in the text, not a file on the message. */
   linked?: boolean;
 };

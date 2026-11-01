@@ -32,6 +32,7 @@ export const FluxerStarboardGuild = Layer.effect(
       nsfw: (channelId) =>
         request("fetching a channel", () => client.channels.resolve(channelId)).pipe(
           Effect.map((channel) => "nsfw" in channel && channel.nsfw === true),
+          orNotFound(() => false),
         ),
 
       channel: (channelId) =>

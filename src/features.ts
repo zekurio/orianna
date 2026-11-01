@@ -97,6 +97,8 @@ const startFeatures = Effect.fnUntraced(function* (
   // votes, so a poll it ends counts them.
   yield* whenever(milestones.logins, roleMenus.sync);
   if (starboard.board) yield* whenever(milestones.logins, starboard.catchUp);
+  // Posts the opt-out missed while the starboard was starting over, or couldn't delete.
+  yield* whenever(milestones.logins, Effect.asVoid(starboard.takeDownOptedOut()));
   if (community) {
     const reconcile = community.reconcile().pipe(Effect.catchCause(logFailure("poll reconcile")));
     yield* whenever(milestones.pollCatchUps, reconcile);

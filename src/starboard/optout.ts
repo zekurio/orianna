@@ -13,14 +13,18 @@ export const optedOut = Effect.fnUntraced(function* (userId: string) {
   return db.select().from(starboardOptOuts).where(eq(starboardOptOuts.userId, userId)).get() !== undefined;
 });
 
-/** Keeps the member's messages out of every starboard and takes down their posts. Returns how many. */
+/**
+ * Keeps the member's messages out of every starboard and takes down their
+ * posts. A starboard that's starting over takes them down once it's up again.
+ * Returns how many came down now.
+ */
 export const optOut = Effect.fnUntraced(function* (userId: string) {
   const db = yield* Database;
   db.insert(starboardOptOuts).values({ userId, optedOutAt: new Date() }).onConflictDoNothing().run();
   let removed = 0;
   for (const context of (yield* (yield* Guilds).built).values()) {
     const starboard = yield* SubscriptionRef.get(Context.get(context, LiveStarboard));
-    if (starboard) removed += yield* starboard.takeDownAuthor(userId);
+    if (starboard) removed += yield* starboard.takeDownOptedOut(userId);
   }
   return removed;
 });

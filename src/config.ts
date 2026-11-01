@@ -90,7 +90,11 @@ const RoleMenusSchema = Schema.Struct({
 });
 
 const StarboardSchema = Schema.Struct({
-  /** Where the bot posts the messages that make it. The starboard is off without one. */
+  /**
+   * Where the bot posts the messages that make it. The starboard is off
+   * without one. Moving it leaves the posts so far where they are, and the
+   * web interface shows only the ones in the new channel.
+   */
   channelId: Schema.optionalKey(Snowflake),
   /** The minimum number of votes, the author's own included, until a message gets into the starboard. */
   threshold: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(orDefault(5)),
@@ -101,7 +105,8 @@ const StarboardSchema = Schema.Struct({
 /**
  * Bot settings: what the bot does in the guild. They live in the database,
  * where `!settings` edits them while the bot runs; src/settings/settings.ts
- * keeps them. Nothing here is a secret or needs a restart.
+ * keeps them. Nothing here is a secret or needs a restart. The channels they
+ * name have to be the guild's own, and take messages.
  */
 export const BotSettingsSchema = Schema.Struct({
   /** What commands start with, e.g. `!` for `!help`. */
@@ -376,6 +381,26 @@ function checkStarboard(settings: BotSettings): string[] {
   const emoji = settings.starboard?.emoji;
   if (emoji === undefined || parseEmoji(emoji)) return [];
   return [`/starboard/emoji: ${emoji} is not an emoji; use a Unicode emoji, name:id or <:name:id>`];
+}
+
+/** The channels the settings have the bot post in, with where in the document each is. */
+export function settingsChannels(settings: BotSettings): { path: string; channelId: string }[] {
+  const channels: { path: string; channelId: string }[] = [];
+  if (settings.pollsChannelId !== undefined) {
+    channels.push({ path: "/pollsChannelId", channelId: settings.pollsChannelId });
+  }
+  if (settings.roleMenus) {
+    channels.push({ path: "/roleMenus/channelId", channelId: settings.roleMenus.channelId });
+    settings.roleMenus.menus.forEach((menu, i) => {
+      if (menu.channelId !== undefined) {
+        channels.push({ path: `/roleMenus/menus/${i}/channelId`, channelId: menu.channelId });
+      }
+    });
+  }
+  if (settings.starboard?.channelId !== undefined) {
+    channels.push({ path: "/starboard/channelId", channelId: settings.starboard.channelId });
+  }
+  return channels;
 }
 
 export const loadConfig = Effect.fn("loadConfig")(function* (path: string) {

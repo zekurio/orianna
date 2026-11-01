@@ -61,6 +61,7 @@ export const settingsCommands = Effect.fnUntraced(function* () {
         const settings = yield* Settings;
         const result = yield* Effect.result(settings.replace(raw, ctx.userId));
         if (Result.isFailure(result)) {
+          if (result.failure._tag === "FluxerError") return yield* result.failure;
           return yield* ctx.error(`The settings weren't changed:\n${problemBlock(result.failure.problems)}`);
         }
         const changed = result.success;

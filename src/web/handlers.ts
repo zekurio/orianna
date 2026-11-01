@@ -314,7 +314,7 @@ export const HandlersLive = WebRpcs.toLayer(
                 }
                 return Effect.succeed(next);
               }, userId)
-              .pipe(Effect.mapError(rejected));
+              .pipe(Effect.catchTag("InvalidSettings", (err) => Effect.fail(rejected(err))));
           }),
         ).pipe(answer("saving the bot settings")),
 
@@ -322,7 +322,7 @@ export const HandlersLive = WebRpcs.toLayer(
         inGuild(
           Effect.gen(function* () {
             const userId = yield* mayAdmin;
-            return yield* (yield* Settings).replace(document, userId).pipe(Effect.mapError(rejected));
+            return yield* (yield* Settings).replace(document, userId).pipe(Effect.catchTag("InvalidSettings", (err) => Effect.fail(rejected(err))));
           }),
         ).pipe(answer("importing the bot settings")),
 

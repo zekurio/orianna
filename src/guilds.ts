@@ -14,7 +14,8 @@ import { FluxerCommunityPollChat } from "./polls/fluxer.ts";
 import { PollTransport } from "./polls/transport.ts";
 import { FluxerRoleGuild } from "./roles/fluxer.ts";
 import type { RoleGuild } from "./roles/menus.ts";
-import { Settings, SettingsStore } from "./settings/settings.ts";
+import { FluxerSettingsGuild } from "./settings/fluxer.ts";
+import { Settings, type SettingsGuild, SettingsStore } from "./settings/settings.ts";
 import { FluxerStarboardGuild } from "./starboard/fluxer.ts";
 import { LiveStarboard, type StarboardGuild } from "./starboard/starboard.ts";
 
@@ -26,6 +27,7 @@ import { LiveStarboard, type StarboardGuild } from "./starboard/starboard.ts";
 export type GuildServices =
   | CurrentGuild
   | Settings
+  | SettingsGuild
   | GuildAccess
   | RoleGuild
   | ExpressionGuild
@@ -44,7 +46,11 @@ const guildLayer = (guildId: string) =>
     FluxerStarboardGuild,
     FluxerCommunityPollChat,
     LiveStarboard.layer,
-  ).pipe(Layer.provideMerge(Settings.layer), Layer.provideMerge(Layer.succeed(CurrentGuild, { id: guildId })));
+  ).pipe(
+    Layer.provideMerge(Settings.layer),
+    Layer.provideMerge(FluxerSettingsGuild),
+    Layer.provideMerge(Layer.succeed(CurrentGuild, { id: guildId })),
+  );
 
 export class Guilds extends Context.Service<
   Guilds,

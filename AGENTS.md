@@ -25,11 +25,12 @@ points at its docs and examples.
   the router replies with it. Other failures are logged.
 - The bot serves every guild it's in. What belongs to a guild runs with
   that guild's services: `CurrentGuild` names it, and `src/guilds.ts` builds
-  its `Settings` and its platform-facing pieces (`GuildAccess`, `RoleGuild`,
-  `ExpressionGuild`, `StarboardGuild`), which are `Context.Service`s with a
-  Fluxer layer next to them. `src/features.ts` starts each guild's features;
-  `src/main.ts` wires the shared layers together. Rows that belong to a
-  guild carry its `guildId`, and queries filter by it.
+  its `Settings` and its platform-facing pieces (`SettingsGuild`,
+  `GuildAccess`, `RoleGuild`, `ExpressionGuild`, `StarboardGuild`), which are
+  `Context.Service`s with a Fluxer layer next to them. `src/features.ts`
+  starts each guild's features; `src/main.ts` wires the shared layers
+  together. Rows that belong to a guild carry its `guildId`, and queries
+  filter by it.
 - Use `listen` from `src/fluxer.ts` for gateway events, so handlers run in
   fibers that stop on shutdown. Every guild's listeners see every guild's
   events, so a guild's listener ignores the ones from other guilds.

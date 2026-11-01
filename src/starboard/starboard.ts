@@ -1,4 +1,4 @@
-import { and, count, desc, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { Context, Duration, Effect, Layer, Option, Result, Semaphore, Stream, SubscriptionRef } from "effect";
 import type { UserError } from "../commands/command.ts";
 import type { StarboardConfig } from "../config.ts";
@@ -59,6 +59,7 @@ export class StarboardGuild extends Context.Service<
   {
     /** Null when the message is gone. */
     readonly message: (channelId: string, messageId: string) => Effect.Effect<StarboardMessage | null, FluxerError>;
+    /** False when the channel is gone, which leaves nothing to show there. */
     readonly nsfw: (channelId: string) => Effect.Effect<boolean, FluxerError>;
     /** Null when the guild has no such channel. */
     readonly channel: (channelId: string) => Effect.Effect<StarboardChannel | null, FluxerError>;
@@ -159,63 +160,92 @@ export const makeStarboard = Effect.fnUntraced(function* (config: StarboardConfi
       if (row) yield* takeDown(row);
       return;
     }
-    if (message.guildId !== guildId || optedOut(message.authorId)) return;
+    if (message.guildId !== guildId) return;
     const votes = message.reactionCounts.get(board.emoji.key) ?? 0;
-    if (votes < board.threshold) {
+    // The opt-out also takes down a post it couldn't when the member opted out.
+    if (votes < board.threshold || optedOut(message.authorId)) {
       if (row) yield* takeDown(row);
       return;
     }
 
+    // A post stays in the channel it went up in when the starboard moves,
+    // so it hides what that channel calls for.
+    const postChannelId = row?.postChannelId ?? board.channelId;
     const link = guild.messageLink(channelId, messageId);
-    const { text, media } = contentsOf(message, yield* censorFor(board, channelId));
+    const { text, media } = contentsOf(message, yield* censorFor(postChannelId, channelId));
+    const shown = media.filter((m) => !m.hidden).map(entryMedia);
     const image = media.find((m) => m.kind === "image");
-    if (row?.postChannelId && row.postId) {
-      // The blurred copy went with the post, and edits keep it.
-      const blurred = image?.hidden ? row.media?.find((m) => m.blurred) : undefined;
-      const shown = image?.hidden ? blurred?.url : image?.url;
-      const kept = [...media.filter((m) => !m.hidden).map(entryMedia), ...(blurred ? [blurred] : [])];
-      if (yield* guild.edit(row.postChannelId, row.postId, renderPost(message, votes, link, text, shown))) {
-        db.update(starboardEntries)
-          .set({ count: votes, ...snapshot(message, text, kept) })
-          .where(eq(starboardEntries.messageId, messageId))
-          .run();
-      } else {
+    const hidden = image?.hidden ? image.url : undefined;
+    // Like shinpuru, an image the starboard hides goes up blurred instead.
+    // Edits keep the post's blurred copy while it's of the same image.
+    const old = row?.media?.find((m) => m.blurred);
+    const kept = hidden !== undefined && old?.source === sourceOf(hidden) ? old : undefined;
+    const fresh = hidden !== undefined && !kept ? yield* blurredCopy(hidden) : undefined;
+    const attach = fresh !== undefined && fresh.stored === null;
+    // An edit can't change a post's files.
+    const reattach = attach || (old?.attached === true && !kept);
+
+    if (row?.postChannelId && row.postId && !reattach) {
+      const copy = kept ?? (fresh?.stored ? blurredMedia(fresh.stored, fresh.source) : undefined);
+      const body = renderPost(message, votes, link, text, hidden === undefined ? image?.url : copy?.url);
+      // A change to the settings interrupts updates; one that came between
+      // editing and recording would lose track of the blurred copies.
+      const edited = yield* Effect.uninterruptible(
+        guild.edit(row.postChannelId, row.postId, body).pipe(
+          Effect.tapError(() => discard(fresh)),
+          Effect.map((edited) => {
+            if (edited) {
+              db.update(starboardEntries)
+                .set({ count: votes, ...snapshot(message, text, [...shown, ...(copy ? [copy] : [])]) })
+                .where(eq(starboardEntries.messageId, messageId))
+                .run();
+            }
+            return edited;
+          }),
+        ),
+      );
+      if (!edited) {
         // Someone deleted the post while the bot was offline.
-        yield* markRemoved(row);
+        yield* discard(fresh);
+        return yield* markRemoved(row);
       }
+      if (old && old !== copy) yield* store.remove(old.url);
       return;
     }
 
-    // Like shinpuru, an image the starboard hides goes up blurred instead,
-    // from the image store. Without a web interface to serve it, the blurred
-    // copy is sent with the post.
-    const blurred = image?.hidden ? yield* blur(image.url) : undefined;
-    const stored = blurred ? yield* store.put(blurred.image, blurred.type) : null;
-    const attached = blurred && !stored;
-    const shown = image?.hidden ? (stored ?? (attached ? `attachment://${BLURRED}` : undefined)) : image?.url;
+    // Without a web interface to serve it from the image store, the blurred
+    // copy is sent with the post. A post that has to swap the copy it was
+    // sent with goes up again, where the old one was.
+    if (row) yield* takeDown(row);
     const body = {
-      ...renderPost(message, votes, link, text, shown),
-      files: attached ? [{ name: BLURRED, data: blurred.image }] : [],
+      ...renderPost(
+        message,
+        votes,
+        link,
+        text,
+        hidden === undefined ? image?.url : fresh && (fresh.stored ?? `attachment://${BLURRED}`),
+      ),
+      files: attach ? [{ name: BLURRED, data: fresh.image }] : [],
     };
     // A change to the settings interrupts updates; one that came between
     // posting and recording would leave the post behind, and post it again.
     yield* Effect.uninterruptible(
-      guild.post(board.channelId, body).pipe(
-        Effect.tapError(() => (stored ? store.remove(stored) : Effect.void)),
+      guild.post(postChannelId, body).pipe(
+        Effect.tapError(() => discard(fresh)),
         Effect.map((post) => {
-          const url = stored ?? (attached ? post.image : null);
-          const copy: StarboardMedia[] = url ? [{ url, name: fileName(url), kind: "image", blurred: true }] : [];
+          const url = fresh?.stored ?? (attach ? post.image : null);
+          const copy = fresh && url ? [blurredMedia(url, fresh.source, attach)] : [];
           db.insert(starboardEntries)
             .values({
               messageId,
               guildId,
               channelId,
               authorId: message.authorId,
-              postChannelId: board.channelId,
+              postChannelId,
               postId: post.id,
               count: votes,
-              postedAt: new Date(),
-              ...snapshot(message, text, [...media.filter((m) => !m.hidden).map(entryMedia), ...copy]),
+              postedAt: row?.postedAt ?? new Date(),
+              ...snapshot(message, text, [...shown, ...copy]),
             })
             .run();
         }),
@@ -223,18 +253,29 @@ export const makeStarboard = Effect.fnUntraced(function* (config: StarboardConfi
     );
   });
 
-  const censorFor = Effect.fnUntraced(function* (board: Board, channelId: string) {
-    if (yield* guild.nsfw(board.channelId)) return { channel: false, marked: false } satisfies Censor;
+  /** What a post in `postChannelId` hides of a message from `channelId`. */
+  const censorFor = Effect.fnUntraced(function* (postChannelId: string, channelId: string) {
+    if (yield* guild.nsfw(postChannelId)) return { channel: false, marked: false } satisfies Censor;
     return { channel: yield* guild.nsfw(channelId), marked: true } satisfies Censor;
   });
 
-  /** A blurred copy of an image, or nothing when it can't be blurred. */
-  const blur = Effect.fnUntraced(function* (url: string) {
+  /**
+   * A blurred copy of an image, stored in the image store, or with `stored`
+   * null to send with the post. Nothing when it can't be blurred.
+   */
+  const blurredCopy = Effect.fnUntraced(function* (url: string) {
     const result = yield* Effect.result(guild.downloadImage(url).pipe(Effect.flatMap(magick.blur)));
-    if (Result.isSuccess(result)) return result.success;
-    yield* Effect.logWarning(`starboard: couldn't blur ${url}: ${result.failure.message}`);
-    return undefined;
+    if (Result.isFailure(result)) {
+      yield* Effect.logWarning(`starboard: couldn't blur ${url}: ${result.failure.message}`);
+      return undefined;
+    }
+    const { image, type } = result.success;
+    return { image, source: sourceOf(url), stored: yield* store.put(image, type) };
   });
+
+  /** Deletes a blurred copy no post ended up showing. */
+  const discard = (copy: { stored: string | null } | undefined) =>
+    copy?.stored ? store.remove(copy.stored) : Effect.void;
 
   /** Deletes the post and forgets the entry, so the message can go up again. */
   const takeDown = Effect.fnUntraced(function* (row: Entry) {
@@ -278,10 +319,10 @@ export const makeStarboard = Effect.fnUntraced(function* (config: StarboardConfi
         "catching up",
         Effect.gen(function* () {
           const row = entry(messageId);
-          if (!row?.postId || row.content !== null) return;
+          if (!row?.postChannelId || !row.postId || row.content !== null) return;
           const message = yield* guild.message(row.channelId, messageId);
           if (!message) return yield* takeDown(row);
-          const { text, media } = contentsOf(message, yield* censorFor(board, row.channelId));
+          const { text, media } = contentsOf(message, yield* censorFor(row.postChannelId, row.channelId));
           const shown = media.filter((m) => !m.hidden).map(entryMedia);
           db.update(starboardEntries)
             .set(snapshot(message, text, shown))
@@ -334,8 +375,12 @@ export const makeStarboard = Effect.fnUntraced(function* (config: StarboardConfi
         }),
       ),
 
-    /** Takes down the member's posts, once they opted out. Returns how many. */
-    takeDownAuthor: (userId: string) =>
+    /**
+     * Takes down the posts of members who opted out, only `userId`'s when
+     * given. A post that doesn't come down stays for the next time. Returns
+     * how many did.
+     */
+    takeDownOptedOut: (userId?: string) =>
       lock.withPermits(1)(
         Effect.gen(function* () {
           const rows = db
@@ -344,20 +389,38 @@ export const makeStarboard = Effect.fnUntraced(function* (config: StarboardConfi
             .where(
               and(
                 eq(starboardEntries.guildId, guildId),
-                eq(starboardEntries.authorId, userId),
                 isNotNull(starboardEntries.postId),
+                inArray(
+                  starboardEntries.authorId,
+                  db.select({ userId: starboardOptOuts.userId }).from(starboardOptOuts),
+                ),
+                userId === undefined ? undefined : eq(starboardEntries.authorId, userId),
               ),
             )
             .all();
-          for (const row of rows) yield* takeDown(row);
-          return rows.length;
+          let removed = 0;
+          for (const row of rows) {
+            yield* takeDown(row).pipe(
+              Effect.map(() => removed++),
+              Effect.catch((err) =>
+                Effect.logWarning(`starboard: couldn't take down the post of ${row.messageId}: ${err.message}`),
+              ),
+            );
+          }
+          return removed;
         }),
       ),
 
-    /** A page of the posts, newest or most voted first, and how many there are. */
+    /**
+     * A page of the posts in the starboard channel, newest or most voted
+     * first, and how many there are. Posts that stayed behind when the
+     * starboard moved are left out: what they show was fit for their channel,
+     * and who can see it.
+     */
     posts: (sort: "latest" | "top", offset: number, limit: number) =>
       Effect.sync(() => {
-        const where = and(eq(starboardEntries.guildId, guildId), isNotNull(starboardEntries.postId));
+        if (!board) return { rows: [], total: 0 };
+        const where = and(eq(starboardEntries.guildId, guildId), eq(starboardEntries.postChannelId, board.channelId));
         const order =
           sort === "top"
             ? [desc(starboardEntries.count), desc(starboardEntries.postedAt)]
@@ -442,6 +505,15 @@ function entryMedia({ hidden: _hidden, ...media }: Media): StarboardMedia {
 
 function fileName(url: string): string {
   return URL.parse(url)?.pathname.split("/").at(-1) || url;
+}
+
+/** What a blurred copy records of its image: a hash, so the web interface can't link to the image. */
+function sourceOf(url: string): string {
+  return Bun.SHA256.hash(url, "hex");
+}
+
+function blurredMedia(url: string, source: string, attached = false): StarboardMedia {
+  return { url, name: fileName(url), kind: "image", blurred: true, source, ...(attached && { attached }) };
 }
 
 /** What the entry keeps of the message. */
