@@ -1,9 +1,10 @@
 import type { Message } from "@fluxerjs/core";
-import { Cause, Context, Duration, Effect, Queue, Result, type Scope, Stream } from "effect";
-import { AppConfig } from "../config.ts";
+import { Cause, Context, Duration, Effect, Layer, Queue, Ref, Result, type Scope, Stream } from "effect";
+import type { AppConfig } from "../config.ts";
 import { type Fluxer, type FluxerError, logFailure, request } from "../fluxer.ts";
 import { appendFooter, type MessageBody } from "../messages/body.ts";
 import { editOptions, REPLY_MENTION, sendOptions } from "../messages/fluxer.ts";
+import { Guilds } from "../guilds.ts";
 import { GuildAccess } from "../permissions/rules.ts";
 import { Settings } from "../settings/settings.ts";
 import {
@@ -29,47 +30,72 @@ const PAGE_IDLE = Duration.minutes(2);
 export class CommandRouter extends Context.Service<
   CommandRouter,
   {
-    /** The commands as they are now; they change with the settings. */
-    readonly entries: Effect.Effect<ReadonlyMap<string, CommandEntry>>;
-    /** Replaces the commands. Commands already running carry on. */
-    readonly setCommands: (list: readonly CommandEntry[]) => Effect.Effect<void>;
+    /** The guild's commands as they are now; they change with its settings. */
+    readonly entries: (guildId: string) => Effect.Effect<ReadonlyMap<string, CommandEntry>>;
+    /** Replaces the guild's commands. Commands already running carry on. */
+    readonly setCommands: (guildId: string, list: readonly CommandEntry[]) => Effect.Effect<void>;
+    /** Drops the guild's commands, once the bot left it. */
+    readonly removeGuild: (guildId: string) => Effect.Effect<void>;
     /** Prefix adapter: `!name [subcommand] args...` from a chat message. */
     readonly handleMessage: (message: Message) => Effect.Effect<void, FluxerError>;
   }
 >()("orianna/CommandRouter") {}
 
+/** Each guild's commands by name, keyed by guild ID. */
+type Commands = ReadonlyMap<string, ReadonlyMap<string, CommandEntry>>;
+
 /**
- * Builds the router for `list`, until {@link CommandRouter.setCommands}
- * replaces it. Paginated replies keep listening for page turns until they go
- * idle or the scope closes.
+ * Every guild's commands as they are now, for what starts before the router
+ * does, like the web interface. The router keeps it up to date.
  */
-export const makeCommandRouter = Effect.fnUntraced(function* (list: readonly CommandEntry[]) {
-  let entries: ReadonlyMap<string, CommandEntry> = new Map();
-  const setCommands = (list: readonly CommandEntry[]) =>
+export class CommandList extends Context.Service<CommandList, Ref.Ref<Commands>>()("orianna/CommandList") {
+  static readonly layer = Layer.effect(CommandList, Ref.make<Commands>(new Map()));
+}
+
+/**
+ * Builds the router. A guild has no commands until its features set them.
+ * Commands run with their guild's services. Paginated replies keep listening
+ * for page turns until they go idle or the scope closes.
+ */
+export const makeCommandRouter = Effect.fnUntraced(function* () {
+  const current = yield* CommandList;
+  const setCommands = (guildId: string, list: readonly CommandEntry[]) =>
     Effect.suspend(() => {
       const next = new Map<string, CommandEntry>();
       for (const entry of list) {
         if (next.has(entry.name)) return Effect.die(new Error(`duplicate command: ${entry.name}`));
         next.set(entry.name, entry);
       }
-      entries = next;
-      return Effect.void;
+      return Ref.update(current, (all) => new Map(all).set(guildId, next));
     });
-  yield* setCommands(list);
-  const context = yield* Effect.context<AppConfig | Settings | GuildAccess | Fluxer>();
+  const removeGuild = (guildId: string) =>
+    Ref.update(current, (all) => {
+      const next = new Map(all);
+      next.delete(guildId);
+      return next;
+    });
+  const context = yield* Effect.context<AppConfig | Fluxer | Guilds>();
   const scope = yield* Effect.scope;
 
+  /** Runs the message's command in its guild, if it is one. */
   const handleMessage = Effect.fnUntraced(function* (message: Message) {
-    const { guildId } = yield* AppConfig.current;
-    if (message.author.bot) return;
-    if (message.guildId !== guildId) return;
+    if (message.author.bot || !message.guildId) return;
+    const commands = (yield* Ref.get(current)).get(message.guildId);
+    if (!commands) return;
+    const guild = yield* (yield* Guilds).context(message.guildId).pipe(
+      // The guild's commands are only set once its services are built.
+      Effect.orDie,
+    );
+    yield* handleIn(message, commands).pipe(Effect.provideContext(guild));
+  });
 
+  const handleIn = Effect.fnUntraced(function* (message: Message, commands: ReadonlyMap<string, CommandEntry>) {
     const { prefix } = yield* Settings.current;
     if (!message.content.startsWith(prefix)) return;
 
     const first = nextWord(message.content.slice(prefix.length));
     if (!first) return;
-    const entry = entries.get(first.word.toLowerCase());
+    const entry = commands.get(first.word.toLowerCase());
     if (!entry) return;
 
     const base = messageContext(message, scope);
@@ -136,8 +162,9 @@ export const makeCommandRouter = Effect.fnUntraced(function* (list: readonly Com
     );
 
   const router: CommandRouter["Service"] = {
-    entries: Effect.sync(() => entries),
+    entries: (guildId) => Ref.get(current).pipe(Effect.map((all) => all.get(guildId) ?? new Map())),
     setCommands,
+    removeGuild,
     handleMessage: (message) => handleMessage(message).pipe(Effect.provideContext(context)),
   };
   return router;

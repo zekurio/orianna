@@ -1,44 +1,42 @@
 # Orianna
 
-Orianna is a bot for one guild on a self-hosted [Fluxer](https://fluxer.app)
-instance.
+Orianna is a bot for servers on a self-hosted [Fluxer](https://fluxer.app)
+instance. Invite it to as many servers as you like. Each one gets its own
+settings, which start at the defaults.
 
-- Members propose emojis and stickers, the server votes on them with
-  reactions, and the bot adds the ones that pass. An image can be attached,
-  linked, or taken from a 7TV emote. Wide images are cut into a row of emojis.
-- Members start their own polls with `!poll` and watch the results come in.
-- Role menus let members give themselves roles by reacting to a message.
-- Boards repost messages that got enough reactions, like a starboard, or a
-  hall of shame.
-- Permission rules decide who may do what.
-- Settings live in the bot's database. The server's admins change them in chat
-  while the bot runs, and every change is recorded.
-- Members sign in to a web interface with their Fluxer account. Its pages are
-  still empty.
+- Members propose emojis and stickers, the server votes with reactions, and
+  the bot adds what passes. The image can be an attachment, a link or a 7TV
+  emote, and a wide image turns into a row of emojis.
+- `!poll` starts a poll that shows its results while people vote.
+- Role menus give a role to whoever reacts to a message.
+- The starboard, copied from shinpuru, reposts messages once they get enough
+  ⭐ reactions.
+- Permission rules decide who may run which command.
+- Members sign in to a web interface with their Fluxer account. They can browse
+  the starboard and see the commands they're allowed to run, and admins
+  change the settings there.
 
 Fluxer has no slash commands or buttons yet, so commands start with a prefix,
 `!` by default, and every vote is a reaction.
 
-## Docs
-
-- [Commands](docs/commands.md) covers every command and how votes work.
-- [Permissions](docs/permissions.md) explains the rules that decide who may
-  do what.
-- [Configuration](docs/configuration.md) covers the config file and every bot
-  setting.
+The code is the documentation. [`src/config.ts`](src/config.ts) describes
+every key of the config file and every bot setting, the permission rules
+included. `!help` and the web interface's commands page list the commands a
+member may run, with their options.
 
 ## Running it
 
-You need a bot token from your Fluxer instance and the ID of your guild. The
-config file only says how to reach Fluxer and where to keep the database.
-Everything else is a bot setting, which starts at the defaults. Once the bot
-is running, the guild owner or a member with Administrator turns features on
-with `!settings export` and `!settings import`, as
-[Configuration](docs/configuration.md#bot-settings) describes.
+The config file says how to reach Fluxer, where the database goes, and where
+to serve the web interface. Everything else is a per-server setting. A
+server's owner and members with Administrator change those on the web
+interface's Admin tab, or with `!settings export` and `!settings import` in
+chat.
+
+The web interface signs people in through the bot's application. Add
+`<publicUrl>/auth/callback` to the application's redirect URIs and give the
+bot its client secret.
 
 ### On NixOS
-
-The flake exports a NixOS module:
 
 ```nix
 {
@@ -52,10 +50,7 @@ The flake exports a NixOS module:
           services.orianna = {
             enable = true;
             tokenFile = "/run/secrets/orianna-token";
-            settings = {
-              instance = "https://chat.example.org";
-              guildId = "1234567890";
-            };
+            settings.instance = "https://chat.example.org";
           };
         }
       ];
@@ -64,69 +59,57 @@ The flake exports a NixOS module:
 }
 ```
 
-The module writes `settings` to `/etc/orianna/config.json`, keeps the database
-in `/var/lib/orianna`, and hands the token to the service as a systemd
+The module writes `settings` to `/etc/orianna/config.json` and keeps the
+database in `/var/lib/orianna`. It hands the token to the service as a systemd
 credential, so the file can stay readable by root only. For the web
-interface, add `web` to `settings` and point `clientSecretFile` at the
-application's client secret, which the service gets the same way.
-[Configuration](docs/configuration.md#the-web-interface) has the steps. After a
-`nixos-rebuild switch`, the bot restarts when the config file changed.
+interface, add `web` to `settings` and set `clientSecretFile`.
 
 ### Anywhere else
-
-Build the bot with [Bun](https://bun.sh):
 
 ```sh
 bun install --production
 bun run build
 ```
 
-That writes `dist/orianna`, one executable with the bot, the web interface
-and the Bun runtime inside. It runs on the kind of machine that built it,
-which needs nothing else but ImageMagick 7. Then, where it runs:
+That gives you `dist/orianna`, one executable with the web interface and the
+Bun runtime inside. It runs on the same kind of machine that built it and
+needs ImageMagick 7 next to it. To start it:
 
 ```sh
-cp config.example.json config.json
-echo 'FLUXER_BOT_TOKEN=...' > .env
+cp config.example.json config.json   # fill in the instance, and `web` or remove it
+echo 'FLUXER_BOT_TOKEN=...' > .env    # and FLUXER_CLIENT_SECRET for the web interface
 ./dist/orianna
 ```
 
-Fill in the instance and guild ID in `config.json` first. Fill in `web` and
-add `FLUXER_CLIENT_SECRET` to `.env` for the web interface, or remove `web`
-to run without it. The bot reads the config from `ORIANNA_CONFIG`, or from
-`./config.json` when that's unset, and loads `.env` from the working
-directory. It creates the database and applies migrations when it starts.
-[`settings.example.json`](settings.example.json) shows every bot setting,
-ready to edit and send to `!settings import`.
+The bot reads the config from `ORIANNA_CONFIG`, or `./config.json`, and
+creates its database on the first start.
 
 ### What the bot needs in Fluxer
 
-Give the bot's role these permissions. Skip the rows for features you leave
-off.
+Give the bot's role these permissions. Skip the rows for features a server
+leaves off.
 
 | Feature | Where | Permissions |
 |---|---|---|
 | Commands | Where members run them | View Channel, Send Messages, Embed Links, Add Reactions, Manage Messages |
-| `!settings` | Where admins run it | Attach Files, for `!settings export` |
-| Proposals | The guild | Manage Expressions |
-| Proposals | The `pollsChannelId` channel | Send Messages, Attach Files, Add Reactions, Manage Messages, Read Message History, Mention Everyone |
+| `!settings export` | Where admins run it | Attach Files |
+| Proposals | The server | Manage Expressions |
+| Proposals | The polls channel | Send Messages, Attach Files, Add Reactions, Manage Messages, Read Message History, Mention Everyone |
 | `!poll` | Where members run it | Send Messages, Embed Links, Add Reactions, Manage Messages, Read Message History |
-| Role menus | The guild | Manage Roles, with the bot's highest role above every menu role |
+| Role menus | The server | Manage Roles, with the bot's highest role above every menu role |
 | Role menus | The menu channels | Send Messages, Embed Links, Add Reactions, Manage Messages, Read Message History |
+| Starboard | Where members react | View Channel, Read Message History |
+| Starboard | The starboard channel | Send Messages, Embed Links, Attach Files |
 
-The bot uses Manage Messages to move a member's vote when they react with a
-different answer, to remove reactions that don't belong, and to delete the
-`!poll` message once the poll is up. In command channels, Add Reactions and
-Manage Messages are only for the ⬅️ and ➡️ arrows that page through long
-lists. Mention Everyone is for the `@here` on each proposal. Manage
-Expressions lets the bot add emojis and stickers, and delete the pieces of a
-cut image again if only some of them went in.
+Manage Messages lets the bot move a vote when someone picks another answer,
+clear reactions that don't belong, and delete the `!poll` message once the
+poll is up. In command channels it's only for the ⬅️ and ➡️ arrows on long
+lists. Mention Everyone is for the `@here` on each proposal.
 
 ## Development
 
-The dev shell comes from [devenv](https://devenv.sh) and loads through direnv.
-It provides Bun, SQLite and ImageMagick, and points `ORIANNA_CONFIG` at
-`./config.json`.
+The dev shell comes from [devenv](https://devenv.sh) through direnv, with Bun,
+SQLite and ImageMagick.
 
 ```sh
 cp config.example.json config.json
@@ -134,17 +117,8 @@ echo 'FLUXER_BOT_TOKEN=...' > .env
 bun run dev
 ```
 
-For the web interface on your machine, set `web.publicUrl` to
-`http://localhost:8080`, add `http://localhost:8080/auth/callback` as a
-redirect URI of the application, and put `FLUXER_CLIENT_SECRET` in `.env`.
-
-| Command | What it does |
-|---|---|
-| `bun run dev` | Runs the bot and restarts it when a file changes. Changes to the web interface's app in `src/web/app` reload open pages instead. |
-| `bun run build` | Compiles the bot into `dist/orianna`, the executable the Nix package ships |
-| `bun run typecheck` | Runs `tsc --noEmit` |
-| `bun run db:generate` | Writes a migration for changes to `src/db/schema.ts` |
-
-After changing `src/db/schema.ts`, run `bun run db:generate` and commit what
-it writes to `drizzle/`. [AGENTS.md](AGENTS.md) has the rest: commit style,
-branch names, and what to run before a pull request.
+`bun run dev` restarts the bot when a file changes and reloads open pages of
+the web interface. `bun run typecheck` is the only check there is, so run it
+before every commit. After changing `src/db/schema.ts`, run
+`bun run db:generate` and commit what it writes to `drizzle/`.
+[AGENTS.md](AGENTS.md) covers commit style, branch names and pull requests.

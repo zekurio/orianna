@@ -4,7 +4,7 @@ import { HttpEffect } from "effect/http";
 import { RpcSerialization, RpcServer } from "effect/rpc";
 import { AppConfig, ConfigError, type WebConfig } from "../config.ts";
 import { type FluxerError, logFailure } from "../fluxer.ts";
-import { GuildAccess } from "../permissions/rules.ts";
+import { IMAGE_STORE_PATH, ImageStore } from "../imagestore.ts";
 import app from "./app/index.html";
 import { FluxerOAuth } from "./fluxer.ts";
 import { AuthenticationLive, HandlersLive } from "./handlers.ts";
@@ -14,7 +14,8 @@ import { randomToken, SESSION_COOKIE, SESSION_TTL, Sessions } from "./sessions.t
 
 // The web interface: a React app that Bun bundles from app/index.html, the
 // calls it makes at /rpc, and signing in and out. Members sign in with their
-// Fluxer account; the session cookie names a row in web_sessions.
+// Fluxer account; the session cookie names a row in web_sessions. It also
+// serves the image store, for anyone with a link, Fluxer's media proxy included.
 
 /** Holds the state and PKCE verifier while the browser is away signing in. */
 const LOGIN_COOKIE = "orianna_login";
@@ -23,7 +24,7 @@ const CALLBACK_PATH = "/auth/callback";
 const LOGIN_TTL = Duration.minutes(10);
 const PROBLEM = "The bot ran into a problem. Its log says what happened.";
 
-type Services = OAuth | Sessions | GuildAccess;
+type Services = OAuth | Sessions | ImageStore;
 type Handler = (req: BunRequest) => Effect.Effect<Response, FluxerError, Services>;
 
 /** Serves the web interface when the config file has a `web` section. */
@@ -104,12 +105,8 @@ const serve = (web: WebConfig) =>
             yield* Effect.logWarning(`signing in to the web interface failed: ${identified.failure.message}`);
             return backToApp("failed");
           }
+          // Anyone may sign in; the app shows the guilds they share with the bot.
           const userId = identified.success;
-          const joined = yield* Effect.result((yield* GuildAccess).permissionsOf(userId));
-          if (Result.isFailure(joined)) {
-            if (joined.failure._tag === "UserError") return backToApp("not-member");
-            return yield* joined.failure;
-          }
 
           const token = yield* (yield* Sessions).create(userId);
           req.cookies.set(SESSION_COOKIE, token, {
@@ -130,6 +127,20 @@ const serve = (web: WebConfig) =>
           return new Response(null, { status: 204 });
         });
 
+      const storedImage: Handler = (req) =>
+        Effect.gen(function* () {
+          const found = yield* (yield* ImageStore).get(req.params.file ?? "");
+          if (!found) return new Response("There's no such image.", { status: 404 });
+          return new Response(new Uint8Array(found.image), {
+            headers: {
+              "Content-Type": found.contentType,
+              // A stored image never changes.
+              "Cache-Control": "public, max-age=31536000, immutable",
+              "X-Content-Type-Options": "nosniff",
+            },
+          });
+        });
+
       // The RPC client posts to /rpc/, with the slash.
       const rpcRoute = { POST: sameOrigin((req) => rpc(req)) };
 
@@ -146,6 +157,7 @@ const serve = (web: WebConfig) =>
                 "/auth/logout": { POST: sameOrigin(route("signing out", logout)) },
                 "/rpc": rpcRoute,
                 "/rpc/": rpcRoute,
+                [`${IMAGE_STORE_PATH}/:file`]: { GET: route("serving a stored image", storedImage) },
                 // The app routes in the browser, so every other page is the app.
                 "/*": app,
               },

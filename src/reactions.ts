@@ -11,31 +11,44 @@ export interface ReactionListener<E = never> {
   reactionsCleared(messageId: string, emoji?: ReactionEmoji): Effect.Effect<void, E>;
 }
 
-/** Feeds reaction events to `listener` until the scope closes, skipping bots, this one included. */
+/**
+ * Feeds reaction events to `listener` until the scope closes, skipping bots,
+ * this one included. With `guildId`, only reactions in that guild.
+ */
 export const attachReactions = Effect.fnUntraced(function* <E>(
   listener: ReactionListener<E>,
   label: string,
+  guildId?: string,
 ) {
   const { client } = yield* Fluxer;
   const isBot = (userId: string, bot: boolean | undefined) =>
     bot === true || userId === client.user?.id;
+  const elsewhere = (id: string | null | undefined) => guildId !== undefined && id !== guildId;
   const failed = `${label} reaction handling`;
 
   yield* listen(Events.MessageReactionAdd, failed, (p) =>
-    isBot(p.userId, p.user?.bot) ? Effect.void : listener.reactionAdded(p.messageId, p.userId, p.emoji),
+    isBot(p.userId, p.user?.bot) || elsewhere(p.reaction.guildId)
+      ? Effect.void
+      : listener.reactionAdded(p.messageId, p.userId, p.emoji),
   );
   yield* listen(Events.MessageReactionAddMany, failed, (p) =>
-    Effect.forEach(
-      p.reactions.filter((r) => !isBot(r.userId, r.member?.user.bot)),
-      (r) => listener.reactionAdded(p.messageId, r.userId, r.emoji),
-      { discard: true },
-    ),
+    elsewhere(p.guildId)
+      ? Effect.void
+      : Effect.forEach(
+          p.reactions.filter((r) => !isBot(r.userId, r.member?.user.bot)),
+          (r) => listener.reactionAdded(p.messageId, r.userId, r.emoji),
+          { discard: true },
+        ),
   );
   yield* listen(Events.MessageReactionRemove, failed, (p) =>
-    isBot(p.userId, p.user?.bot) ? Effect.void : listener.reactionRemoved(p.messageId, p.userId, p.emoji),
+    isBot(p.userId, p.user?.bot) || elsewhere(p.reaction.guildId)
+      ? Effect.void
+      : listener.reactionRemoved(p.messageId, p.userId, p.emoji),
   );
-  yield* listen(Events.MessageReactionRemoveAll, failed, (p) => listener.reactionsCleared(p.messageId));
+  yield* listen(Events.MessageReactionRemoveAll, failed, (p) =>
+    elsewhere(p.guildId) ? Effect.void : listener.reactionsCleared(p.messageId),
+  );
   yield* listen(Events.MessageReactionRemoveEmoji, failed, (p) =>
-    listener.reactionsCleared(p.messageId, p.emoji),
+    elsewhere(p.guildId) ? Effect.void : listener.reactionsCleared(p.messageId, p.emoji),
   );
 });

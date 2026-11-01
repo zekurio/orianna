@@ -1,6 +1,7 @@
 import { Events, type Message, PermissionFlags, Routes } from "@fluxerjs/core";
 import { Effect, Layer } from "effect";
 import { Fluxer, listen, orNotFound, reactionUsers, request } from "../fluxer.ts";
+import { CurrentGuild } from "../guild.ts";
 import { editOptions, NO_MENTIONS, sendOptions } from "../messages/fluxer.ts";
 import { attachReactions } from "../reactions.ts";
 import { type MenuReaction, RoleGuild, type RoleMenus } from "./menus.ts";
@@ -31,7 +32,8 @@ const ELEVATED =
 export const FluxerRoleGuild = Layer.effect(
   RoleGuild,
   Effect.gen(function* () {
-    const { client, guildId } = yield* Fluxer;
+    const { client } = yield* Fluxer;
+    const { id: guildId } = yield* CurrentGuild;
     /** Menu messages, kept so reacting doesn't fetch the message every time. */
     const messages = new Map<string, Message>();
     const guild = request("fetching the guild", () => client.guilds.resolve(guildId));
@@ -144,11 +146,13 @@ export const FluxerRoleGuild = Layer.effect(
 
 /** Feeds reactions, deleted messages and departing members into the role menus, until the scope closes. */
 export const attachRoleMenuEvents = Effect.fnUntraced(function* (menus: RoleMenus) {
-  const { guildId } = yield* Fluxer;
-  yield* attachReactions(menus, "role menu");
-  yield* listen(Events.MessageDelete, "role menu message delete", (message) => menus.messageDeleted(message.id));
+  const { id: guildId } = yield* CurrentGuild;
+  yield* attachReactions(menus, "role menu", guildId);
+  yield* listen(Events.MessageDelete, "role menu message delete", (message) =>
+    message.guildId === guildId ? menus.messageDeleted(message.id) : Effect.void,
+  );
   yield* listen(Events.MessageDeleteBulk, "role menu message delete", (p) =>
-    Effect.forEach(p.ids, (id) => menus.messageDeleted(id), { discard: true }),
+    p.guildId === guildId ? Effect.forEach(p.ids, (id) => menus.messageDeleted(id), { discard: true }) : Effect.void,
   );
   yield* listen(Events.GuildMemberRemove, "role menu member leave", (member) =>
     member.guild.id === guildId ? menus.memberLeft(member.id) : Effect.void,

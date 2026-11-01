@@ -1,6 +1,7 @@
 import { Data, Effect } from "effect";
 import type { AppConfig } from "../config.ts";
 import type { Fluxer, FluxerError } from "../fluxer.ts";
+import type { CurrentGuild } from "../guild.ts";
 import type { MessageBody } from "../messages/body.ts";
 import type { GuildAccess, MemberPermissions, Permission } from "../permissions/rules.ts";
 import type { Settings } from "../settings/settings.ts";
@@ -75,7 +76,8 @@ export function refuse(message: string): Effect.Effect<never, UserError> {
 }
 
 /** Services every command may use. */
-export type CommandServices = AppConfig | Settings | GuildAccess | Fluxer | CommandRouter;
+/** What every command may use: its guild's settings and access, and what all guilds share. */
+export type CommandServices = AppConfig | CurrentGuild | Settings | GuildAccess | Fluxer | CommandRouter;
 
 /** What a command may fail with. Anything else that goes wrong is a defect. */
 export type CommandError = UserError | FluxerError;

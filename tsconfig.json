@@ -15,7 +15,10 @@
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
     "noFallthroughCasesInSwitch": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+
+    // The web app's own modules, as shadcn/ui's components import them.
+    "paths": { "@/*": ["./src/web/app/*"] }
   },
-  "include": ["src", "drizzle.config.ts"]
+  "include": ["src", "scripts", "drizzle.config.ts"]
 }

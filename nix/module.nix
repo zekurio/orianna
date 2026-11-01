@@ -45,16 +45,16 @@ in
     settings = lib.mkOption {
       description = ''
         Deployment configuration, written to /etc/orianna/config.json. See
-        docs/configuration.md for every key. Unknown keys are rejected when the bot
+        src/config.ts for every key. Unknown keys are rejected when the bot
         starts, and any change restarts it.
 
-        Bot settings like `permissions`, `emoji` or `boards` live in the bot's
-        database and are edited with `!settings`, not here.
+        Bot settings like `permissions`, `emoji` or `starboard` live in the bot's
+        database, one set per server, and are edited on the web interface's
+        Admin tab or with `!settings`, not here.
       '';
       example = lib.literalExpression ''
         {
           instance = "https://chat.example.org";
-          guildId = "1234567890";
           web = {
             publicUrl = "https://orianna.example.org";
             clientId = "1234567890";
@@ -68,10 +68,6 @@ in
             type = lib.types.str;
             example = "https://chat.example.org";
             description = "Origin of the Fluxer instance; the bot reads /.well-known/fluxer from it.";
-          };
-          guildId = lib.mkOption {
-            type = lib.types.str;
-            description = "ID of the guild the bot serves.";
           };
           database = lib.mkOption {
             type = lib.types.str;

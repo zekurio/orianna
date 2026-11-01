@@ -19,13 +19,13 @@ export const PERMISSIONS = [
   "sticker.cancel-any",
   "polls.create",
   "polls.end-any",
-  "boards.remove",
+  "starboard.config",
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
 
 /** Named after the settings section that turns the feature on. */
-export type PermissionGroup = "emoji" | "sticker" | "polls" | "boards";
+export type PermissionGroup = "emoji" | "sticker" | "polls" | "starboard";
 
 export function groupOf(permission: Permission): PermissionGroup {
   return permission.slice(0, permission.indexOf(".")) as PermissionGroup;
@@ -149,6 +149,13 @@ export class GuildAccess extends Context.Service<
       userId: string,
       permission: Permission,
     ) => Effect.Effect<boolean, UserError | FluxerError>;
+    /** Whether the member can see the channel. False when either is gone. */
+    readonly canView: (userId: string, channelId: string) => Effect.Effect<boolean, FluxerError>;
+    /** The channels of `channelIds` the member can see, in the same order. None when they've left. */
+    readonly visibleChannels: (
+      userId: string,
+      channelIds: readonly string[],
+    ) => Effect.Effect<string[], FluxerError>;
     /** Role IDs with rules in the settings that the guild doesn't have. */
     readonly unknownRoles: Effect.Effect<string[], FluxerError>;
   }

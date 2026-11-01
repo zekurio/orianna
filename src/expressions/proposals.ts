@@ -283,7 +283,7 @@ export const makeExpressionProposals = Effect.fnUntraced(function* (
     return db
       .select()
       .from(proposals)
-      .where(and(eq(proposals.pollId, pollId), eq(proposals.type, kind.type)))
+      .where(and(eq(proposals.pollId, pollId), eq(proposals.guildId, guildId), eq(proposals.type, kind.type)))
       .get();
   }
 
@@ -302,7 +302,7 @@ export const makeExpressionProposals = Effect.fnUntraced(function* (
       .select({ proposal: proposals, poll: polls })
       .from(proposals)
       .innerJoin(polls, eq(polls.id, proposals.pollId))
-      .where(and(eq(proposals.type, kind.type), eq(proposals.status, "pending")))
+      .where(and(eq(proposals.guildId, guildId), eq(proposals.type, kind.type), eq(proposals.status, "pending")))
       .orderBy(asc(polls.closesAt))
       .all();
   }
@@ -380,7 +380,7 @@ export const makeExpressionProposals = Effect.fnUntraced(function* (
 
     db.transaction((tx) => {
       tx.insert(proposals)
-        .values({ pollId: poll.id, type: kind.type, name, description, tags, proposerId, requiredYes })
+        .values({ pollId: poll.id, guildId, type: kind.type, name, description, tags, proposerId, requiredYes })
         .run();
       tx.insert(proposalImages)
         .values(
@@ -593,7 +593,7 @@ export const makeExpressionProposals = Effect.fnUntraced(function* (
         .from(proposalImages)
         .innerJoin(proposals, eq(proposals.pollId, proposalImages.pollId))
         .innerJoin(polls, eq(polls.id, proposalImages.pollId))
-        .where(and(eq(proposals.type, kind.type), eq(proposals.status, "pending")))
+        .where(and(eq(proposals.guildId, guildId), eq(proposals.type, kind.type), eq(proposals.status, "pending")))
         .all()
         .find((p) => wanted.includes(p.name.toLowerCase()));
       if (taken) {
@@ -747,7 +747,7 @@ export const makeExpressionProposals = Effect.fnUntraced(function* (
       return proposal?.status === "pending" && passes(proposal, tally);
     },
   };
-  yield* pollService.register(kind.pollKind, handler);
+  yield* pollService.register(guildId, kind.pollKind, handler);
 
   return {
     kind,

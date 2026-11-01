@@ -11,6 +11,7 @@ import {
   reactionKey,
 } from "../emoji.ts";
 import { type FluxerError, logFailure } from "../fluxer.ts";
+import { CurrentGuild } from "../guild.ts";
 import { ACCENT, type MessageBody } from "../messages/body.ts";
 import type { ReactionListener } from "../reactions.ts";
 
@@ -98,6 +99,7 @@ export type RoleMenus = Effect.Success<ReturnType<typeof makeRoleMenus>>;
 export const makeRoleMenus = Effect.fnUntraced(function* (config: RoleMenusConfig | undefined) {
   const db = yield* Database;
   const guild = yield* RoleGuild;
+  const { id: guildId } = yield* CurrentGuild;
   /** By message ID. */
   const live = new Map<string, LiveMenu>();
   const lock = yield* Semaphore.make(1);
@@ -111,7 +113,7 @@ export const makeRoleMenus = Effect.fnUntraced(function* (config: RoleMenusConfi
     const names = new Set(menus.map((m) => m.name));
     live.clear();
 
-    for (const row of db.select().from(roleMenus).all()) {
+    for (const row of db.select().from(roleMenus).where(eq(roleMenus.guildId, guildId)).all()) {
       if (names.has(row.name)) continue;
       const deleted = yield* guild.delete(row.channelId, row.messageId).pipe(
         Effect.as(true),
@@ -165,7 +167,7 @@ export const makeRoleMenus = Effect.fnUntraced(function* (config: RoleMenusConfi
     const body = renderMenu(menu);
     const rendered = JSON.stringify(body);
 
-    let row = db.select().from(roleMenus).where(eq(roleMenus.name, menu.name)).get();
+    let row = db.select().from(roleMenus).where(and(eq(roleMenus.guildId, guildId), eq(roleMenus.name, menu.name))).get();
     let reactions: MenuReaction[] | null = [];
     if (row && row.channelId !== menu.channelId) {
       yield* guild.delete(row.channelId, row.messageId);
@@ -188,7 +190,7 @@ export const makeRoleMenus = Effect.fnUntraced(function* (config: RoleMenusConfi
           Effect.map((messageId) =>
             db
               .insert(roleMenus)
-              .values({ name: menu.name, channelId: menu.channelId, messageId, rendered })
+              .values({ guildId, name: menu.name, channelId: menu.channelId, messageId, rendered })
               .returning()
               .get(),
           ),
@@ -197,7 +199,7 @@ export const makeRoleMenus = Effect.fnUntraced(function* (config: RoleMenusConfi
       reactions = [];
     } else if (row.rendered !== rendered) {
       yield* guild.edit(row.channelId, row.messageId, body);
-      db.update(roleMenus).set({ rendered }).where(eq(roleMenus.name, menu.name)).run();
+      db.update(roleMenus).set({ rendered }).where(and(eq(roleMenus.guildId, guildId), eq(roleMenus.name, menu.name))).run();
     }
 
     const liveMenu: LiveMenu = { ...menu, messageId: row.messageId, paused };
@@ -207,7 +209,7 @@ export const makeRoleMenus = Effect.fnUntraced(function* (config: RoleMenusConfi
     db.delete(roleMenuReactions)
       .where(
         and(
-          eq(roleMenuReactions.menu, menu.name),
+          eq(roleMenuReactions.guildId, guildId), eq(roleMenuReactions.menu, menu.name),
           notInArray(
             roleMenuReactions.roleId,
             menuConfig.options.map((o) => o.roleId),
@@ -308,7 +310,7 @@ export const makeRoleMenus = Effect.fnUntraced(function* (config: RoleMenusConfi
     if (!given) return yield* dropReaction;
 
     db.insert(roleMenuReactions)
-      .values({ menu: menu.name, roleId: option.roleId, userId })
+      .values({ guildId, menu: menu.name, roleId: option.roleId, userId })
       .onConflictDoNothing()
       .run();
     if (menu.mode !== "single") return;
@@ -340,7 +342,7 @@ export const makeRoleMenus = Effect.fnUntraced(function* (config: RoleMenusConfi
         .delete(roleMenuReactions)
         .where(
           and(
-            eq(roleMenuReactions.menu, menu.name),
+            eq(roleMenuReactions.guildId, guildId), eq(roleMenuReactions.menu, menu.name),
             eq(roleMenuReactions.roleId, roleId),
             eq(roleMenuReactions.userId, userId),
           ),
@@ -355,7 +357,7 @@ export const makeRoleMenus = Effect.fnUntraced(function* (config: RoleMenusConfi
   }
 
   function records(menu: string, userId?: string) {
-    const conditions = [eq(roleMenuReactions.menu, menu)];
+    const conditions = [eq(roleMenuReactions.guildId, guildId), eq(roleMenuReactions.menu, menu)];
     if (userId) conditions.push(eq(roleMenuReactions.userId, userId));
     return db
       .select()
@@ -366,7 +368,7 @@ export const makeRoleMenus = Effect.fnUntraced(function* (config: RoleMenusConfi
 
   /** Drops a menu's row and, with it, its records. */
   function forget(name: string) {
-    db.delete(roleMenus).where(eq(roleMenus.name, name)).run();
+    db.delete(roleMenus).where(and(eq(roleMenus.guildId, guildId), eq(roleMenus.name, name))).run();
   }
 
   const menus = {
@@ -419,7 +421,7 @@ export const makeRoleMenus = Effect.fnUntraced(function* (config: RoleMenusConfi
           const cleared = emoji ? (option ? [option] : []) : menu.options;
           for (const option of cleared) {
             db.delete(roleMenuReactions)
-              .where(and(eq(roleMenuReactions.menu, menu.name), eq(roleMenuReactions.roleId, option.roleId)))
+              .where(and(eq(roleMenuReactions.guildId, guildId), eq(roleMenuReactions.menu, menu.name), eq(roleMenuReactions.roleId, option.roleId)))
               .run();
             yield* guild
               .react(menu.channelId, messageId, option.emoji.api)
@@ -433,7 +435,7 @@ export const makeRoleMenus = Effect.fnUntraced(function* (config: RoleMenusConfi
       enqueue(
         "message delete",
         Effect.gen(function* () {
-          const row = db.select().from(roleMenus).where(eq(roleMenus.messageId, messageId)).get();
+          const row = db.select().from(roleMenus).where(and(eq(roleMenus.guildId, guildId), eq(roleMenus.messageId, messageId))).get();
           if (!row) return;
           live.delete(messageId);
           forget(row.name);
@@ -446,7 +448,7 @@ export const makeRoleMenus = Effect.fnUntraced(function* (config: RoleMenusConfi
       enqueue(
         "member leave",
         Effect.gen(function* () {
-          const rows = db.delete(roleMenuReactions).where(eq(roleMenuReactions.userId, userId)).returning().all();
+          const rows = db.delete(roleMenuReactions).where(and(eq(roleMenuReactions.guildId, guildId), eq(roleMenuReactions.userId, userId))).returning().all();
           for (const row of rows) {
             const menu = [...live.values()].find((m) => m.name === row.menu);
             const option = menu?.options.find((o) => o.roleId === row.roleId);

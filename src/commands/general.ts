@@ -26,7 +26,7 @@ export const help = defineCommand({
     Effect.gen(function* () {
       const { prefix } = yield* Settings.current;
       const permissions = yield* (yield* GuildAccess).permissionsOf(ctx.userId);
-      const entries = yield* (yield* CommandRouter).entries;
+      const entries = yield* (yield* CommandRouter).entries(ctx.guildId);
       const lines = [...entries.values()].flatMap((entry) =>
         isGroup(entry)
           ? entry.subcommands

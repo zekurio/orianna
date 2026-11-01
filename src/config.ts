@@ -89,25 +89,24 @@ const RoleMenusSchema = Schema.Struct({
   menus: Schema.Array(RoleMenuSchema).pipe(orDefault([])),
 });
 
-const BoardSchema = Schema.Struct({
-  /** What `!board top` takes, e.g. `gems`. */
-  name: Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]{0,31}$/)),
-  /** A Unicode emoji, `name:id` or `<:name:id>` (`<a:name:id>` for an animated one). */
-  emoji: Schema.String.check(Schema.isMinLength(1)),
-  /** Where the bot posts the messages that make it. */
-  channelId: Snowflake,
-  /** Members other than the author who have to react before a message goes up. */
+const StarboardSchema = Schema.Struct({
+  /**
+   * Where the bot posts the messages that make it. The starboard is off
+   * without one. Moving it leaves the posts so far where they are, and the
+   * web interface shows only the ones in the new channel.
+   */
+  channelId: Schema.optionalKey(Snowflake),
+  /** The minimum number of votes, the author's own included, until a message gets into the starboard. */
   threshold: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(orDefault(5)),
-  /** Keeps a post up when reactions drop below the threshold again. */
-  keep: Schema.Boolean.pipe(orDefault(false)),
-  /** Channels whose messages never go up, such as private ones. Board channels never do. */
-  ignoredChannelIds: Schema.Array(Snowflake).pipe(orDefault([])),
+  /** A Unicode emoji, `name:id` or `<:name:id>` (`<a:name:id>` for an animated one). */
+  emoji: Schema.String.check(Schema.isMinLength(1)).pipe(orDefault("⭐")),
 });
 
 /**
  * Bot settings: what the bot does in the guild. They live in the database,
  * where `!settings` edits them while the bot runs; src/settings/settings.ts
- * keeps them. Nothing here is a secret or needs a restart.
+ * keeps them. Nothing here is a secret or needs a restart. The channels they
+ * name have to be the guild's own, and take messages.
  */
 export const BotSettingsSchema = Schema.Struct({
   /** What commands start with, e.g. `!` for `!help`. */
@@ -124,7 +123,7 @@ export const BotSettingsSchema = Schema.Struct({
    * - `sticker.propose`, `sticker.add`, `sticker.decide`, `sticker.cancel-any`
    * - `polls.create`: start a poll with `!poll`
    * - `polls.end-any`: end anyone's poll early with 🛑, not just one's own
-   * - `boards.remove`: take a message off a board for good with `!board remove`
+   * - `starboard.config`: change the starboard with `!starboard set` and `disable`
    *
    * The most specific rule that names a permission decides it, so
    * `-emoji.decide` beats `+emoji.*`, which beats `+*`. Between rules that
@@ -162,12 +161,13 @@ export const BotSettingsSchema = Schema.Struct({
    */
   roleMenus: Schema.optionalKey(RoleMenusSchema),
   /**
-   * Starboards: once enough members react to a message with a board's emoji,
-   * the bot posts it in the board's channel. It needs View Channel and Read
-   * Message History where members react, and Send Messages and Embed Links in
-   * the board channels.
+   * The starboard, where members vote memorable messages in with an emoji.
+   * Once enough react to a message, the bot posts it in the starboard
+   * channel. It needs View Channel and Read Message History where members
+   * react, and Send Messages, Embed Links and Attach Files in the starboard
+   * channel. Off while this section or its `channelId` is missing.
    */
-  boards: Schema.optionalKey(Schema.Array(BoardSchema)),
+  starboard: Schema.optionalKey(StarboardSchema),
 });
 
 export type BotSettings = typeof BotSettingsSchema.Type;
@@ -212,8 +212,6 @@ const WebConfigSchema = Schema.Struct({
 export const ConfigSchema = Schema.Struct({
   /** Origin of the Fluxer instance. The client reads `/.well-known/fluxer` from here. */
   instance: Schema.String.check(Schema.isMinLength(1)),
-  /** The guild this bot serves. Messages from anywhere else are ignored. */
-  guildId: Snowflake,
   /** SQLite file. Relative paths resolve against the working directory. */
   database: Schema.String.check(Schema.isMinLength(1)).pipe(orDefault("./data/orianna.db")),
   /** The web interface is off when this section is missing. */
@@ -223,7 +221,6 @@ export const ConfigSchema = Schema.Struct({
 /** The deployment keys of the config file. */
 export interface Config {
   readonly instance: string;
-  readonly guildId: string;
   readonly database: string;
   readonly web: WebConfig | undefined;
 }
@@ -235,7 +232,7 @@ export type PollsConfig = typeof PollsConfigSchema.Type;
 export type PermissionsConfig = typeof PermissionsSchema.Type;
 export type RoleMenusConfig = typeof RoleMenusSchema.Type;
 export type RoleMenuConfig = typeof RoleMenuSchema.Type;
-export type BoardConfig = typeof BoardSchema.Type;
+export type StarboardConfig = typeof StarboardSchema.Type;
 
 export class ConfigError extends Data.TaggedError("ConfigError")<{ readonly message: string }> {}
 
@@ -255,9 +252,8 @@ const decodeOptions = { errors: "all", onExcessProperty: "error" } as const;
 export function parseConfig(raw: unknown): Effect.Effect<Config, ConfigError> {
   return Schema.decodeUnknownEffect(ConfigSchema)(raw, decodeOptions).pipe(
     Effect.mapError((err) => new ConfigError({ message: `invalid config:\n${indent(schemaProblems(err.issue))}` })),
-    Effect.map(({ instance, guildId, database, web }) => ({
+    Effect.map(({ instance, database, web }) => ({
       instance,
-      guildId,
       database,
       // Without the trailing slash, so paths can go straight after it.
       web: web && { ...web, publicUrl: new URL(web.publicUrl).origin },
@@ -267,7 +263,7 @@ export function parseConfig(raw: unknown): Effect.Effect<Config, ConfigError> {
 
 /**
  * Validates bot settings and fills in defaults. Problems have the same paths
- * as the keys in the document, like `/boards/1/threshold`. `guildId` is the
+ * as the keys in the document, like `/starboard/threshold`. `guildId` is the
  * guild's, whose @everyone role can't have rules of its own.
  */
 export function parseSettings(raw: unknown, guildId: string): Effect.Effect<BotSettings, InvalidSettings> {
@@ -278,7 +274,7 @@ export function parseSettings(raw: unknown, guildId: string): Effect.Effect<BotS
         ...checkPollsChannel(settings),
         ...checkPermissions(settings, guildId),
         ...checkRoleMenus(settings),
-        ...checkBoards(settings),
+        ...checkStarboard(settings),
       ];
       return problems.length > 0 ? Effect.fail(new InvalidSettings({ problems })) : Effect.succeed(settings);
     }),
@@ -380,19 +376,31 @@ function checkRoleMenus(settings: BotSettings): string[] {
   return problems;
 }
 
-/** What the schema can't express: unique names, and emoji the bot can read. */
-function checkBoards(settings: BotSettings): string[] {
-  const problems: string[] = [];
-  const names = new Set<string>();
-  settings.boards?.forEach((board, i) => {
-    const at = `/boards/${i}`;
-    if (names.has(board.name)) problems.push(`${at}/name: another board is also called ${board.name}`);
-    names.add(board.name);
-    if (!parseEmoji(board.emoji)) {
-      problems.push(`${at}/emoji: ${board.emoji} is not an emoji; use a Unicode emoji, name:id or <:name:id>`);
-    }
-  });
-  return problems;
+/** What the schema can't express: an emoji the bot can read. */
+function checkStarboard(settings: BotSettings): string[] {
+  const emoji = settings.starboard?.emoji;
+  if (emoji === undefined || parseEmoji(emoji)) return [];
+  return [`/starboard/emoji: ${emoji} is not an emoji; use a Unicode emoji, name:id or <:name:id>`];
+}
+
+/** The channels the settings have the bot post in, with where in the document each is. */
+export function settingsChannels(settings: BotSettings): { path: string; channelId: string }[] {
+  const channels: { path: string; channelId: string }[] = [];
+  if (settings.pollsChannelId !== undefined) {
+    channels.push({ path: "/pollsChannelId", channelId: settings.pollsChannelId });
+  }
+  if (settings.roleMenus) {
+    channels.push({ path: "/roleMenus/channelId", channelId: settings.roleMenus.channelId });
+    settings.roleMenus.menus.forEach((menu, i) => {
+      if (menu.channelId !== undefined) {
+        channels.push({ path: `/roleMenus/menus/${i}/channelId`, channelId: menu.channelId });
+      }
+    });
+  }
+  if (settings.starboard?.channelId !== undefined) {
+    channels.push({ path: "/starboard/channelId", channelId: settings.starboard.channelId });
+  }
+  return channels;
 }
 
 export const loadConfig = Effect.fn("loadConfig")(function* (path: string) {

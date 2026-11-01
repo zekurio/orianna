@@ -61,6 +61,7 @@ export const settingsCommands = Effect.fnUntraced(function* () {
         const settings = yield* Settings;
         const result = yield* Effect.result(settings.replace(raw, ctx.userId));
         if (Result.isFailure(result)) {
+          if (result.failure._tag === "FluxerError") return yield* result.failure;
           return yield* ctx.error(`The settings weren't changed:\n${problemBlock(result.failure.problems)}`);
         }
         const changed = result.success;
@@ -118,11 +119,10 @@ function problemBlock(problems: readonly string[]): string {
   return `\`\`\`\n${shown.join("\n")}\n\`\`\`${left > 0 ? `\n…and ${left} more.` : ""}`;
 }
 
-/** e.g. "<t:…:R> <@123> changed `emoji` and `boards`" */
+/** e.g. "<t:…:R> <@123> changed `emoji` and `starboard`" */
 function describe(change: SettingsChange): string {
   const when = timestamp(change.changedAt);
-  if (change.source === "config-file") return `${when} imported from the config file on the first start`;
-  if (change.source === "defaults") return `${when} set to the defaults on the first start`;
+  if (change.source === "defaults") return `${when} set to the defaults when the bot joined`;
   return `${when} <@${change.changedBy}> changed ${list(change.sections as SettingsSection[])}`;
 }
 
