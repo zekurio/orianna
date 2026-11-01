@@ -11,7 +11,6 @@ import { Button } from "@/components/ui/button";
 import { DialogFooter } from "@/components/ui/dialog";
 import {
   Field,
-  FieldContent,
   FieldDescription,
   FieldError,
   FieldGroup,
@@ -121,7 +120,7 @@ function KarmaForm({ setup, onCancel, onDone }: { setup: KarmaSetup; onCancel: (
       const failure = Cause.squash(exit.cause) as { _tag?: string; problems?: readonly string[] };
       if (failure._tag === "SettingsRejected" && failure.problems) {
         setRejected(failure.problems);
-        return toast.error("Couldn't save karma", { description: "The bot didn't take it. What's wrong is marked." });
+        return toast.error("Couldn't save karma", { description: "Check the marked fields." });
       }
       return toast.error(failureMessage(exit.cause));
     }
@@ -134,7 +133,7 @@ function KarmaForm({ setup, onCancel, onDone }: { setup: KarmaSetup; onCancel: (
     const exit = await disable({ payload: { guildId }, reactivityKeys: KARMA_KEYS });
     setBusy(false);
     if (Exit.isFailure(exit)) return toast.error(failureMessage(exit.cause));
-    toast.success("Karma is off", { description: "Members keep their karma for when it's back on." });
+    toast.success("Karma is off", { description: "Members keep their karma." });
     onDone();
   };
 
@@ -145,7 +144,6 @@ function KarmaForm({ setup, onCancel, onDone }: { setup: KarmaSetup; onCancel: (
           <EmojiList
             list="upvotes"
             legend="Upvotes"
-            description="Reacting with one of these gives the author a point."
             value={draft.upvotes}
             server={setup.emojis}
             problems={problems}
@@ -154,7 +152,6 @@ function KarmaForm({ setup, onCancel, onDone }: { setup: KarmaSetup; onCancel: (
           <EmojiList
             list="downvotes"
             legend="Downvotes"
-            description="Reacting with one of these takes a point. Leave it empty for no downvotes."
             value={draft.downvotes}
             server={setup.emojis}
             problems={problems}
@@ -173,16 +170,16 @@ function KarmaForm({ setup, onCancel, onDone }: { setup: KarmaSetup; onCancel: (
               onChange={(e) => set("votesPerHour", e.target.valueAsNumber)}
               aria-invalid={problem("votesPerHour") ? true : undefined}
             />
-            <FieldDescription>How many votes a member may give in an hour. Votes past that don't count.</FieldDescription>
+            <FieldDescription>Per member.</FieldDescription>
             <FieldError>{problem("votesPerHour")}</FieldError>
           </Field>
 
-          <Field orientation="horizontal" className="self-start sm:pt-6">
-            <Switch id={`${id}-penalty`} checked={draft.penalty} onCheckedChange={(on) => set("penalty", on)} />
-            <FieldContent>
-              <FieldLabel htmlFor={`${id}-penalty`}>Downvotes cost a point</FieldLabel>
-              <FieldDescription>A member who downvotes loses a point too.</FieldDescription>
-            </FieldContent>
+          <Field className="self-start">
+            <FieldLabel htmlFor={`${id}-penalty`}>Downvoting costs the voter a point</FieldLabel>
+            {/* As tall as the input next to it, so the switch lines up with it. */}
+            <div className="flex h-8 items-center">
+              <Switch id={`${id}-penalty`} checked={draft.penalty} onCheckedChange={(on) => set("penalty", on)} />
+            </div>
           </Field>
         </div>
 
@@ -195,10 +192,7 @@ function KarmaForm({ setup, onCancel, onDone }: { setup: KarmaSetup; onCancel: (
 
         <FieldSet>
           <FieldLegend variant="label">Rules</FieldLegend>
-          <FieldDescription>
-            What happens when a member's karma crosses a value. A role stays while their karma does, and goes once it
-            doesn't. The bot needs Manage Roles, Kick Members or Ban Members for those.
-          </FieldDescription>
+          <FieldDescription>What happens when a member's karma crosses a value.</FieldDescription>
           {draft.rules.length > 0 && (
             <ul className="flex flex-col gap-4">
               {draft.rules.map((rule, i) => (
@@ -251,7 +245,6 @@ function KarmaForm({ setup, onCancel, onDone }: { setup: KarmaSetup; onCancel: (
 function EmojiList({
   list,
   legend,
-  description,
   value,
   server,
   problems,
@@ -259,7 +252,6 @@ function EmojiList({
 }: {
   list: "upvotes" | "downvotes";
   legend: string;
-  description: string;
   value: readonly string[];
   server: readonly ServerEmoji[];
   problems: Problems;
@@ -269,7 +261,6 @@ function EmojiList({
   return (
     <FieldSet>
       <FieldLegend variant="label">{legend}</FieldLegend>
-      <FieldDescription>{description}</FieldDescription>
       {value.length > 0 && (
         <ul className="flex flex-col gap-2">
           {value.map((emoji, i) => {
@@ -357,7 +348,7 @@ function Blocklist({
   return (
     <FieldSet>
       <FieldLegend variant="label">Blocklist</FieldLegend>
-      <FieldDescription>Members who can't give or get karma. They keep the karma they have.</FieldDescription>
+      <FieldDescription>Members who can't give or get karma.</FieldDescription>
       {value.length > 0 && (
         <ul className="flex flex-col divide-y rounded-lg border">
           {value.map((userId, i) => {
@@ -530,7 +521,7 @@ function RuleRow({
           <FieldError>{problem("message")}</FieldError>
         </Field>
       ) : (
-        <p className="text-sm text-muted-foreground sm:pt-2">The bot tells them why in a DM first.</p>
+        <p className="text-sm text-muted-foreground sm:pt-2">They get a DM first.</p>
       )}
 
       <Button

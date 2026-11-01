@@ -32,20 +32,8 @@ export function StarboardOptOut() {
   return (
     <SettingRow
       id={id}
-      title="Opt-out from starboard"
-      description={
-        <>
-          The starboard allows users to vote high quality or funny messages into the "starboard", where all voted
-          messages are presented with their vote count. This starboard is represented as channel on the server as
-          well as section in the web interface. Therefore, the message content needs to be stored in the database.
-          If you don't want your messages to be presented in the starboard, here you can opt-out from it globally.
-        </>
-      }
-      hint={
-        <>
-          In chat, in any server: <code>starboard optout</code> and <code>starboard optin</code> after its prefix.
-        </>
-      }
+      title="Keep me off the starboard"
+      description="Your messages won't be posted there, and the bot won't store them for it."
       control={AsyncResult.matchWithError(optedOut, {
         onInitial: () => (
           <Placeholder>
@@ -72,8 +60,8 @@ function OptOutSwitch({ optedOut, id }: { optedOut: boolean; id: string }) {
     setConfirming(false);
     if (Exit.isFailure(exit)) return toast.error(failureMessage(exit.cause));
     const removed = exit.value;
-    if (!next) return toast.success("Your messages can get into the starboard again.");
-    toast.success("Your messages stay out of the starboard now.", {
+    if (!next) return toast.success("Your messages can go on the starboard again");
+    toast.success("You're off the starboard", {
       description: removed > 0 ? `Took down ${removed} ${removed === 1 ? "post" : "posts"}.` : undefined,
     });
   };
@@ -93,10 +81,8 @@ function OptOutSwitch({ optedOut, id }: { optedOut: boolean; id: string }) {
       <AlertDialog open={confirming} onOpenChange={(open) => !busy && setConfirming(open)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Opt-out from starboard?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Your messages already in the starboard come down, and they don't keep their votes.
-            </AlertDialogDescription>
+            <AlertDialogTitle>Leave the starboard?</AlertDialogTitle>
+            <AlertDialogDescription>Your posts on it are taken down and lose their votes.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
@@ -110,7 +96,7 @@ function OptOutSwitch({ optedOut, id }: { optedOut: boolean; id: string }) {
               }}
             >
               {busy && <Spinner />}
-              Opt out
+              Leave
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

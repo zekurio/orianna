@@ -41,26 +41,10 @@ export function parseAdminPath(path: string): Tab | undefined {
 
 export function AdminPage({ tab }: { tab: Tab }) {
   const guild = useGuild();
-  const { admin, prefix } = guild;
-  if (!admin) {
-    return (
-      <PageHeader
-        title="Admin"
-        lead="Only the server owner and members with Administrator can change the bot settings."
-      />
-    );
-  }
+  if (!guild.admin) return <PageHeader title="Admin" lead="Only the server owner and administrators can see this." />;
   return (
     <>
-      <PageHeader
-        title="Admin"
-        lead={
-          <>
-            What the bot does in {guild.name}. Changes apply right away and show up in{" "}
-            <code>{prefix}settings log</code>.
-          </>
-        }
-      />
+      <PageHeader title="Admin" />
       <Tabs value={tab} onValueChange={(next) => navigate(guildPath(guild.id, pathOf(next as Tab)))} className="gap-6">
         <TabsList className="max-w-full justify-start overflow-x-auto">
           {TABS.map(({ tab: t, label, icon: TabIcon }) => (
@@ -102,7 +86,7 @@ function Section({ tab, setup, settings }: { tab: Tab } & SectionProps) {
   const props = { setup, settings };
   switch (tab) {
     case "general":
-      return <GeneralSection key={JSON.stringify(settings.prefix)} {...props} />;
+      return <GeneralSection key={JSON.stringify([settings.prefix, settings.commandChannels])} {...props} />;
     case "permissions":
       return <PermissionsSection key={JSON.stringify(settings.permissions)} {...props} />;
     case "proposals":

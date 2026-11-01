@@ -5,9 +5,10 @@ import { RpcSerialization, RpcServer } from "effect/rpc";
 import { AppConfig, ConfigError, type WebConfig } from "../config.ts";
 import { type FluxerError, logFailure } from "../fluxer.ts";
 import { IMAGE_STORE_PATH, ImageStore } from "../imagestore.ts";
+import { millis, tagLogs } from "../log.ts";
 import app from "./app/index.html";
 import { FluxerOAuth } from "./fluxer.ts";
-import { AuthenticationLive, HandlersLive } from "./handlers.ts";
+import { AuthenticationLive, CallLogLive, HandlersLive } from "./handlers.ts";
 import { OAuth } from "./oauth.ts";
 import { type SignInError, WebRpcs } from "./rpc.ts";
 import { randomToken, SESSION_COOKIE, SESSION_TTL, Sessions } from "./sessions.ts";
@@ -16,6 +17,8 @@ import { randomToken, SESSION_COOKIE, SESSION_TTL, Sessions } from "./sessions.t
 // calls it makes at /rpc, and signing in and out. Members sign in with their
 // Fluxer account; the session cookie names a row in web_sessions. It also
 // serves the image store, for anyone with a link, Fluxer's media proxy included.
+// The requests the bot answers itself are logged; Bun serves the app's pages
+// and scripts on its own, without telling.
 
 /** Holds the state and PKCE verifier while the browser is away signing in. */
 const LOGIN_COOKIE = "orianna_login";
@@ -33,7 +36,7 @@ export const WebServer = Layer.unwrap(
     const { web } = yield* AppConfig.current;
     if (!web) return Layer.empty;
     return serve(web).pipe(
-      Layer.provide(Layer.mergeAll(HandlersLive, AuthenticationLive, RpcSerialization.layerNdjson)),
+      Layer.provide(Layer.mergeAll(HandlersLive, AuthenticationLive, CallLogLive, RpcSerialization.layerNdjson)),
       Layer.provide(Layer.mergeAll(FluxerOAuth(web), Sessions.layer)),
     );
   }),
@@ -51,24 +54,38 @@ const serve = (web: WebConfig) =>
       const rpc = HttpEffect.toWebHandler(yield* RpcServer.toHttpEffect(WebRpcs, { disableFatalDefects: true }));
       const secure = web.publicUrl.startsWith("https:");
 
-      const route = (label: string, handler: Handler) => (req: BunRequest) =>
-        run(
-          handler(req).pipe(
-            Effect.catchCause((cause) =>
-              logFailure(label)(cause).pipe(Effect.as(new Response(PROBLEM, { status: 500 }))),
+      /**
+       * Answers with `handler`, or a 500 when it fails, and logs the answer and
+       * how long it took at `level`.
+       */
+      const route =
+        (label: string, handler: Handler, level: "Info" | "Debug" = "Info") =>
+        (req: BunRequest) =>
+          run(
+            handler(req).pipe(
+              Effect.catchCause((cause) =>
+                logFailure(label)(cause).pipe(Effect.as(new Response(PROBLEM, { status: 500 }))),
+              ),
+              Effect.timed,
+              Effect.flatMap(([duration, res]) =>
+                Effect.logWithLevel(level)(
+                  `${req.method} ${new URL(req.url).pathname} ${res.status} ${millis(duration)}`,
+                ).pipe(Effect.as(res)),
+              ),
+              tagLogs("http"),
             ),
-          ),
-        );
+          );
 
       /**
        * Browsers say where a POST comes from. One from another origin is a page
        * elsewhere trying to act for the member, with their cookie.
        */
       const sameOrigin =
-        (handler: (req: BunRequest) => Response | Promise<Response>) => (req: BunRequest) =>
+        (handler: Handler): Handler =>
+        (req) =>
           req.headers.get("origin") === web.publicUrl
             ? handler(req)
-            : new Response("That request came from another site.", { status: 403 });
+            : Effect.succeed(new Response("That request came from another site.", { status: 403 }));
 
       const login: Handler = (req) =>
         Effect.gen(function* () {
@@ -141,8 +158,11 @@ const serve = (web: WebConfig) =>
           });
         });
 
-      // The RPC client posts to /rpc/, with the slash.
-      const rpcRoute = { POST: sameOrigin((req) => rpc(req)) };
+      // The RPC client posts to /rpc/, with the slash. Each call in a request
+      // is logged on its own, so the request is only logged at `debug`.
+      const rpcRoute = {
+        POST: route("answering the app", sameOrigin((req) => Effect.promise(() => rpc(req))), "Debug"),
+      };
 
       const server = yield* Effect.acquireRelease(
         Effect.try({
@@ -154,7 +174,7 @@ const serve = (web: WebConfig) =>
               routes: {
                 "/auth/login": { GET: route("starting a sign-in", login) },
                 [CALLBACK_PATH]: { GET: route("signing in", callback) },
-                "/auth/logout": { POST: sameOrigin(route("signing out", logout)) },
+                "/auth/logout": { POST: route("signing out", sameOrigin(logout)) },
                 "/rpc": rpcRoute,
                 "/rpc/": rpcRoute,
                 [`${IMAGE_STORE_PATH}/:file`]: { GET: route("serving a stored image", storedImage) },
@@ -170,7 +190,9 @@ const serve = (web: WebConfig) =>
         }),
         (server) => Effect.promise(() => server.stop(true)),
       );
-      yield* Effect.logInfo(`web interface listening on ${server.url.origin}, open it at ${web.publicUrl}`);
+      yield* Effect.logInfo(`web interface listening on ${server.url.origin}, open it at ${web.publicUrl}`).pipe(
+        tagLogs("http"),
+      );
     }),
   );
 

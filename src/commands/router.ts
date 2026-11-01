@@ -90,8 +90,8 @@ export const makeCommandRouter = Effect.fnUntraced(function* () {
   });
 
   const handleIn = Effect.fnUntraced(function* (message: Message, commands: ReadonlyMap<string, CommandEntry>) {
-    const { prefix } = yield* Settings.current;
-    if (!message.content.startsWith(prefix)) return;
+    const { prefix, commandChannels } = yield* Settings.current;
+    if (!message.content.startsWith(prefix) || !takesCommands(message, commandChannels)) return;
 
     const first = nextWord(message.content.slice(prefix.length));
     if (!first) return;
@@ -172,6 +172,17 @@ export const makeCommandRouter = Effect.fnUntraced(function* () {
   };
   return router;
 });
+
+/**
+ * Whether the bot takes commands where the message was sent: anywhere while
+ * `channels` is empty, else in those channels and their threads.
+ */
+function takesCommands(message: Message, channels: readonly string[]): boolean {
+  if (channels.length === 0 || channels.includes(message.channelId)) return true;
+  // A thread the bot hasn't cached doesn't say which channel it's in.
+  const channel = message.channel;
+  return channel?.isThread() === true && channel.parentId !== null && channels.includes(channel.parentId);
+}
 
 /** Answers a group name on its own with the subcommands the member may run. */
 function listSubcommands(prefix: string, ctx: BaseContext, group: CommandGroup) {

@@ -30,22 +30,16 @@ export function SettingsGroup({
   );
 }
 
-/**
- * One setting. `id` is its control's, which the title labels and the
- * description describes; `hint` is a smaller line under the description, like
- * the chat commands that do the same.
- */
+/** One setting. `id` is its control's, which the title labels and the description describes. */
 export function SettingRow({
   id,
   title,
   description,
-  hint,
   control,
 }: {
   id: string;
   title: string;
   description: ReactNode;
-  hint?: ReactNode;
   control: ReactNode;
 }) {
   return (
@@ -53,11 +47,10 @@ export function SettingRow({
       <Label htmlFor={id} className="text-base leading-snug">
         {title}
       </Label>
-      <div className="row-span-3 flex min-h-6 items-center">{control}</div>
+      <div className="row-span-2 flex min-h-6 items-center">{control}</div>
       <p id={`${id}-description`} className="max-w-[72ch] text-sm text-muted-foreground">
         {description}
       </p>
-      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
     </li>
   );
 }

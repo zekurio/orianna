@@ -1,6 +1,7 @@
 import { Client, type ClientEventName, type ClientEvents, type Message } from "@fluxerjs/core";
-import { Cause, Context, Data, Effect, FiberSet, Layer, Redacted, type Scope } from "effect";
+import { Cause, Context, Data, Effect, Exit, FiberSet, Layer, Option, Redacted, type Scope } from "effect";
 import { AppConfig, readToken } from "./config.ts";
+import { fluxerLogger, millis, tagLogs } from "./log.ts";
 
 // Every call into fluxer.js goes through `request`, so failures arrive as a
 // FluxerError instead of a rejected promise. fluxer.js already waits out rate
@@ -43,9 +44,25 @@ export class FluxerError extends Data.TaggedError("FluxerError")<{
   }
 }
 
-/** Runs a fluxer.js call, turning a rejection into a FluxerError. */
+/**
+ * Runs a fluxer.js call, turning a rejection into a FluxerError. At the
+ * `debug` log level it logs how the call went and how long it took.
+ */
 export function request<A>(action: string, call: () => Promise<A>): Effect.Effect<A, FluxerError> {
-  return Effect.tryPromise({ try: call, catch: (cause) => new FluxerError({ action, cause }) });
+  return Effect.tryPromise({ try: call, catch: (cause) => new FluxerError({ action, cause }) }).pipe(
+    Effect.exit,
+    Effect.timed,
+    Effect.flatMap(([duration, exit]) => {
+      const took = millis(duration);
+      const outcome = Exit.isSuccess(exit)
+        ? took
+        : Option.match(Exit.findErrorOption(exit), {
+            onNone: () => `interrupted after ${took}`,
+            onSome: (err) => `failed after ${took}: ${err.reason}`,
+          });
+      return Effect.logDebug(`${action}: ${outcome}`).pipe(tagLogs("fluxer"), Effect.andThen(exit));
+    }),
+  );
 }
 
 const isNotFound = (err: unknown): err is FluxerError => err instanceof FluxerError && err.notFound;
@@ -71,10 +88,10 @@ export class Fluxer extends Context.Service<
   static readonly layer = Layer.effect(
     Fluxer,
     Effect.gen(function* () {
-      const { instance } = yield* AppConfig.current;
+      const { instance, logLevel } = yield* AppConfig.current;
       const token = yield* readToken;
       const client = yield* Effect.acquireRelease(
-        request(`reaching ${instance}`, () => Client.fromDiscovery(instance)),
+        request(`reaching ${instance}`, () => Client.fromDiscovery(instance, { logger: fluxerLogger(logLevel) })),
         (client) =>
           request("disconnecting", () => client.destroy()).pipe(
             Effect.catch((err) => Effect.logWarning(err.message)),

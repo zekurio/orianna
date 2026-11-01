@@ -3,7 +3,6 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import { Context, Effect, FileSystem, Layer, Path } from "effect";
 import { AppConfig } from "../config.ts";
-import * as schema from "./schema.ts";
 
 // bun:sqlite answers synchronously, so queries run inline in effects. A query
 // that throws is a bug or a broken disk, and ends up as a defect.
@@ -14,7 +13,7 @@ function openDatabase(file: string, migrationsFolder: string) {
   sqlite.run("PRAGMA journal_mode = WAL");
   sqlite.run("PRAGMA foreign_keys = ON");
 
-  const db = drizzle({ client: sqlite, schema, casing: "snake_case" });
+  const db = drizzle({ client: sqlite });
   migrate(db, { migrationsFolder });
   return db;
 }

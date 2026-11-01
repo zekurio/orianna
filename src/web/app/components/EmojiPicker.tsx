@@ -112,8 +112,9 @@ export function EmojiPicker({
         }
       }}
     >
+      {/* Shrinks, unlike other buttons, to leave room for one next to it, like a remove button. */}
       <PopoverTrigger asChild>
-        <Button variant="outline" className="h-9 w-full justify-start gap-2 px-3 font-normal" {...trigger}>
+        <Button variant="outline" className="h-9 w-full min-w-0 shrink justify-start gap-2 px-3 font-normal" {...trigger}>
           {current ? (
             <>
               <EmojiImage key={current.value} choice={current} />

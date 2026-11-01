@@ -32,10 +32,7 @@ export function ProfilePage() {
           </div>
         </CardContent>
       </Card>
-      <SettingsGroup
-        title="Privacy"
-        description="What the bot may do with your messages, in every server. These only change things for you."
-      >
+      <SettingsGroup title="Privacy" description="Applies in every server.">
         <StarboardOptOut />
       </SettingsGroup>
     </>
@@ -77,9 +74,7 @@ export function NoGuildsPage() {
             <UsersThree />
           </EmptyMedia>
           <EmptyTitle>Orianna isn't in any of your servers</EmptyTitle>
-          <EmptyDescription>
-            Once someone invites the bot to a server you're in, it shows up here. Your profile works in the meantime.
-          </EmptyDescription>
+          <EmptyDescription>Servers show up here once it joins one you're in.</EmptyDescription>
         </EmptyHeader>
         <EmptyContent>
           <Button variant="outline" asChild>

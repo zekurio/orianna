@@ -150,6 +150,11 @@ export const BotSettingsSchema = Schema.Struct({
   /** What commands start with, e.g. `!` for `!help`. */
   prefix: Schema.String.check(Schema.isMinLength(1)).pipe(orDefault("!")),
   /**
+   * The channels the bot takes commands in, with their threads. It ignores
+   * commands anywhere else, admins' included. Empty for every channel.
+   */
+  commandChannels: Schema.Array(Snowflake).pipe(orDefault([])),
+  /**
    * Who may do what, as rules like `+emoji.add` to allow and `-polls.*` to
    * deny. A rule names one permission, a group like `emoji.*`, or `*` for
    * all of them:
@@ -254,10 +259,12 @@ const WebConfigSchema = Schema.Struct({
   port: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 })).pipe(orDefault(8080)),
 });
 
+const LogLevelSchema = Schema.Literals(["error", "warn", "info", "debug"]);
+
 /**
- * The config file: how to reach Fluxer, where to keep data, and where to
- * serve the web interface. It's read once at startup, so changing it takes a
- * restart.
+ * The config file: how to reach Fluxer, where to keep data, where to serve
+ * the web interface, and how much to log. It's read once at startup, so
+ * changing it takes a restart.
  */
 export const ConfigSchema = Schema.Struct({
   /** Origin of the Fluxer instance. The client reads `/.well-known/fluxer` from here. */
@@ -266,6 +273,13 @@ export const ConfigSchema = Schema.Struct({
   database: Schema.String.check(Schema.isMinLength(1)).pipe(orDefault("./data/orianna.db")),
   /** The web interface is off when this section is missing. */
   web: Schema.optionalKey(WebConfigSchema),
+  /**
+   * The least the bot logs: `error`, `warn`, `info` or `debug`. `info` has
+   * the web interface's requests, the calls the app makes and the gateway
+   * connection; `debug` adds every request to Fluxer and what fluxer.js says
+   * about the gateway.
+   */
+  logLevel: LogLevelSchema.pipe(orDefault("info")),
 });
 
 /** The deployment keys of the config file. */
@@ -273,9 +287,11 @@ export interface Config {
   readonly instance: string;
   readonly database: string;
   readonly web: WebConfig | undefined;
+  readonly logLevel: LogLevelName;
 }
 
 export type WebConfig = typeof WebConfigSchema.Type;
+export type LogLevelName = typeof LogLevelSchema.Type;
 
 export type ProposalConfig = typeof ProposalConfigSchema.Type;
 export type PollsConfig = typeof PollsConfigSchema.Type;
@@ -307,11 +323,12 @@ const decodeOptions = { errors: "all", onExcessProperty: "error" } as const;
 export function parseConfig(raw: unknown): Effect.Effect<Config, ConfigError> {
   return Schema.decodeUnknownEffect(ConfigSchema)(raw, decodeOptions).pipe(
     Effect.mapError((err) => new ConfigError({ message: `invalid config:\n${indent(schemaProblems(err.issue))}` })),
-    Effect.map(({ instance, database, web }) => ({
+    Effect.map(({ instance, database, web, logLevel }) => ({
       instance,
       database,
       // Without the trailing slash, so paths can go straight after it.
       web: web && { ...web, publicUrl: new URL(web.publicUrl).origin },
+      logLevel,
     })),
   );
 }
@@ -479,7 +496,7 @@ function checkKarma(settings: BotSettings): string[] {
 
 /** The channels the settings have the bot post in, with where in the document each is. */
 export function settingsChannels(settings: BotSettings): { path: string; channelId: string }[] {
-  const channels: { path: string; channelId: string }[] = [];
+  const channels = settings.commandChannels.map((channelId, i) => ({ path: `/commandChannels/${i}`, channelId }));
   if (settings.pollsChannelId !== undefined) {
     channels.push({ path: "/pollsChannelId", channelId: settings.pollsChannelId });
   }

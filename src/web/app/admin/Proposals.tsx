@@ -3,7 +3,6 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel, FieldSet, 
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { useGuild } from "../guild.tsx";
 import {
   differs,
   numberValue,
@@ -39,7 +38,6 @@ export function ProposalsSection(props: SectionProps) {
 }
 
 function ProposalsCard({ setup, settings }: SectionProps) {
-  const { prefix } = useGuild();
   const { save, busy, problems } = useSave("proposals");
   const saved = { pollsChannelId: settings.pollsChannelId, emoji: settings.emoji, sticker: settings.sticker };
   const [draft, setDraft] = useState(saved);
@@ -53,12 +51,7 @@ function ProposalsCard({ setup, settings }: SectionProps) {
   return (
     <SettingsCard
       title="Emoji and sticker proposals"
-      description={
-        <>
-          Members put emojis and stickers up for a vote with <code>{prefix}emoji propose</code> and{" "}
-          <code>{prefix}sticker propose</code>.
-        </>
-      }
+      description="Members put emojis and stickers up for a vote."
       dirty={differs(draft, saved)}
       busy={busy}
       problems={[
@@ -98,7 +91,7 @@ function ProposalsCard({ setup, settings }: SectionProps) {
             ))}
           </SelectContent>
         </Select>
-        <FieldDescription>Where proposals go up for a vote. Both kinds need it.</FieldDescription>
+        <FieldDescription>Where proposals are voted on.</FieldDescription>
         <FieldError>{channelProblem}</FieldError>
       </Field>
 
@@ -166,14 +159,11 @@ function ProposalFields({
           aria-label={`${legend} on`}
         />
       </div>
-      {value === undefined ? (
-        <FieldDescription>Off. Turning it on starts with the defaults.</FieldDescription>
-      ) : (
+      {value && (
         <FieldGroup className="grid gap-x-6 gap-y-5 sm:grid-cols-2">
           <NumberField
             id={`${id}-hours`}
             label="Voting time, in hours"
-            hint="How long a vote runs."
             value={value.votingHours}
             min={1}
             onChange={(votingHours) => set({ votingHours })}
@@ -182,7 +172,6 @@ function ProposalFields({
           <NumberField
             id={`${id}-open`}
             label="Open proposals per member"
-            hint="How many of this kind one member can have open."
             value={value.maxOpenPerUser}
             min={1}
             onChange={(maxOpenPerUser) => set({ maxOpenPerUser })}
@@ -191,7 +180,7 @@ function ProposalFields({
           <NumberField
             id={`${id}-size`}
             label="Largest upload, in KiB"
-            hint="Set it to the instance's limit, 512 KiB unless it was changed. Larger images are scaled down to fit."
+            hint="The instance's limit, 512 KiB by default."
             value={value.maxImageBytes / 1024}
             min={1}
             onChange={(kib) => set({ maxImageBytes: Math.round(kib * 1024) })}
@@ -200,7 +189,7 @@ function ProposalFields({
           <NumberField
             id={`${id}-threshold`}
             label="Votes needed, in percent"
-            hint="Of the members who can see the polls channel, rounded up. A proposal also needs more ✅ than ❌."
+            hint="Of members who can see the polls channel. It also needs more ✅ than ❌."
             value={Math.round(value.threshold * 1000) / 10}
             min={1}
             max={100}
@@ -214,7 +203,6 @@ function ProposalFields({
 }
 
 function PollsCard({ settings }: SectionProps) {
-  const { prefix } = useGuild();
   const { save, busy, problems } = useSave("polls");
   const [draft, setDraft] = useState(settings.polls);
   const id = useId();
@@ -226,11 +214,6 @@ function PollsCard({ settings }: SectionProps) {
   return (
     <SettingsCard
       title="Polls"
-      description={
-        <>
-          Polls members start with <code>{prefix}poll</code> in the channel they're in.
-        </>
-      }
       dirty={differs(draft, settings.polls)}
       busy={busy}
       problems={problemsUnder(problems, "/polls").filter(
@@ -254,7 +237,7 @@ function PollsCard({ settings }: SectionProps) {
           <NumberField
             id={`${id}-hours`}
             label="Default length, in hours"
-            hint="How long a poll runs when it's given no duration. 672, four weeks, at most."
+            hint="For polls started without one. 672 at most."
             value={draft.defaultHours}
             min={1}
             max={672}
@@ -264,7 +247,6 @@ function PollsCard({ settings }: SectionProps) {
           <NumberField
             id={`${id}-open`}
             label="Open polls per member"
-            hint="How many open polls one member can have."
             value={draft.maxOpenPerUser}
             min={1}
             onChange={(maxOpenPerUser) => set({ maxOpenPerUser })}
@@ -288,7 +270,7 @@ function NumberField({
 }: {
   id: string;
   label: string;
-  hint: string;
+  hint?: string;
   value: number;
   min?: number;
   max?: number;
@@ -310,7 +292,7 @@ function NumberField({
         aria-describedby={`${id}-hint ${id}-problem`}
         className="sm:max-w-40"
       />
-      <FieldDescription id={`${id}-hint`}>{hint}</FieldDescription>
+      {hint && <FieldDescription id={`${id}-hint`}>{hint}</FieldDescription>}
       <FieldError id={`${id}-problem`}>{problem}</FieldError>
     </Field>
   );

@@ -28,11 +28,11 @@ member may run, with their options.
 
 ## Running it
 
-The config file says how to reach Fluxer, where the database goes, and where
-to serve the web interface. Everything else is a per-server setting. A
-server's owner and members with Administrator change those on the web
-interface's Admin tab, or with `!settings export` and `!settings import` in
-chat.
+The config file says how to reach Fluxer, where the database goes, where to
+serve the web interface, and how much to log. Everything else is a per-server
+setting. A server's owner and members with Administrator change those on the
+web interface's Admin tab, or with `!settings export` and `!settings import`
+in chat.
 
 The web interface signs people in through the bot's application. Add
 `<publicUrl>/auth/callback` to the application's redirect URIs and give the
@@ -131,7 +131,7 @@ database named in the config file, the same one the bot opens:
 
 | Script | What it does |
 |---|---|
-| `bun db:generate` | Replaces `drizzle/` with a fresh `0000_init` from `src/db/schema.ts` |
+| `bun db:generate` | Replaces `drizzle/` with a fresh `<timestamp>_init` migration from `src/db/schema.ts` |
 | `bun db:push` | Changes the database to match `src/db/schema.ts`, without a migration |
 | `bun db:studio` | Opens it in Drizzle Studio |
 

@@ -1,9 +1,8 @@
 import { PlusIcon, TrashIcon, UsersThreeIcon } from "@phosphor-icons/react";
 import { type ReactNode, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Field, FieldDescription, FieldError, FieldLegend, FieldSet } from "@/components/ui/field";
+import { Field, FieldError, FieldLegend, FieldSet } from "@/components/ui/field";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useGuild } from "../guild.tsx";
 import { differs, problemAt, problemsUnder, type SectionProps, type Settings, SettingsCard, useSave } from "./shared.tsx";
 
 // Who may do what: rules like `+emoji.add` or `-polls.*` for everyone and per
@@ -30,7 +29,6 @@ function targetsOf(permissions: readonly string[]): Target[] {
 }
 
 export function PermissionsSection({ setup, settings }: SectionProps) {
-  const { prefix } = useGuild();
   const { save, busy, problems } = useSave("permissions");
   const [draft, setDraft] = useState<Permissions>(settings.permissions);
   const targets = targetsOf(setup.permissions);
@@ -59,7 +57,6 @@ export function PermissionsSection({ setup, settings }: SectionProps) {
             Everyone
           </span>
         }
-        hint="Every member, whatever their roles."
         path="/permissions/everyone"
         rules={draft.everyone}
         targets={targets}
@@ -84,15 +81,7 @@ export function PermissionsSection({ setup, settings }: SectionProps) {
   return (
     <SettingsCard
       title="Permissions"
-      description={
-        <>
-          A rule allows (<code>+</code>) or denies (<code>-</code>) a permission, a group like <code>emoji.*</code>,
-          or <code>*</code> for everything. The most specific rule that names a permission decides it. Between rules
-          that are just as specific, a role's beats Manage Expressions, which beats everyone's, and a higher role beats
-          a lower one. A permission no rule names is denied. The server owner and members with Administrator may do
-          everything. <code>{prefix}perms</code> shows what a member may do, and why.
-        </>
-      }
+      description="The most specific rule wins, and a role's rules beat everyone's. Admins may do everything."
       dirty={differs(draft, settings.permissions)}
       busy={busy}
       problems={problemsUnder(problems, "/permissions").filter((p) => !shown.has(p))}
@@ -140,7 +129,6 @@ function RoleName({ id, role }: { id: string; role: Role | undefined }) {
 /** The rules of everyone or of one role. */
 function RuleList({
   title,
-  hint,
   path,
   rules,
   targets,
@@ -149,7 +137,6 @@ function RuleList({
   onRemove,
 }: {
   title: ReactNode;
-  hint?: string;
   /** Where the bot's problems with this list point, like `/permissions/everyone`. */
   path: string;
   rules: readonly string[];
@@ -175,7 +162,6 @@ function RuleList({
           </Button>
         )}
       </div>
-      {hint && <FieldDescription>{hint}</FieldDescription>}
       {rules.length === 0 && <p className="text-sm text-muted-foreground">No rules.</p>}
       <ul className="flex flex-col gap-3">
         {rules.map((rule, i) => {

@@ -18,19 +18,12 @@ import { useGuild } from "./guild.tsx";
 // explained, and a search across all of it.
 
 export function CommandsPage() {
-  const { id: guildId, prefix } = useGuild();
+  const { id: guildId } = useGuild();
   const commands = useAtomValue(Api.query("commands", { guildId }));
   const [query, setQuery] = useState("");
   return (
     <>
-      <PageHeader
-        title="Commands"
-        lead={
-          <>
-            The commands you may run, with your permissions. They all start with <code>{prefix}</code>.
-          </>
-        }
-      />
+      <PageHeader title="Commands" lead="The ones you can run here." />
       <InputGroup className="h-10 sm:max-w-md">
         <InputGroupAddon>
           <MagnifyingGlass />
@@ -83,7 +76,7 @@ function CommandList({ sections, query }: { sections: readonly CommandSection[];
           </EmptyMedia>
           <EmptyTitle>No command matches</EmptyTitle>
           <EmptyDescription>
-            Nothing you may run has <q>{deferred.trim()}</q> in its name, what it does, or its options.
+            Nothing matches <q>{deferred.trim()}</q>.
           </EmptyDescription>
         </EmptyHeader>
       </Empty>

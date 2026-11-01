@@ -116,15 +116,17 @@ Body explaining what changed and why, wrapped at 72 columns.
   write code that upgrades stored data, like old settings documents or rows
   from an older schema. The bot validates the stored settings on every
   start, so renaming or removing a settings key, like a schema change that
-  doesn't fit an existing database, means deleting the database. Mark those
-  commits with `!` and a `BREAKING CHANGE:` footer that says so.
-- `drizzle/` holds one migration, `0000_init`, which the bot applies when it
-  opens the database. After changing `src/db/schema.ts`, run
-  `bun run db:generate`, which replaces `drizzle/` with a new `0000_init`,
-  and commit it with the schema change. Then delete the dev database; the
-  bot creates it again when it starts. The `db:*` scripts run drizzle-kit,
-  which finds the database through the config file, like the bot; see
-  `drizzle.config.ts`.
+  doesn't fit an existing database, means deleting the database.
+- `drizzle/` holds one migration, a `<timestamp>_init` folder, which the bot
+  applies when it opens the database. After changing `src/db/schema.ts`, run
+  `bun run db:generate`, which replaces `drizzle/` with a new one, and commit
+  it with the schema change. Then delete the dev database; the bot creates it
+  again when it starts. The `db:*` scripts run drizzle-kit on Bun, with
+  `bun --bun`, and it finds the database through the config file, like the
+  bot; see `drizzle.config.ts`. drizzle-orm and drizzle-kit are pinned to the
+  same 1.0 release candidate, so update them together. Declare a text primary
+  key with `primaryKey()` next to the table's indexes, not `.primaryKey()` on
+  the column; `src/db/schema.ts` says why.
 - The code is the documentation; there's no `docs/` to keep in step. When
   `src/config.ts` changes, keep its doc comments current, and update
   `config.example.json` in the same commit when the config file changes.

@@ -9,7 +9,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -105,19 +105,14 @@ export function StarboardPage() {
 
 /** The starboard settings, over the page. */
 function SettingsDialog() {
-  const { prefix } = useGuild();
   const { settingsOpen, setSettingsOpen } = useStarboardView();
   // Loaded with the page, so the form is there as soon as the dialog opens.
   useAtomMount(setupQuery(useGuild().id));
   return (
     <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent className="sm:max-w-xl" aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle>Starboard settings</DialogTitle>
-          <DialogDescription>
-            Same as <code>{prefix}starboard set</code>. Changes apply right away and show up in{" "}
-            <code>{prefix}settings log</code>.
-          </DialogDescription>
         </DialogHeader>
         <StarboardSettings onCancel={() => setSettingsOpen(false)} onDone={() => setSettingsOpen(false)} />
       </DialogContent>
@@ -149,9 +144,9 @@ function EntriesSkeleton({ count = 3 }: { count?: number }) {
   );
 }
 
-/** shinpuru's empty starboard; while it's `off`, with a way to set it up for members who may. */
+/** An empty starboard; while it's `off`, with a way to set it up for members who may. */
 function NothingHere({ off = false }: { off?: boolean }) {
-  const { prefix, configStarboard } = useGuild();
+  const { configStarboard } = useGuild();
   const setSettingsOpen = useStarboardView((view) => view.setSettingsOpen);
   return (
     <Empty>
@@ -159,9 +154,9 @@ function NothingHere({ off = false }: { off?: boolean }) {
         <EmptyMedia variant="icon">
           <Star />
         </EmptyMedia>
-        <EmptyTitle>Hm, nothing's going on here ...</EmptyTitle>
+        <EmptyTitle>{off ? "The starboard is off here" : "Nothing here yet"}</EmptyTitle>
         <EmptyDescription>
-          Did you already set up the starboard? If not, use the <code>{prefix}starboard</code> command to do so.
+          {off ? "Once it's on, messages with enough votes show up here." : "Messages with enough votes show up here."}
         </EmptyDescription>
       </EmptyHeader>
       {off && configStarboard && (
@@ -242,9 +237,7 @@ function EntryCard({ entry, starboard, names }: { entry: Entry; starboard: Starb
       <CardContent>
         <div className="flex flex-col gap-2 rounded-lg bg-background p-3">
           {entry.content === null ? (
-            <p className="text-sm text-muted-foreground">
-              The bot hasn't caught up on this entry yet. Open it in Fluxer to read it.
-            </p>
+            <p className="text-sm text-muted-foreground">Not loaded yet. Open it in Fluxer to read it.</p>
           ) : (
             entry.content && <MessageText text={entry.content} names={names} />
           )}

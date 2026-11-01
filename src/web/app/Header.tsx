@@ -42,7 +42,8 @@ export function Header({ path }: { path: string }) {
   const { guilds } = useSession();
   const { guildId: last } = useLastGuild();
   const current = useContext(GuildContext);
-  // Outside a guild, like on the profile, the tabs lead back to the last one.
+  // Outside a guild, like on the profile, the switcher shows the last one and
+  // the tabs lead back to it.
   const guild = current ?? homeGuild(guilds, last);
   const page = parseGuildPath(path)?.page;
   const tabs = guild?.admin ? [...TABS, ADMIN_TAB] : TABS;
@@ -61,7 +62,7 @@ export function Header({ path }: { path: string }) {
           <span aria-hidden="true" className="text-2xl font-light text-border">
             /
           </span>
-          <GuildSwitcher current={current} path={path} />
+          <GuildSwitcher current={guild} path={path} />
         </div>
         <nav
           className="flex gap-1 self-stretch max-sm:order-1 max-sm:-mx-3.5 max-sm:h-12 max-sm:basis-full"
@@ -95,35 +96,33 @@ export function Header({ path }: { path: string }) {
 }
 
 /**
- * The guild the page is about, and a menu of the others the member shares
- * with the bot. Picking one keeps the page, like the starboard, in that guild.
+ * The guild the page is about, or outside a guild the one the tabs lead to,
+ * and a menu of the others the member shares with the bot. Picking one keeps
+ * the page, like the starboard, in that guild; outside a guild, like on the
+ * profile, it stays on the page and points the tabs at that guild.
  */
-function GuildSwitcher({ current, path }: { current: GuildInfo | null; path: string }) {
+function GuildSwitcher({ current, path }: { current: GuildInfo | undefined; path: string }) {
   const { guilds } = useSession();
-  if (guilds.length === 0) return <span className="text-muted-foreground">No servers</span>;
-  const page = parseGuildPath(path)?.page ?? "/starboard";
+  const remember = useLastGuild((state) => state.remember);
+  if (!current) return <span className="text-muted-foreground">No servers</span>;
+  const page = parseGuildPath(path)?.page;
+  const pick = (guildId: string) => (page ? navigate(guildPath(guildId, page)) : remember(guildId));
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" className="h-10 min-w-0 gap-2 px-2 font-medium text-foreground">
-          {current ? (
-            <>
-              <GuildIcon guild={current} />
-              <span className="truncate max-sm:max-w-[9rem]">{current.name}</span>
-            </>
-          ) : (
-            <span className="text-muted-foreground">Pick a server</span>
-          )}
+          <GuildIcon guild={current} />
+          <span className="truncate max-sm:max-w-[9rem]">{current.name}</span>
           <CaretUpDown className="text-muted-foreground" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-64">
         <DropdownMenuLabel>Servers</DropdownMenuLabel>
         {guilds.map((guild) => (
-          <DropdownMenuItem key={guild.id} onSelect={() => navigate(guildPath(guild.id, page))}>
+          <DropdownMenuItem key={guild.id} onSelect={() => pick(guild.id)}>
             <GuildIcon guild={guild} />
             <span className="truncate">{guild.name}</span>
-            {guild.id === current?.id && <Check className="ml-auto" />}
+            {guild.id === current.id && <Check className="ml-auto" />}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

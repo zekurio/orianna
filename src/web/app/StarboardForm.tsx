@@ -99,7 +99,7 @@ function StarboardForm({
   const checked = useMemo(() => check(draft), [draft]);
   const problems: Problems = Result.isFailure(checked) ? checked.failure : {};
   const problem = (key: Key) => (submitted || touched.has(key) ? problems[key] : undefined);
-  /** The props that tie a control to its description and problem. */
+  /** The props that tie a control to its description, where it has one, and problem. */
   const control = (key: Key) => ({
     id: `${id}-${key}`,
     "aria-invalid": problem(key) ? true : undefined,
@@ -117,20 +117,15 @@ function StarboardForm({
       if (first) document.getElementById(`${id}-${first}`)?.focus();
       return;
     }
-    const config = checked.success;
     setBusy(true);
     // The karma page says what getting into the starboard gives.
-    const exit = await save({ payload: { guildId, starboard: config }, reactivityKeys: [...STARBOARD_KEYS, ...KARMA_KEYS] });
+    const exit = await save({
+      payload: { guildId, starboard: checked.success },
+      reactivityKeys: [...STARBOARD_KEYS, ...KARMA_KEYS],
+    });
     setBusy(false);
     if (Exit.isFailure(exit)) return toast.error(failureMessage(exit.cause));
-    // Like shinpuru's reply: the channel, the threshold, the emoji and the karma gain.
-    const where = setup.channels.find((c) => c.id === config.channelId)?.name ?? "a channel you can't see";
-    const custom = /^<a?:(\w+):\d+>$/.exec(config.emoji)?.[1];
-    toast.success("Set starboard config", {
-      description:
-        `#${where} · threshold ${config.threshold} · ${custom ? `:${custom}:` : config.emoji} · ` +
-        `karma gain ${config.karma}`,
-    });
+    toast.success(config.channelId === null ? "The starboard is on" : "Saved the starboard");
     onDone();
   };
 
@@ -139,9 +134,7 @@ function StarboardForm({
     const exit = await disable({ payload: { guildId }, reactivityKeys: [...STARBOARD_KEYS, ...KARMA_KEYS] });
     setBusy(false);
     if (Exit.isFailure(exit)) return toast.error(failureMessage(exit.cause));
-    toast.success("Starboard disabled", {
-      description: "Set a channel as starboard channel to enable the starboard.",
-    });
+    toast.success("The starboard is off");
     onDone();
   };
 
@@ -173,14 +166,11 @@ function StarboardForm({
                 ))}
               </SelectContent>
             </Select>
-            <FieldDescription id={`${id}-channelId-hint`}>
-              The channel where the starboard messages will appear.
-            </FieldDescription>
             <FieldError id={`${id}-channelId-problem`}>{problem("channelId")}</FieldError>
           </Field>
 
           <Field data-invalid={problem("threshold") ? true : undefined}>
-            <FieldLabel htmlFor={`${id}-threshold`}>Threshold</FieldLabel>
+            <FieldLabel htmlFor={`${id}-threshold`}>Votes needed</FieldLabel>
             <Input
               {...control("threshold")}
               type="number"
@@ -192,9 +182,6 @@ function StarboardForm({
               onBlur={() => touch("threshold")}
               required
             />
-            <FieldDescription id={`${id}-threshold-hint`}>
-              The minimum number of emoji votes until a message gets into the starboard.
-            </FieldDescription>
             <FieldError id={`${id}-threshold-problem`}>{problem("threshold")}</FieldError>
           </Field>
 
@@ -208,7 +195,6 @@ function StarboardForm({
               onChange={(emoji) => set("emoji", emoji)}
               onClose={() => touch("emoji")}
             />
-            <FieldDescription id={`${id}-emoji-hint`}>The emoji to be used for starring messages.</FieldDescription>
             <FieldError id={`${id}-emoji-problem`}>{problem("emoji")}</FieldError>
           </Field>
 
@@ -225,9 +211,7 @@ function StarboardForm({
               onBlur={() => touch("karma")}
               required
             />
-            <FieldDescription id={`${id}-karma-hint`}>
-              The amount of karma an author gets when their message gets into the starboard, while karma is on.
-            </FieldDescription>
+            <FieldDescription id={`${id}-karma-hint`}>For the author, while karma is on.</FieldDescription>
             <FieldError id={`${id}-karma-problem`}>{problem("karma")}</FieldError>
           </Field>
         </div>
@@ -236,7 +220,7 @@ function StarboardForm({
         {config.channelId !== null && (
           <Button type="button" variant="destructive" className="sm:mr-auto" disabled={busy} onClick={turnOff}>
             <ProhibitIcon />
-            Disable
+            Turn off
           </Button>
         )}
         <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>

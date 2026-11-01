@@ -41,7 +41,7 @@ export function HistorySection({ settings }: SectionProps) {
 }
 
 function SettingsFile({ settings }: Pick<SectionProps, "settings">) {
-  const { id: guildId, prefix } = useGuild();
+  const { id: guildId } = useGuild();
   const importSettings = useAtomSet(Api.mutation("importSettings"), { mode: "promiseExit" });
   const input = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState<{ name: string; document: unknown }>();
@@ -82,7 +82,7 @@ function SettingsFile({ settings }: Pick<SectionProps, "settings">) {
       const failure = Cause.squash(exit.cause) as { _tag?: string; problems?: readonly string[] };
       if (failure._tag === "SettingsRejected" && failure.problems) {
         setProblems(failure.problems);
-        toast.error("The settings weren't changed", { description: "The file has problems, listed below." });
+        toast.error("The settings weren't changed", { description: "See the problems below." });
       } else {
         toast.error(failureMessage(exit.cause));
       }
@@ -91,7 +91,7 @@ function SettingsFile({ settings }: Pick<SectionProps, "settings">) {
     setProblems([]);
     const changed = exit.value;
     toast.success(changed.length > 0 ? "Imported the settings" : "Nothing changed", {
-      description: changed.length > 0 ? `Changed ${changed.join(", ")}.` : "That's what the settings are already.",
+      description: changed.length > 0 ? `Changed ${changed.join(", ")}.` : undefined,
     });
   };
 
@@ -99,11 +99,7 @@ function SettingsFile({ settings }: Pick<SectionProps, "settings">) {
     <Card>
       <CardHeader>
         <CardTitle>Settings file</CardTitle>
-        <CardDescription>
-          All bot settings as JSON, the same file <code>{prefix}settings export</code> gives you and{" "}
-          <code>{prefix}settings import</code> takes. Importing replaces everything: a section missing from the
-          file turns its feature off.
-        </CardDescription>
+        <CardDescription>All settings as JSON. Importing replaces them.</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         <div className="flex flex-wrap gap-2">
@@ -124,9 +120,7 @@ function SettingsFile({ settings }: Pick<SectionProps, "settings">) {
           <AlertDialogHeader>
             <AlertDialogTitle>Replace all bot settings?</AlertDialogTitle>
             <AlertDialogDescription>
-              The settings become what's in {pending?.name}. A section the file leaves out turns its feature off, and
-              a key it leaves out goes back to its default. The bot checks the whole file first and changes nothing if
-              something is wrong.
+              Features {pending?.name} leaves out are turned off. Nothing changes if the file has problems.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -150,7 +144,7 @@ function ChangeLog() {
     <Card>
       <CardHeader>
         <CardTitle>History</CardTitle>
-        <CardDescription>The last 30 changes to the settings, from here and from chat, newest first.</CardDescription>
+        <CardDescription>The last 30 changes.</CardDescription>
       </CardHeader>
       <CardContent>
         {AsyncResult.matchWithError(log, {

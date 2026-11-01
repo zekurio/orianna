@@ -4,14 +4,19 @@ import {
   index,
   integer,
   primaryKey,
-  sqliteTable,
+  snakeCase,
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
-// Column names are derived from the keys with `casing: "snake_case"`, which is
-// set both here (drizzle.config.ts) and at runtime (db/index.ts). The bot
-// serves every guild it's in, so what belongs to a guild carries its ID.
+// Tables come from `snakeCase.table`, so column names are the keys in
+// snake_case. The bot serves every guild it's in, so what belongs to a guild
+// carries its ID.
+//
+// SQLite lets a text primary key hold NULL unless the column says NOT NULL,
+// and drizzle-kit leaves NOT NULL off a key declared on its column with
+// `.primaryKey()`. Tables keyed by text declare the key with `primaryKey()`
+// instead, which keeps it.
 
 export type PollOption = {
   /** Stable identifier stored on votes. */
@@ -21,7 +26,7 @@ export type PollOption = {
   label: string;
 };
 
-export const polls = sqliteTable(
+export const polls = snakeCase.table(
   "polls",
   {
     id: integer().primaryKey({ autoIncrement: true }),
@@ -53,7 +58,7 @@ export const polls = sqliteTable(
   ],
 );
 
-export const votes = sqliteTable(
+export const votes = snakeCase.table(
   "votes",
   {
     pollId: integer()
@@ -67,7 +72,7 @@ export const votes = sqliteTable(
   (t) => [primaryKey({ columns: [t.pollId, t.userId, t.optionKey] })],
 );
 
-export const proposals = sqliteTable(
+export const proposals = snakeCase.table(
   "proposals",
   {
     /** Proposals share their poll's id; users refer to them by the poll's slug. */
@@ -104,7 +109,7 @@ export const proposals = sqliteTable(
  * What a proposal adds: one image, or the pieces of a wide or tall image, each
  * of which becomes its own emoji or sticker.
  */
-export const proposalImages = sqliteTable(
+export const proposalImages = snakeCase.table(
   "proposal_images",
   {
     pollId: integer()
@@ -123,7 +128,7 @@ export const proposalImages = sqliteTable(
   (t) => [primaryKey({ columns: [t.pollId, t.position] })],
 );
 
-export const roleMenus = sqliteTable(
+export const roleMenus = snakeCase.table(
   "role_menus",
   {
     guildId: text().notNull(),
@@ -142,7 +147,7 @@ export const roleMenus = sqliteTable(
  * message shows what changed while the bot was offline, without handing back
  * roles that were taken away some other way.
  */
-export const roleMenuReactions = sqliteTable(
+export const roleMenuReactions = snakeCase.table(
   "role_menu_reactions",
   {
     guildId: text().notNull(),
@@ -185,10 +190,10 @@ export type StarboardMedia = {
  * taken down because votes dropped, and stays as `removed` when someone
  * deleted the post.
  */
-export const starboardEntries = sqliteTable(
+export const starboardEntries = snakeCase.table(
   "starboard_entries",
   {
-    messageId: text().primaryKey(),
+    messageId: text().notNull(),
     guildId: text().notNull(),
     channelId: text().notNull(),
     authorId: text().notNull(),
@@ -212,6 +217,7 @@ export const starboardEntries = sqliteTable(
     sentAt: integer({ mode: "timestamp_ms" }),
   },
   (t) => [
+    primaryKey({ columns: [t.messageId] }),
     uniqueIndex("starboard_entries_post_id_idx").on(t.postId),
     index("starboard_entries_guild_id_author_id_idx").on(t.guildId, t.authorId),
     index("starboard_entries_guild_id_posted_at_idx").on(t.guildId, t.postedAt),
@@ -219,13 +225,17 @@ export const starboardEntries = sqliteTable(
 );
 
 /** Members whose messages never go into the starboard, in any guild, as on shinpuru. */
-export const starboardOptOuts = sqliteTable("starboard_opt_outs", {
-  userId: text().primaryKey(),
-  optedOutAt: integer({ mode: "timestamp_ms" }).notNull(),
-});
+export const starboardOptOuts = snakeCase.table(
+  "starboard_opt_outs",
+  {
+    userId: text().notNull(),
+    optedOutAt: integer({ mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId] })],
+);
 
 /** Each member's karma in a guild; src/karma/karma.ts keeps it. */
-export const karma = sqliteTable(
+export const karma = snakeCase.table(
   "karma",
   {
     guildId: text().notNull(),
@@ -239,7 +249,7 @@ export const karma = sqliteTable(
  * Karma votes, one per member and message for good, so removing a reaction
  * and adding it again doesn't count twice.
  */
-export const karmaVotes = sqliteTable(
+export const karmaVotes = snakeCase.table(
   "karma_votes",
   {
     messageId: text().notNull(),
@@ -261,29 +271,37 @@ export const karmaVotes = sqliteTable(
  * Karma the starboard gave, one per message, so a message that drops out and
  * gets in again doesn't pay twice.
  */
-export const karmaBonuses = sqliteTable("karma_bonuses", {
-  messageId: text().primaryKey(),
-  guildId: text().notNull(),
-  userId: text().notNull(),
-  amount: integer().notNull(),
-  givenAt: integer({ mode: "timestamp_ms" }).notNull(),
-  /** Someone deleted the post, which took the karma back. */
-  revoked: integer({ mode: "boolean" }).notNull().default(false),
-});
+export const karmaBonuses = snakeCase.table(
+  "karma_bonuses",
+  {
+    messageId: text().notNull(),
+    guildId: text().notNull(),
+    userId: text().notNull(),
+    amount: integer().notNull(),
+    givenAt: integer({ mode: "timestamp_ms" }).notNull(),
+    /** Someone deleted the post, which took the karma back. */
+    revoked: integer({ mode: "boolean" }).notNull().default(false),
+  },
+  (t) => [primaryKey({ columns: [t.messageId] })],
+);
 
 /**
  * The bot settings, one JSON document per guild. The bot validates them when
  * it loads them; src/settings/settings.ts reads and writes them.
  */
-export const settings = sqliteTable("settings", {
-  guildId: text().primaryKey(),
-  /** With defaults filled in, as of the last change. */
-  document: text({ mode: "json" }).$type<unknown>().notNull(),
-  updatedAt: integer({ mode: "timestamp_ms" }).notNull(),
-});
+export const settings = snakeCase.table(
+  "settings",
+  {
+    guildId: text().notNull(),
+    /** With defaults filled in, as of the last change. */
+    document: text({ mode: "json" }).$type<unknown>().notNull(),
+    updatedAt: integer({ mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.guildId] })],
+);
 
 /** Every change to the bot settings. */
-export const settingsChanges = sqliteTable(
+export const settingsChanges = snakeCase.table(
   "settings_changes",
   {
     id: integer().primaryKey({ autoIncrement: true }),
@@ -306,26 +324,30 @@ export const settingsChanges = sqliteTable(
 );
 
 /** Members signed in to the web interface. */
-export const webSessions = sqliteTable(
+export const webSessions = snakeCase.table(
   "web_sessions",
   {
     /** SHA-256 of the session cookie, in hex, so the table alone can't sign anyone in. */
-    tokenHash: text().primaryKey(),
+    tokenHash: text().notNull(),
     userId: text().notNull(),
     createdAt: integer({ mode: "timestamp_ms" }).notNull(),
     expiresAt: integer({ mode: "timestamp_ms" }).notNull(),
   },
-  (t) => [index("web_sessions_expires_at_idx").on(t.expiresAt)],
+  (t) => [primaryKey({ columns: [t.tokenHash] }), index("web_sessions_expires_at_idx").on(t.expiresAt)],
 );
 
 /**
  * Images the web interface serves at `/imagestore/<id>.<ext>`, for embeds
  * to link to, like shinpuru's image store. src/imagestore.ts keeps them.
  */
-export const storedImages = sqliteTable("stored_images", {
-  /** Random, so nobody can guess the URL of an image they weren't shown. */
-  id: text().primaryKey(),
-  image: blob({ mode: "buffer" }).notNull(),
-  contentType: text().notNull(),
-  storedAt: integer({ mode: "timestamp_ms" }).notNull(),
-});
+export const storedImages = snakeCase.table(
+  "stored_images",
+  {
+    /** Random, so nobody can guess the URL of an image they weren't shown. */
+    id: text().notNull(),
+    image: blob({ mode: "buffer" }).notNull(),
+    contentType: text().notNull(),
+    storedAt: integer({ mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.id] })],
+);

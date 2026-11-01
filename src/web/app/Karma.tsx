@@ -9,7 +9,7 @@ import { Problem } from "@/components/Problem";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { EmojiInfo, KarmaBoard } from "../rpc.ts";
@@ -63,19 +63,15 @@ export function KarmaPage() {
 
 /** The karma settings, over the page. */
 function SettingsDialog() {
-  const { id: guildId, prefix } = useGuild();
+  const { id: guildId } = useGuild();
   const { settingsOpen, setSettingsOpen } = useKarmaView();
   // Loaded with the page, so the form is there as soon as the dialog opens.
   useAtomMount(karmaSetupQuery(guildId));
   return (
     <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl">
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl" aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle>Karma settings</DialogTitle>
-          <DialogDescription>
-            Same as <code>{prefix}karma set</code>, <code>block</code> and <code>addrule</code>. Changes apply right
-            away and show up in <code>{prefix}settings log</code>.
-          </DialogDescription>
         </DialogHeader>
         <KarmaSettings onCancel={() => setSettingsOpen(false)} onDone={() => setSettingsOpen(false)} />
       </DialogContent>
@@ -122,9 +118,7 @@ function Off() {
           <ThumbsUp />
         </EmptyMedia>
         <EmptyTitle>Karma is off here</EmptyTitle>
-        <EmptyDescription>
-          Once it's on, members give each other karma by reacting to messages, and the starboard adds to it.
-        </EmptyDescription>
+        <EmptyDescription>Members give each other karma by reacting to messages.</EmptyDescription>
       </EmptyHeader>
       {configKarma && (
         <EmptyContent>
@@ -144,7 +138,7 @@ function Board({ board }: { board: KarmaBoard }) {
     <>
       <Card>
         <CardContent className="flex flex-col gap-3">
-          <span className="text-muted-foreground">Your karma here</span>
+          <span className="text-muted-foreground">Your karma</span>
           <strong className="font-heading text-4xl leading-none text-primary tabular-nums">{board.own}</strong>
           <p className="max-w-[72ch] text-sm text-muted-foreground">
             <HowItWorks board={board} />
@@ -189,37 +183,29 @@ function Board({ board }: { board: KarmaBoard }) {
   );
 }
 
-/** What gives and takes karma here, in a few sentences. */
+/** What gives and takes karma here, in a few short sentences. */
 function HowItWorks({ board }: { board: KarmaBoard }) {
   const { upvotes, downvotes, votesPerHour, penalty, starboardGain } = board;
-  const votes =
-    upvotes.length > 0 && downvotes.length > 0 ? (
-      <>
-        React with <Emojis list={upvotes} /> to give the author of a message a point, or <Emojis list={downvotes} /> to
-        take one.
-      </>
-    ) : upvotes.length > 0 ? (
-      <>
-        React with <Emojis list={upvotes} /> to give the author of a message a point.
-      </>
-    ) : downvotes.length > 0 ? (
-      <>
-        React with <Emojis list={downvotes} /> to take a point from the author of a message.
-      </>
-    ) : null;
+  const up = upvotes.length > 0;
+  const down = downvotes.length > 0;
   return (
     <>
-      {votes && (
+      {up && down ? (
         <>
-          {votes} You can vote {votesPerHour === 1 ? "once" : `${votesPerHour} times`} an hour, once per message
-          {penalty && downvotes.length > 0 ? ", and a downvote costs you a point too" : ""}.{" "}
+          React with <Emojis list={upvotes} /> to give a point, <Emojis list={downvotes} /> to take one.{" "}
         </>
-      )}
-      {starboardGain > 0 && (
+      ) : up ? (
         <>
-          A message that gets into the starboard gives its author {starboardGain} {starboardGain === 1 ? "point" : "points"}.
+          React with <Emojis list={upvotes} /> to give a point.{" "}
         </>
-      )}
+      ) : down ? (
+        <>
+          React with <Emojis list={downvotes} /> to take a point.{" "}
+        </>
+      ) : null}
+      {(up || down) && `Up to ${votesPerHour} ${votesPerHour === 1 ? "vote" : "votes"} an hour. `}
+      {down && penalty && "Downvoting costs you a point. "}
+      {starboardGain > 0 && `Starboard posts earn ${starboardGain}.`}
     </>
   );
 }

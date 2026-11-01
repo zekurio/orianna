@@ -1,7 +1,7 @@
 import { BunRuntime, BunServices } from "@effect/platform-bun";
 import * as BunDns from "@effect/platform-bun/BunDns";
 import { Events } from "@fluxerjs/core";
-import { Cause, Console, Effect, Exit, Layer, Queue, SubscriptionRef } from "effect";
+import { Cause, Effect, Exit, Layer, Queue, SubscriptionRef } from "effect";
 import { FetchHttpClient } from "effect/http";
 import type { CommandEntry } from "./commands/command.ts";
 import { help, ping } from "./commands/general.ts";
@@ -13,6 +13,7 @@ import { type Milestones, serveGuilds } from "./features.ts";
 import { Fluxer, listen, logFailure, login } from "./fluxer.ts";
 import { Guilds } from "./guilds.ts";
 import { ImageStore } from "./imagestore.ts";
+import { MinimumLogLevel, PrettyLogger, tagLogs } from "./log.ts";
 import { perms } from "./permissions/commands.ts";
 import { FluxerPollTransport } from "./polls/fluxer.ts";
 import { PollService } from "./polls/service.ts";
@@ -26,6 +27,7 @@ const Platform = Layer.mergeAll(BunServices.layer, BunDns.layer, FetchHttpClient
 const Core = Fluxer.layer.pipe(
   Layer.provideMerge(SettingsStore.layer),
   Layer.provideMerge(Database.layer),
+  Layer.provideMerge(MinimumLogLevel),
   Layer.provideMerge(AppConfig.layer),
   Layer.provideMerge(Platform),
 );
@@ -78,10 +80,18 @@ const run = Effect.fnUntraced(function* (hangups: Queue.Queue<void>) {
   yield* listen(Events.Ready, "startup", () =>
     Effect.gen(function* () {
       const { client } = yield* Fluxer;
-      yield* Effect.logInfo(`logged in as ${client.user?.username} on ${instance}`);
+      yield* Effect.logInfo(`logged in as ${client.user?.username} on ${instance}`).pipe(tagLogs("fluxer"));
       yield* SubscriptionRef.update(milestones.logins, (n) => n + 1);
       yield* catchUpPolls;
     }),
+  );
+  // fluxer.js reconnects on its own; a resume picks up where the connection
+  // left off, and anything else ends in a new Ready.
+  yield* listen(Events.ShardDisconnect, "logging a disconnect", (_shard, code) =>
+    Effect.logWarning(`lost the gateway connection (close code ${code})`).pipe(tagLogs("fluxer")),
+  );
+  yield* listen(Events.ShardResumed, "logging a resume", () =>
+    Effect.logInfo("resumed the gateway connection").pipe(tagLogs("fluxer")),
   );
   yield* listen(Events.MessageCreate, "handling a message", router.handleMessage);
   yield* attachReactions(polls, "poll");
@@ -128,8 +138,10 @@ const main = Effect.gen(function* () {
   Effect.tapCause((cause) => {
     if (Cause.hasInterruptsOnly(cause)) return Effect.void;
     const error = Cause.squash(cause);
-    return error instanceof ConfigError ? Console.error(error.message) : Effect.logError(cause);
+    return Effect.logError(error instanceof ConfigError ? error.message : cause);
   }),
+  // Everything logs through consola, from the first line to the last.
+  Effect.provide(PrettyLogger),
 );
 
 BunRuntime.runMain(main, {

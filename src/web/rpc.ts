@@ -37,6 +37,9 @@ export class Authentication extends RpcMiddleware.Service<Authentication, { prov
   { error: Schema.Union([SignedOut, NotMember]) },
 ) {}
 
+/** Logs each call, what came of it and how long it took. Only the bot has it. */
+export class CallLog extends RpcMiddleware.Service<CallLog>()("orianna/web/CallLog") {}
+
 /** Which guild a call is about. */
 const GuildId = Schema.String.check(Schema.isPattern(/^[0-9]+$/));
 
@@ -389,7 +392,11 @@ export const WebRpcs = RpcGroup.make(
   }),
   /** Turns karma off. Members keep their karma for when it's back on. */
   Rpc.make("disableKarma", { payload: { guildId: GuildId }, error: Refused }),
-).middleware(Authentication);
+)
+  .middleware(Authentication)
+  // The last middleware runs first, so calls that don't get past
+  // Authentication are logged too.
+  .middleware(CallLog);
 
 /**
  * Why a sign-in failed, in the `error` query parameter the callback sends the

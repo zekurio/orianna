@@ -71,7 +71,7 @@ export function RoleMenusSection({ setup, settings }: SectionProps) {
   return (
     <SettingsCard
       title="Role menus"
-      description="Messages where members react to give themselves roles, and remove the reaction to drop them."
+      description="Members react to a message to pick their roles."
       dirty={differs(draft, saved)}
       busy={busy}
       problems={rest}
@@ -82,25 +82,20 @@ export function RoleMenusSection({ setup, settings }: SectionProps) {
         <Switch id={`${id}-on`} checked={draft !== undefined} onCheckedChange={turn} />
         <FieldContent>
           <FieldLabel htmlFor={`${id}-on`}>Role menus</FieldLabel>
-          <FieldDescription>
-            The bot needs Manage Roles, with its own role above every menu role, and Send Messages, Embed Links, Add
-            Reactions and Manage Messages in the menu channels. Turning them off takes the menu messages down; members
-            keep the roles they have.
-          </FieldDescription>
+          <FieldDescription>The bot's role has to be above the roles it gives.</FieldDescription>
         </FieldContent>
       </Field>
 
       {draft && (
         <>
           <Field data-invalid={problemAt(problems, `${ROOT}/channelId`) ? true : undefined} className="sm:max-w-sm">
-            <FieldLabel htmlFor={`${id}-channel`}>Channel</FieldLabel>
+            <FieldLabel htmlFor={`${id}-channel`}>Default channel</FieldLabel>
             <ChannelSelect
               id={`${id}-channel`}
               value={draft.channelId}
               channels={setup.channels}
               onChange={(channelId) => setDraft({ ...draft, channelId })}
             />
-            <FieldDescription>Where menus go unless they pick a channel of their own.</FieldDescription>
             <FieldError>{problemAt(problems, `${ROOT}/channelId`)}</FieldError>
           </Field>
 
@@ -173,9 +168,7 @@ function MenuEditor({
             spellCheck={false}
             aria-invalid={invalid("name")}
           />
-          <FieldDescription>
-            Lowercase letters, digits and hyphens. Renaming a menu deletes its message and posts a new one.
-          </FieldDescription>
+          <FieldDescription>Lowercase letters, digits and hyphens. Renaming reposts the menu.</FieldDescription>
           <FieldError>{problem("name")}</FieldError>
         </Field>
 
@@ -202,7 +195,7 @@ function MenuEditor({
             maxLength={1000}
             aria-invalid={invalid("description")}
           />
-          <FieldDescription>Optional, shown above the roles.</FieldDescription>
+          <FieldDescription>Optional.</FieldDescription>
           <FieldError>{problem("description")}</FieldError>
         </Field>
 
@@ -217,7 +210,6 @@ function MenuEditor({
               <SelectItem value="single">One at a time</SelectItem>
             </SelectContent>
           </Select>
-          <FieldDescription>With one at a time, picking a role replaces the last.</FieldDescription>
           <FieldError>{problem("mode")}</FieldError>
         </Field>
 

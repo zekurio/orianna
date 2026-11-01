@@ -1,5 +1,5 @@
 import { cdnEmojiURL } from "@fluxerjs/core";
-import { Effect, Layer, Option, Ref, Result } from "effect";
+import { Cause, Effect, Exit, Layer, Option, Predicate, Ref, Result, Schema } from "effect";
 import { Headers } from "effect/http";
 import { type Command, formatUsage, isGroup, mayRun, type UserError } from "../commands/command.ts";
 import { CommandList } from "../commands/router.ts";
@@ -11,6 +11,7 @@ import { Guilds } from "../guilds.ts";
 import { SCOREBOARD_SIZE } from "../karma/commands.ts";
 import { Karma, KarmaGuild } from "../karma/karma.ts";
 import { currentKarma, disableKarma, setKarma } from "../karma/manage.ts";
+import { millis, tagLogs } from "../log.ts";
 import { GuildAccess, PERMISSIONS } from "../permissions/rules.ts";
 import { Settings } from "../settings/settings.ts";
 import { currentStarboard, disableStarboard, setStarboard } from "../starboard/manage.ts";
@@ -19,6 +20,7 @@ import { LiveStarboard, StarboardGuild } from "../starboard/starboard.ts";
 import { unicodeEmoji } from "./emoji.ts";
 import {
   Authentication,
+  CallLog,
   type CommandInfo,
   type CommandSection,
   CurrentMember,
@@ -123,6 +125,49 @@ export const AuthenticationLive = Layer.effect(
       });
   }),
 );
+
+/**
+ * Logs each call by name, with its guild, what came of it and how long it
+ * took. What went wrong in a call that failed is logged where it failed.
+ *
+ * The RPC server encodes the answer only after this, and an answer that
+ * doesn't fit its schema would reach the app as a defect with nothing in the
+ * log, so it's checked here, the way the server will encode it, and hidden
+ * like any other failure.
+ */
+export const CallLogLive = Layer.succeed(CallLog, (effect, { rpc, payload }) => {
+  const guildId = guildIdOf(payload);
+  const call = guildId === undefined ? rpc._tag : `${rpc._tag} in guild ${guildId}`;
+  return effect.pipe(
+    Effect.tap((answer) => encoderFor(rpc.successSchema)(answer).pipe(hide(`answering ${call}`))),
+    Effect.exit,
+    Effect.timed,
+    Effect.flatMap(([duration, exit]) =>
+      Effect.logInfo(`${call}: ${outcomeOf(exit)} in ${millis(duration)}`).pipe(Effect.andThen(exit)),
+    ),
+    tagLogs("rpc"),
+  );
+});
+
+const encoders = new WeakMap<Schema.Top, (answer: unknown) => Effect.Effect<unknown, Schema.SchemaError>>();
+
+/** Encodes an answer to JSON as the RPC server does. Our schemas need no services to encode. */
+function encoderFor(schema: Schema.Top) {
+  let encode = encoders.get(schema);
+  if (!encode) {
+    encode = Schema.encodeUnknownEffect(Schema.toCodecJson(schema as Schema.Codec<unknown, unknown>));
+    encoders.set(schema, encode);
+  }
+  return encode;
+}
+
+/** `ok`, the error the app gets, like `Refused`, or `failed`. */
+function outcomeOf(exit: Exit.Exit<unknown, unknown>): string {
+  if (Exit.isSuccess(exit)) return "ok";
+  if (Cause.hasInterruptsOnly(exit.cause)) return "interrupted";
+  const error = Option.getOrUndefined(Exit.findErrorOption(exit));
+  return Predicate.hasProperty(error, "_tag") && Predicate.isString(error._tag) ? error._tag : "failed";
+}
 
 export const HandlersLive = WebRpcs.toLayer(
   Effect.gen(function* () {
