@@ -49,8 +49,8 @@ in
         starts, and any change restarts it.
 
         Bot settings like `permissions`, `emoji` or `starboard` live in the bot's
-        database, one set per server, and are edited on the web interface's
-        Admin tab or with `!settings`, not here.
+        database, one set per server, and are edited on the web interface
+        or with `!settings`, not here.
       '';
       example = lib.literalExpression ''
         {

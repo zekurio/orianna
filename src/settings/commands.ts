@@ -18,7 +18,7 @@ const LOG_PAGE_SIZE = 10;
 
 /**
  * `!settings export`, `import` and `log`, for the guild owner and members
- * with Administrator. A stopgap until the web interface edits the settings.
+ * with Administrator. The web interface's Admin tab does the same.
  */
 export const settingsCommands = Effect.fnUntraced(function* () {
   const http = yield* Effect.context<HttpClient.HttpClient | Dns.Dns>();

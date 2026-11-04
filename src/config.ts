@@ -107,7 +107,7 @@ const StarboardSchema = Schema.Struct({
   karma: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(orDefault(3)),
 });
 
-/** Emoji for upvotes or downvotes; a message can carry 30 different reactions. */
+/** Emoji for upvotes or downvotes, 20 at most in each list. */
 const KarmaEmojiSchema = Schema.Array(Schema.String).check(Schema.isMaxLength(20));
 
 const KarmaRuleSchema = Schema.Struct({
@@ -142,9 +142,10 @@ const KarmaSchema = Schema.Struct({
 
 /**
  * Bot settings: what the bot does in the guild. They live in the database,
- * where `!settings` edits them while the bot runs; src/settings/settings.ts
- * keeps them. Nothing here is a secret or needs a restart. The channels they
- * name have to be the guild's own, and take messages.
+ * where the web interface, `!settings`, `!starboard` and `!karma` edit them
+ * while the bot runs; src/settings/settings.ts keeps them. Nothing here is
+ * a secret or needs a restart. The channels they name have to be the
+ * guild's own, and take messages.
  */
 export const BotSettingsSchema = Schema.Struct({
   /** What commands start with, e.g. `!` for `!help`. */
@@ -178,8 +179,9 @@ export const BotSettingsSchema = Schema.Struct({
    *
    * Members with Manage Expressions get `+emoji.*` and `+sticker.*`. The
    * guild owner and members with Administrator may do everything, and only
-   * they may change the settings. `!perms` shows what a member may do and
-   * which rule decided it.
+   * they may change the other settings; `starboard.config` and
+   * `karma.config` cover the `starboard` and `karma` sections. `!perms`
+   * shows what a member may do and which rule decided it.
    */
   permissions: PermissionsSchema.pipe(orDefault({})),
   /** Channel where emoji and sticker proposals are put to a vote. Required when either is on. */
@@ -191,16 +193,18 @@ export const BotSettingsSchema = Schema.Struct({
   /**
    * Polls members start with `!poll`, posted in the channel the command is
    * used in. Disabled when this section is missing. The bot needs Send
-   * Messages, Embed Links and Add Reactions there, and Manage Messages to
-   * delete the `!poll` message, move votes in single-choice polls, and take
-   * back 🛑 from members who may not end a poll.
+   * Messages, Embed Links, Add Reactions and Read Message History there,
+   * and Manage Messages to delete the `!poll` message, move votes in
+   * single-choice polls, and take back 🛑 from members who may not end a
+   * poll.
    */
   polls: Schema.optionalKey(PollsConfigSchema),
   /**
    * Messages where members react to give themselves roles. The bot posts and
    * updates them on startup and whenever this section changes. It needs
    * Manage Roles, with its own role above every menu role, and Send Messages,
-   * Embed Links, Add Reactions and Manage Messages in the menu channels.
+   * Embed Links, Add Reactions, Manage Messages and Read Message History in
+   * the menu channels.
    * Removing a menu or an option takes down its message or reactions;
    * members keep the roles they have.
    */

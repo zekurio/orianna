@@ -17,7 +17,7 @@ import { type SectionProps, type Settings, setupQuery } from "./shared.tsx";
 
 // The Admin tab: the settings of the whole server, for the guild owner and
 // members with Administrator, the same ones `!settings` exports and imports.
-// The starboard's are on its own page.
+// The starboard's and karma's are on their own pages.
 
 type Tab = "general" | "permissions" | "proposals" | "role-menus" | "history";
 
