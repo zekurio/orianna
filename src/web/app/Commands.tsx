@@ -3,14 +3,13 @@ import { MagnifyingGlass, ShieldStar } from "@phosphor-icons/react";
 import { AsyncResult } from "effect/reactivity";
 import { useDeferredValue, useMemo, useState } from "react";
 import { ListCardSkeleton, Placeholder, TextSkeleton } from "@/components/loading";
-import { PageHeader, SectionTitle } from "@/components/page";
+import { PageHeader, SectionTitle, WithSidebar } from "@/components/page";
 import { Problem } from "@/components/Problem";
 import { Card } from "@/components/ui/card";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import type { CommandInfo, CommandSection } from "../rpc.ts";
 import { Api } from "./api.ts";
-import { useSession } from "./App.tsx";
 import { useGuild } from "./guild.tsx";
 import { MessageText } from "./MessageText.tsx";
 
@@ -25,11 +24,7 @@ export function CommandsPage() {
   const commands = useAtomValue(Api.query("commands", { guildId }));
   const [query, setQuery] = useState("");
   return (
-    // On wide screens the section links are fixed to the window's left edge,
-    // 16rem wide. The page stays centred like the others, moving right only
-    // as far as it takes to keep 2rem clear of them: its content starts at
-    // the centred page's edge, (100vw - 72rem) / 2, plus its 2.5rem padding.
-    <div className="flex flex-col gap-6 lg:ml-[max(0px,calc(15.5rem_-_max(0px,50vw_-_36rem)))]">
+    <>
       <PageHeader title="Commands" />
       {AsyncResult.matchWithError(commands, {
         onInitial: () => <CommandBrowser sections={undefined} query={query} onQuery={setQuery} />,
@@ -37,7 +32,7 @@ export function CommandsPage() {
         onDefect: () => <Problem />,
         onSuccess: ({ value }) => <CommandBrowser sections={value} query={query} onQuery={setQuery} />,
       })}
-    </div>
+    </>
   );
 }
 
@@ -45,9 +40,9 @@ export function CommandsPage() {
 const sectionId = (title: string) => "commands-" + title.toLowerCase();
 
 /**
- * The list, with the search and a link to each section along the window's
- * left edge on wide screens, and only the search above it on narrow ones.
- * Without sections, they're still loading.
+ * The list, with the search and a link to each section beside it on wide
+ * screens, and only the search above it on narrow ones. Without sections,
+ * they're still loading.
  */
 function CommandBrowser({
   sections,
@@ -68,84 +63,85 @@ function CommandBrowser({
       .filter((section) => section.commands.length > 0);
   }, [sections, deferred, prefix]);
 
+  const sidebar = (
+    <>
+      <InputGroup className="sm:max-w-md lg:max-w-none">
+        <InputGroupAddon>
+          <MagnifyingGlass />
+        </InputGroupAddon>
+        <InputGroupInput
+          type="search"
+          value={query}
+          onChange={(e) => onQuery(e.target.value)}
+          placeholder="Find a command"
+          aria-label="Find a command"
+          autoFocus
+        />
+      </InputGroup>
+      {shown.length > 0 && (
+        <nav aria-label="Sections" className="hidden flex-col gap-0.5 lg:flex">
+          {shown.map((section) => (
+            <a
+              key={section.title}
+              href={"#" + sectionId(section.title)}
+              className="flex items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 text-sm text-muted-foreground no-underline hover:bg-muted hover:text-foreground"
+            >
+              {section.title}
+              <span className="tabular-nums">{section.commands.length}</span>
+            </a>
+          ))}
+        </nav>
+      )}
+    </>
+  );
+
   return (
-    <div className="flex flex-col gap-6">
-      <aside className="flex flex-col gap-4 lg:fixed lg:top-16 lg:bottom-0 lg:left-0 lg:w-64 lg:overflow-y-auto lg:border-r lg:px-6 lg:pt-12 lg:pb-6">
-        <InputGroup className="sm:max-w-md lg:max-w-none">
-          <InputGroupAddon>
-            <MagnifyingGlass />
-          </InputGroupAddon>
-          <InputGroupInput
-            type="search"
-            value={query}
-            onChange={(e) => onQuery(e.target.value)}
-            placeholder="Find a command"
-            aria-label="Find a command"
-            autoFocus
-          />
-        </InputGroup>
-        {shown.length > 0 && (
-          <nav aria-label="Sections" className="hidden flex-col gap-0.5 lg:flex">
-            {shown.map((section) => (
-              <a
-                key={section.title}
-                href={"#" + sectionId(section.title)}
-                className="flex items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 text-sm text-muted-foreground no-underline hover:bg-muted hover:text-foreground"
-              >
-                {section.title}
-                <span className="tabular-nums">{section.commands.length}</span>
-              </a>
-            ))}
-          </nav>
-        )}
-      </aside>
-      <div className="min-w-0">
-        {sections === undefined ? (
-          <Placeholder label="Loading the commands" className="flex flex-col gap-8">
-            {[4, 3].map((rows, i) => (
-              <div key={i} className="flex flex-col gap-3">
-                <TextSkeleton className="h-7 w-36" />
-                <ListCardSkeleton title={false} rows={rows} />
+    <WithSidebar sidebar={sidebar}>
+      {sections === undefined ? (
+        <Placeholder label="Loading the commands" className="flex flex-col gap-8">
+          {[4, 3].map((rows, i) => (
+            <div key={i} className="flex flex-col gap-3">
+              <TextSkeleton className="h-7 w-36" />
+              <ListCardSkeleton title={false} rows={rows} />
+            </div>
+          ))}
+        </Placeholder>
+      ) : shown.length === 0 ? (
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <MagnifyingGlass />
+            </EmptyMedia>
+            <EmptyTitle>No command matches</EmptyTitle>
+            <EmptyDescription>
+              Nothing matches <q>{deferred.trim()}</q>.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      ) : (
+        <div className="flex flex-col gap-8">
+          {shown.map((section) => (
+            <section key={section.title} id={sectionId(section.title)} className="flex scroll-mt-12 flex-col gap-3">
+              <div className="flex flex-col gap-1">
+                <SectionTitle>{section.title}</SectionTitle>
+                {section.description && (
+                  <div className="text-muted-foreground">
+                    <MessageText text={section.description} names={NO_NAMES} />
+                  </div>
+                )}
               </div>
-            ))}
-          </Placeholder>
-        ) : shown.length === 0 ? (
-          <Empty>
-            <EmptyHeader>
-              <EmptyMedia variant="icon">
-                <MagnifyingGlass />
-              </EmptyMedia>
-              <EmptyTitle>No command matches</EmptyTitle>
-              <EmptyDescription>
-                Nothing matches <q>{deferred.trim()}</q>.
-              </EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-        ) : (
-          <div className="flex flex-col gap-8">
-            {shown.map((section) => (
-              <section key={section.title} id={sectionId(section.title)} className="flex scroll-mt-8 flex-col gap-3">
-                <div className="flex flex-col gap-1">
-                  <SectionTitle>{section.title}</SectionTitle>
-                  {section.description && (
-                    <div className="text-muted-foreground">
-                      <MessageText text={section.description} names={NO_NAMES} />
-                    </div>
-                  )}
-                </div>
-                <Card className="gap-0 py-0">
-                  <ul className="divide-y">
-                    {section.commands.map((command) => (
-                      <CommandRow key={command.name} command={command} />
-                    ))}
-                  </ul>
-                </Card>
-              </section>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
+              <Card className="gap-0 py-0">
+                <ul className="divide-y">
+                  {section.commands.map((command) => (
+                    <CommandRow key={command.name} command={command} />
+                  ))}
+                </ul>
+              </Card>
+            </section>
+          ))}
+        </div>
+      )}
+    </WithSidebar>
   );
 }
 

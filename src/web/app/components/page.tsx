@@ -34,3 +34,23 @@ export function Lead({ children }: { children: ReactNode }) {
 export function SectionTitle({ children }: { children: ReactNode }) {
   return <h2 className="text-2xl leading-tight">{children}</h2>;
 }
+
+/**
+ * Content with a column beside it on wide screens, like the commands page's
+ * search and section links, and above it on narrow ones. The column scrolls
+ * with the page until it reaches the top, then stays there. It scrolls by
+ * itself when it's taller than the window.
+ */
+export function WithSidebar({ sidebar, children }: { sidebar: ReactNode; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-6 lg:grid lg:grid-cols-[14rem_minmax(0,1fr)] lg:items-start lg:gap-10">
+      {/* Held inside the page's scroll box, which is the window less the 4rem
+          header, with the page's 3rem padding above and below. The 0.25rem
+          padding keeps focus rings from being clipped by the scrolling. */}
+      <aside className="flex flex-col gap-4 lg:sticky lg:top-11 lg:-m-1 lg:max-h-[calc(100dvh-9.5rem)] lg:overflow-y-auto lg:p-1">
+        {sidebar}
+      </aside>
+      <div className="min-w-0">{children}</div>
+    </div>
+  );
+}
