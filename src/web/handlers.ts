@@ -1,4 +1,4 @@
-import { cdnEmojiURL } from "@fluxerjs/core";
+import { cdnEmojiURL, type Guild } from "@fluxerjs/core";
 import { Cause, Effect, Exit, Layer, Option, Predicate, Ref, Result, Schema } from "effect";
 import { Headers } from "effect/http";
 import { type Command, formatUsage, isGroup, mayRun, optionHelp, type UserError } from "../commands/command.ts";
@@ -9,7 +9,7 @@ import { Fluxer, type FluxerError, logFailure, request, tagOf } from "../fluxer.
 import { CurrentGuild } from "../guild.ts";
 import { Guilds } from "../guilds.ts";
 import { SCOREBOARD_SIZE } from "../karma/commands.ts";
-import { Karma, KarmaGuild } from "../karma/karma.ts";
+import { HOUR, Karma, KarmaGuild } from "../karma/karma.ts";
 import { currentKarma, disableKarma, setKarma } from "../karma/manage.ts";
 import { millis, tagLogs } from "../log.ts";
 import { GuildAccess, PERMISSIONS } from "../permissions/rules.ts";
@@ -26,6 +26,8 @@ import {
   CurrentMember,
   type EmojiInfo,
   type GuildInfo,
+  type KarmaEntry,
+  type KarmaStanding,
   type Names,
   NotMember,
   Refused,
@@ -80,6 +82,15 @@ const answer =
 const USER_MENTION = /<@!?(\d+)>/g;
 const CHANNEL_MENTION = /<#(\d+)>/g;
 const CUSTOM_EMOJI = /<(a?):\w+:(\d+)>/g;
+
+/**
+ * A server's icon. `Guild.iconURL` always asks for a PNG, which shows an animated icon frozen
+ * on its first frame. An `a_` hash marks an animated one, and the CDN serves those as GIFs.
+ */
+function guildIconUrl(guild: Guild): string | null {
+  const url = guild.iconURL({ size: 64 });
+  return url && guild.icon?.startsWith("a_") ? url.replace(/\.png(?=\?|$)/, ".gif") : url;
+}
 
 /** The `guildId` of a call about a guild. */
 function guildIdOf(payload: unknown): string | undefined {
@@ -304,13 +315,52 @@ export const HandlersLive = WebRpcs.toLayer(
         const info: GuildInfo = {
           id: guild.id,
           name: guild.name,
-          iconUrl: guild.iconURL({ size: 64 }),
+          iconUrl: guildIconUrl(guild),
           admin: permissions.bypass !== null,
           configStarboard: permissions.has("starboard.config"),
           configKarma: permissions.has("karma.config"),
           prefix,
         };
         return info;
+      });
+
+    /** Scoreboard rows with the members' names and pictures. Members who left drop out. */
+    const named = Effect.fnUntraced(function* (rows: readonly { userId: string; value: number; rank: number }[]) {
+      const members = yield* (yield* KarmaGuild).members(rows.map((r) => r.userId));
+      return rows.flatMap((row): KarmaEntry[] => {
+        const found = members.get(row.userId);
+        return found ? [{ ...row, ...found }] : [];
+      });
+    });
+
+    /** The member's karma in the current guild, undefined while it's off there. Fails with a UserError for a non-member. */
+    const standingIn = (userId: string, guildId: string) =>
+      Effect.gen(function* () {
+        yield* (yield* GuildAccess).permissionsOf(userId);
+        const { karma: config, starboard } = yield* Settings.current;
+        if (!config) return undefined;
+        const karma = yield* Karma;
+        const guild = yield* request("fetching the guild", () => client.guilds.resolve(guildId));
+        const own = yield* karma.of(userId);
+        const [ranked] = own === 0 ? [] : yield* karma.ranked({ userIds: [userId] });
+        const recent = yield* karma.recentVotes(userId);
+        const votesLeft = Math.max(0, config.votesPerHour - recent.length);
+        // A vote comes back once enough of the recent ones are an hour old to drop under the limit.
+        const freedBy = recent[recent.length - config.votesPerHour];
+        const standing: KarmaStanding = {
+          guild: { id: guild.id, name: guild.name, iconUrl: guildIconUrl(guild) },
+          own,
+          rank: ranked?.rank ?? null,
+          upvotes: config.upvotes.map(emojiInfo),
+          downvotes: config.downvotes.map(emojiInfo),
+          votesPerHour: config.votesPerHour,
+          votesLeft,
+          nextVoteAt: votesLeft === 0 && freedBy ? freedBy.getTime() + HOUR : null,
+          blocked: config.blocklist.includes(userId),
+          penalty: config.penalty,
+          starboardGain: starboard?.channelId === undefined ? 0 : starboard.karma,
+        };
+        return standing;
       });
 
     return {
@@ -571,26 +621,41 @@ export const HandlersLive = WebRpcs.toLayer(
       karma: () =>
         inGuild(
           Effect.gen(function* () {
-            const { userId } = yield* member;
-            const { karma: config, starboard } = yield* Settings.current;
-            if (!config) return null;
-            const karma = yield* Karma;
-            const top = yield* karma.top(SCOREBOARD_SIZE);
-            const members = yield* (yield* KarmaGuild).members(top.map((t) => t.userId));
-            return {
-              own: yield* karma.of(userId),
-              top: top.flatMap(({ userId, value }) => {
-                const found = members.get(userId);
-                return found ? [{ userId, value, ...found }] : [];
-              }),
-              upvotes: config.upvotes.map(emojiInfo),
-              downvotes: config.downvotes.map(emojiInfo),
-              votesPerHour: config.votesPerHour,
-              penalty: config.penalty,
-              starboardGain: starboard?.channelId === undefined ? 0 : starboard.karma,
-            };
+            if (!(yield* Settings.current).karma) return null;
+            return { top: yield* named(yield* (yield* Karma).ranked({ limit: SCOREBOARD_SIZE })) };
           }),
         ).pipe(hide("loading karma")),
+
+      karmaSearch: ({ query }) =>
+        inGuild(
+          Effect.gen(function* () {
+            const trimmed = query.trim();
+            if (!trimmed || !(yield* Settings.current).karma) return [];
+            const userIds = yield* (yield* KarmaGuild).search(trimmed);
+            return yield* named(yield* (yield* Karma).ranked({ userIds }));
+          }),
+        ).pipe(hide("searching karma")),
+
+      myKarma: () =>
+        Effect.gen(function* () {
+          const { userId } = yield* CurrentMember;
+          const standings = yield* Effect.forEach(
+            yield* guilds.ids,
+            (guildId) =>
+              guilds.context(guildId).pipe(
+                Effect.flatMap((context) => standingIn(userId, guildId).pipe(Effect.provideContext(context))),
+                // Not a member: not one to show.
+                Effect.catchTag("UserError", () => Effect.succeed(undefined)),
+                Effect.catch((err) =>
+                  Effect.logWarning(`guild ${guildId}: couldn't load karma: ${err.message}`).pipe(Effect.as(undefined)),
+                ),
+              ),
+            { concurrency: 4 },
+          );
+          return standings
+            .filter((s): s is KarmaStanding => s !== undefined)
+            .sort((a, b) => a.guild.name.localeCompare(b.guild.name));
+        }).pipe(hide("loading your karma")),
 
       karmaSetup: () =>
         inGuild(

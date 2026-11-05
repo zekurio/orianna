@@ -183,6 +183,8 @@ export type EmojiInfo = typeof EmojiInfo.Type;
 
 /** A member on the karma scoreboard. */
 export const KarmaEntry = Schema.Struct({
+  /** Their place, shared with those who have as much: 1, 1, 3. */
+  rank: Schema.Number,
   userId: Schema.String,
   name: Schema.String,
   avatarUrl: Schema.String,
@@ -190,19 +192,33 @@ export const KarmaEntry = Schema.Struct({
 });
 export type KarmaEntry = typeof KarmaEntry.Type;
 
-/** Karma while it's on: the member's own, the scoreboard, and how voting goes. */
+/** The karma scoreboard while karma is on. */
 export const KarmaBoard = Schema.Struct({
-  own: Schema.Number,
   /** Most karma first, members who left aside. */
   top: Schema.Array(KarmaEntry),
+});
+export type KarmaBoard = typeof KarmaBoard.Type;
+
+/** The member's karma in a guild where it's on, and how voting goes there. */
+export const KarmaStanding = Schema.Struct({
+  guild: Schema.Struct({ id: Schema.String, name: Schema.String, iconUrl: Schema.NullOr(Schema.String) }),
+  own: Schema.Number,
+  /** Their place on the scoreboard; null at 0 karma, where nobody has one. */
+  rank: Schema.NullOr(Schema.Number),
   upvotes: Schema.Array(EmojiInfo),
   downvotes: Schema.Array(EmojiInfo),
   votesPerHour: Schema.Number,
+  /** How many of {@link votesPerHour} the member has left right now. */
+  votesLeft: Schema.Number,
+  /** With none left, when the next one comes back, in ms since the epoch. */
+  nextVoteAt: Schema.NullOr(Schema.Number),
+  /** The member is on the blocklist, so their votes don't count. */
+  blocked: Schema.Boolean,
   penalty: Schema.Boolean,
   /** What getting into the starboard gives; 0 while it's off. */
   starboardGain: Schema.Number,
 });
-export type KarmaBoard = typeof KarmaBoard.Type;
+export type KarmaStanding = typeof KarmaStanding.Type;
 
 const KarmaRuleInput = Schema.Struct({
   when: Schema.Literals(["above", "below"]),
@@ -385,8 +401,15 @@ export const WebRpcs = RpcGroup.make(
   Rpc.make("setStarboard", { payload: { guildId: GuildId, starboard: StarboardInput }, error: Refused }),
   /** Disables the starboard, like `!starboard disable`. */
   Rpc.make("disableStarboard", { payload: { guildId: GuildId }, error: Refused }),
-  /** Karma and its scoreboard, null while it's off. */
+  /** The karma scoreboard, null while karma is off. */
   Rpc.make("karma", { payload: { guildId: GuildId }, success: Schema.NullOr(KarmaBoard) }),
+  /** Members with karma whose names match `query`, most karma first. */
+  Rpc.make("karmaSearch", {
+    payload: { guildId: GuildId, query: Schema.String.check(Schema.isMaxLength(100)) },
+    success: Schema.Array(KarmaEntry),
+  }),
+  /** The member's karma in each guild where it's on, by guild name. */
+  Rpc.make("myKarma", { success: Schema.Array(KarmaStanding) }),
   /** The karma settings, for members with `karma.config`. */
   Rpc.make("karmaSetup", { payload: { guildId: GuildId }, success: KarmaSetup, error: Refused }),
   /** Turns karma on with these settings, or changes them. */

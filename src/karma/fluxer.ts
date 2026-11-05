@@ -5,6 +5,9 @@ import { CurrentGuild } from "../guild.ts";
 import { NO_MENTIONS, sendOptions } from "../messages/fluxer.ts";
 import { type Karma, KarmaGuild, type KarmaMember } from "./karma.ts";
 
+/** How many members a search of the scoreboard looks through. Those without karma drop out after. */
+const SEARCH_LIMIT = 50;
+
 /** Karma through fluxer.js. */
 export const FluxerKarmaGuild = Layer.effect(
   KarmaGuild,
@@ -50,6 +53,14 @@ export const FluxerKarmaGuild = Layer.effect(
           );
           return found;
         }),
+
+      search: (query) =>
+        guild.pipe(
+          Effect.flatMap((g) =>
+            request("searching members", () => g.members.search({ query, limit: SEARCH_LIMIT, isBot: false })),
+          ),
+          Effect.map(({ members }) => members.map((m) => m.userId)),
+        ),
     };
   }),
 );

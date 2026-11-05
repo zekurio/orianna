@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { useSession } from "./App.tsx";
+import { ProfileKarma } from "./ProfileKarma.tsx";
 import { StarboardOptOut } from "./StarboardOptOut.tsx";
 import { Link } from "./router.tsx";
 
@@ -32,6 +33,7 @@ export function ProfilePage() {
           </div>
         </CardContent>
       </Card>
+      <ProfileKarma />
       <SettingsGroup title="Privacy" description="Applies in every server.">
         <StarboardOptOut />
       </SettingsGroup>

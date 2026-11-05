@@ -130,9 +130,10 @@ function GuildSwitcher({ current, path }: { current: GuildInfo | undefined; path
   );
 }
 
-function GuildIcon({ guild }: { guild: GuildInfo }) {
+/** A server's icon, or its initials without one. */
+export function GuildIcon({ guild, className }: { guild: Pick<GuildInfo, "name" | "iconUrl">; className?: string }) {
   return (
-    <Avatar className="size-7 rounded-lg after:rounded-lg">
+    <Avatar className={cn("size-7 rounded-lg after:rounded-lg", className)}>
       {guild.iconUrl && <AvatarImage src={guild.iconUrl} alt="" className="rounded-lg" />}
       <AvatarFallback className="rounded-lg text-xs">{initials(guild.name)}</AvatarFallback>
     </Avatar>

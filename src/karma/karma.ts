@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gt, ne, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, inArray, ne, sql } from "drizzle-orm";
 import { Context, Effect, Layer, Semaphore } from "effect";
 import type { KarmaConfig, KarmaRule } from "../config.ts";
 import { Database, type Transaction } from "../db/index.ts";
@@ -36,6 +36,8 @@ export class KarmaGuild extends Context.Service<
     readonly ban: (userId: string, reason: string) => Effect.Effect<void, FluxerError>;
     /** Those of `userIds` still in the guild, by user ID. */
     readonly members: (userIds: readonly string[]) => Effect.Effect<Map<string, KarmaMember>, FluxerError>;
+    /** The IDs of the members whose names match `query`, best matches first. */
+    readonly search: (query: string) => Effect.Effect<string[], FluxerError>;
   }
 >()("orianna/KarmaGuild") {}
 
@@ -46,7 +48,8 @@ interface Change {
   after: number;
 }
 
-const HOUR = 60 * 60 * 1000;
+/** How long a vote counts against the member who gave it. */
+export const HOUR = 60 * 60 * 1000;
 
 /** The current guild's karma. */
 export class Karma extends Context.Service<
@@ -67,6 +70,17 @@ export class Karma extends Context.Service<
     readonly of: (userId: string) => Effect.Effect<number>;
     /** The members with the most karma, most first. Those at 0 are left out. */
     readonly top: (limit: number) => Effect.Effect<{ userId: string; value: number }[]>;
+    /**
+     * Members with karma and their place on the scoreboard, most first. Members
+     * with the same karma share a place, and the next one skips as many, like
+     * 1, 1, 3. `userIds` keeps only those; `limit` the first so many.
+     */
+    readonly ranked: (options: {
+      readonly limit?: number;
+      readonly userIds?: readonly string[];
+    }) => Effect.Effect<{ userId: string; value: number; rank: number }[]>;
+    /** When a member gave the votes that count against their hour, oldest first. */
+    readonly recentVotes: (voterId: string) => Effect.Effect<Date[]>;
   }
 >()("orianna/Karma") {
   static readonly layer = Layer.effect(
@@ -248,6 +262,44 @@ export class Karma extends Context.Service<
               .orderBy(desc(karma.value))
               .limit(limit)
               .all(),
+          ),
+
+        ranked: ({ limit, userIds }) =>
+          Effect.sync(() => {
+            if (userIds?.length === 0) return [];
+            const board = db
+              .select({
+                userId: karma.userId,
+                value: karma.value,
+                rank: sql<number>`rank() over (order by ${karma.value} desc)`.as("rank"),
+              })
+              .from(karma)
+              .where(and(eq(karma.guildId, guildId), ne(karma.value, 0)))
+              .as("board");
+            const query = db
+              .select()
+              .from(board)
+              .where(userIds ? inArray(board.userId, [...userIds]) : undefined)
+              .orderBy(asc(board.rank), asc(board.userId))
+              .$dynamic();
+            return (limit === undefined ? query : query.limit(limit)).all();
+          }),
+
+        recentVotes: (voterId) =>
+          Effect.sync(() =>
+            db
+              .select({ votedAt: karmaVotes.votedAt })
+              .from(karmaVotes)
+              .where(
+                and(
+                  eq(karmaVotes.guildId, guildId),
+                  eq(karmaVotes.voterId, voterId),
+                  gt(karmaVotes.votedAt, new Date(Date.now() - HOUR)),
+                ),
+              )
+              .orderBy(asc(karmaVotes.votedAt))
+              .all()
+              .map((row) => row.votedAt),
           ),
       };
     }),
