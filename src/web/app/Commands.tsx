@@ -124,7 +124,7 @@ function CommandBrowser({
         ) : (
           <div className="flex flex-col gap-8">
             {shown.map((section) => (
-              <section key={section.title} id={sectionId(section.title)} className="flex scroll-mt-24 flex-col gap-3">
+              <section key={section.title} id={sectionId(section.title)} className="flex scroll-mt-8 flex-col gap-3">
                 <div className="flex flex-col gap-1">
                   <SectionTitle>{section.title}</SectionTitle>
                   {section.description && (

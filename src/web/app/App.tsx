@@ -95,10 +95,16 @@ function Shell() {
 
   return (
     <GuildContext value={guild ?? null}>
-      <Header path={path} />
-      <main className={cn(container, "flex flex-col gap-6 py-8 sm:py-12")}>
-        <Page path={path} />
-      </main>
+      {/* The page scrolls in its own box under the header, so scrolling past
+          either end bounces the page and leaves the header where it is. */}
+      <div className="flex h-dvh flex-col">
+        <Header path={path} />
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <main className={cn(container, "flex flex-col gap-6 py-8 sm:py-12")}>
+            <Page path={path} />
+          </main>
+        </div>
+      </div>
     </GuildContext>
   );
 }

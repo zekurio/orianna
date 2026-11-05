@@ -91,6 +91,9 @@
     color-scheme: dark;
     @apply bg-background font-sans text-foreground;
     line-height: 1.55;
+    /* The signed-in app scrolls inside its own box; this stops the whole
+       window from bouncing along with it. */
+    overscroll-behavior: none;
   }
 
   body {

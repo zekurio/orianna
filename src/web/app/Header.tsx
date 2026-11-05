@@ -48,7 +48,7 @@ export function Header({ path }: { path: string }) {
   const page = parseGuildPath(path)?.page;
   const tabs = guild?.admin ? [...TABS, ADMIN_TAB] : TABS;
   return (
-    <header className="sticky top-0 z-10 border-b bg-background">
+    <header className="z-10 shrink-0 border-b bg-background">
       {/* The full width, unlike the pages, so the tabs have room to grow. */}
       <div className="flex h-16 w-full items-center gap-x-4 px-4 sm:gap-x-10 sm:px-6 max-sm:h-auto max-sm:flex-wrap max-sm:gap-y-1 max-sm:pt-3">
         <div className="flex min-w-0 items-center gap-3">
