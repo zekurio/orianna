@@ -1,7 +1,7 @@
 import { cdnEmojiURL } from "@fluxerjs/core";
 import { Cause, Effect, Exit, Layer, Option, Predicate, Ref, Result, Schema } from "effect";
 import { Headers } from "effect/http";
-import { type Command, formatUsage, isGroup, mayRun, type UserError } from "../commands/command.ts";
+import { type Command, formatUsage, isGroup, mayRun, optionHelp, type UserError } from "../commands/command.ts";
 import { CommandList } from "../commands/router.ts";
 import { Database } from "../db/index.ts";
 import { type ParsedEmoji, parseEmoji } from "../emoji.ts";
@@ -425,30 +425,43 @@ export const HandlersLive = WebRpcs.toLayer(
             const info = (path: string, c: Command): CommandInfo => ({
               name: path,
               description: c.description,
+              details: c.details ?? null,
               usage: formatUsage(c.options),
-              options: (c.options ?? []).map((o) => ({
-                name: o.name,
-                description: o.description,
-                usage: formatUsage([o]),
-              })),
+              options: optionHelp(c.options),
               permission: c.permission ?? null,
               adminOnly: c.adminOnly === true,
             });
-            const standalone: CommandInfo[] = [];
-            const groups: CommandSection[] = [];
+            const general: CommandInfo[] = [];
+            // By title. A group and the commands that name it as their section share one.
+            const features = new Map<string, { description: string | null; commands: CommandInfo[] }>();
+            const feature = (title: string) => {
+              let section = features.get(title);
+              if (!section) features.set(title, (section = { description: null, commands: [] }));
+              return section;
+            };
             const entries = (yield* Ref.get(commandList)).get(guildId) ?? new Map();
             for (const entry of entries.values()) {
               if (!isGroup(entry)) {
-                if (mayRun(entry, permissions)) standalone.push(info(entry.name, entry));
+                if (!mayRun(entry, permissions)) continue;
+                (entry.section === undefined ? general : feature(entry.section).commands).push(info(entry.name, entry));
                 continue;
               }
               const commands = [
                 ...(entry.default && mayRun(entry.default, permissions) ? [info(entry.name, entry.default)] : []),
                 ...entry.subcommands.filter((c) => mayRun(c, permissions)).map((c) => info(`${entry.name} ${c.name}`, c)),
               ];
-              if (commands.length > 0) groups.push({ group: entry.name, description: entry.description, commands });
+              if (commands.length === 0) continue;
+              const section = feature(entry.name[0]!.toUpperCase() + entry.name.slice(1));
+              section.description = entry.description;
+              section.commands.push(...commands);
             }
-            return [{ group: null, description: null, commands: standalone }, ...groups].filter(
+            // General first, then the features by name, then the ones only admins
+            // may run anything in, like the settings.
+            const adminOnly = (s: { commands: readonly CommandInfo[] }) => s.commands.every((c) => c.adminOnly);
+            const sections: CommandSection[] = [...features]
+              .map(([title, s]) => ({ title, ...s }))
+              .sort((a, b) => Number(adminOnly(a)) - Number(adminOnly(b)) || a.title.localeCompare(b.title));
+            return [{ title: "General", description: null, commands: general }, ...sections].filter(
               (s) => s.commands.length > 0,
             );
           }),

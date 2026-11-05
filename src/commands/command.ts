@@ -13,27 +13,47 @@ import type { CommandRouter } from "./router.ts";
 
 export type OptionType = "string" | "integer" | "attachment";
 
+/**
+ * Options are given by position, in order, like chat bots took them before
+ * slash commands: one word each, or a quoted value with spaces. Attachments
+ * don't take a position; see `parseOptions` in options.ts.
+ * `checkOptions` holds every command to that when it's registered.
+ */
 export interface OptionSpec {
   name: string;
   description: string;
   type: OptionType;
-  /** Defaults to true. */
+  /**
+   * Defaults to true. Required strings and integers can't come after
+   * optional ones; an empty pair of quotes skips an optional one.
+   */
   required?: boolean;
   /**
-   * Strings only: take the rest of the positional input, spaces included. Must
-   * be the last positional option.
+   * Strings only: take the rest of the input as typed, spaces and quotes
+   * included. Must be the last string or integer option.
    */
   rest?: boolean;
-  /**
-   * Given as `--name value` anywhere after the positional options instead of by
-   * position. The value runs until the next `--flag`, so it may contain spaces.
-   */
-  named?: boolean;
   /**
    * Attachments only: the file has to come with the message. A pasted link is
    * refused instead of downloaded.
    */
   attachedOnly?: boolean;
+  /**
+   * Rest strings only: the pieces the command reads out of the text itself,
+   * like a poll's question, answers and duration. Usage and help show them in
+   * place of the option; parsing still hands over the whole text.
+   */
+  parts?: readonly OptionPart[];
+}
+
+/** A piece of a rest option's text, for usage and help only. */
+export interface OptionPart {
+  name: string;
+  description: string;
+  /** Defaults to true. */
+  required?: boolean;
+  /** May be given more than once, like a poll's answers. */
+  repeated?: boolean;
 }
 
 /**
@@ -131,8 +151,20 @@ export function formatError(message: string): string {
 
 export interface Command<O extends readonly OptionSpec[] = readonly OptionSpec[]> {
   name: string;
+  /** One line; lists show only this. */
   description: string;
+  /**
+   * What doesn't fit in one line, like an example. Shown with the description
+   * by `!help <command>` and on the web.
+   */
+  details?: string;
   options?: O;
+  /**
+   * For a command outside a group: the heading the commands page lists it
+   * under with the rest of its feature, like Polls. Without one it goes under
+   * General.
+   */
+  section?: string;
   /** Members without it are refused, and `!help` leaves the command out for them. */
   permission?: Permission;
   /**
@@ -173,21 +205,55 @@ export function defineCommand<const O extends readonly OptionSpec[] = []>(
   return command;
 }
 
-/** e.g. `<name> <image: attachment or link> [reason...] [--tags tags]` */
+/** e.g. `<name> <image: attachment or link> [reason...]` */
 export function formatUsage(options: readonly OptionSpec[] = []): string {
   return options
     .map((o) => {
+      if (o.parts) return o.parts.map(partUsage).join(" ");
       const label =
         o.type === "attachment"
           ? o.attachedOnly
             ? `${o.name}: attachment`
             : `${o.name}: attachment or link`
-          : o.named
-            ? `--${o.name} ${o.name}`
-            : o.rest
-              ? `${o.name}...`
-              : o.name;
+          : o.rest
+            ? `${o.name}...`
+            : o.name;
       return o.required === false ? `[${label}]` : `<${label}>`;
     })
     .join(" ");
+}
+
+function partUsage(part: OptionPart): string {
+  const label = part.repeated ? `${part.name}...` : part.name;
+  return part.required === false ? `[${label}]` : `<${label}>`;
+}
+
+/** Each option as help explains it, with an option's parts in its place. */
+export function optionHelp(
+  options: readonly OptionSpec[] = [],
+): { name: string; usage: string; description: string }[] {
+  return options.flatMap((o) =>
+    o.parts
+      ? o.parts.map((p) => ({ name: p.name, usage: partUsage(p), description: p.description }))
+      : [{ name: o.name, usage: formatUsage([o]), description: o.description }],
+  );
+}
+
+/**
+ * Why the command's options can't be parsed by position, or undefined when
+ * they can: a rest option that isn't last, parts without rest, or a required
+ * value after an optional one.
+ */
+export function checkOptions(command: Command): string | undefined {
+  const positional = (command.options ?? []).filter((o) => o.type !== "attachment");
+  for (const [i, o] of positional.entries()) {
+    if (o.rest && (o.type !== "string" || i !== positional.length - 1)) {
+      return `${o.name} takes the rest of the input, so it has to be the last string option`;
+    }
+    if (o.parts && !o.rest) return `${o.name} has parts but doesn't take the rest of the input`;
+    if (o.required !== false && positional.slice(0, i).some((p) => p.required === false)) {
+      return `${o.name} is required but comes after an optional option`;
+    }
+  }
+  return undefined;
 }

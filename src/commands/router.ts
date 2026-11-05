@@ -14,11 +14,12 @@ import {
   type CommandEntry,
   type CommandGroup,
   type OptionValue,
+  checkOptions,
   formatError,
   formatUsage,
   isGroup,
-  mayRun,
 } from "./command.ts";
+import { groupHelp } from "./help.ts";
 import { nextWord, parseOptions } from "./options.ts";
 
 type BaseContext = Omit<CommandContext, "options">;
@@ -64,6 +65,13 @@ export const makeCommandRouter = Effect.fnUntraced(function* () {
       const next = new Map<string, CommandEntry>();
       for (const entry of list) {
         if (next.has(entry.name)) return Effect.die(new Error(`duplicate command: ${entry.name}`));
+        const commands = isGroup(entry)
+          ? [...(entry.default ? [[entry.name, entry.default] as const] : []), ...entry.subcommands.map((c) => [`${entry.name} ${c.name}`, c] as const)]
+          : [[entry.name, entry] as const];
+        for (const [path, command] of commands) {
+          const problem = checkOptions(command);
+          if (problem) return Effect.die(new Error(`command ${path}: ${problem}`));
+        }
         next.set(entry.name, entry);
       }
       return Ref.update(current, (all) => new Map(all).set(guildId, next));
@@ -128,7 +136,7 @@ export const makeCommandRouter = Effect.fnUntraced(function* () {
       parseOptions(command.options ?? [], input, messageAttachments(message)),
     );
     if (Result.isFailure(options)) {
-      return yield* base.error(`${options.failure.message}\nUsage: ${usageLine(prefix, path, command)}`);
+      return yield* base.error(`${options.failure.message}\n${usageHint(prefix, path, command)}`);
     }
 
     yield* execute(path, command, { ...base, options: options.success });
@@ -184,20 +192,18 @@ function takesCommands(message: Message, channels: readonly string[]): boolean {
   return channel?.isThread() === true && channel.parentId !== null && channels.includes(channel.parentId);
 }
 
-/** Answers a group name on its own with the subcommands the member may run. */
+/** Answers a group name on its own with its help, as `!help <group>` shows it. */
 function listSubcommands(prefix: string, ctx: BaseContext, group: CommandGroup) {
   return Effect.gen(function* () {
     const permissions = yield* (yield* GuildAccess).permissionsOf(ctx.userId);
-    const lines = group.subcommands
-      .filter((c) => mayRun(c, permissions))
-      .map((c) => usageLine(prefix, `${group.name} ${c.name}`, c));
-    yield* ctx.reply(lines.length > 0 ? lines.join("\n") : "There's nothing here you may run.");
+    yield* ctx.reply(groupHelp(prefix, group, permissions) ?? "There's nothing here you may run.");
   });
 }
 
-export function usageLine(prefix: string, path: string, command: Command): string {
+/** Answers arguments that don't fit with the usage, and where to read more. */
+function usageHint(prefix: string, path: string, command: Command): string {
   const usage = formatUsage(command.options);
-  return `\`${prefix}${path}${usage ? ` ${usage}` : ""}\`: ${command.description}`;
+  return `Usage: \`${prefix}${path}${usage ? ` ${usage}` : ""}\`. \`${prefix}help ${path}\` explains each option.`;
 }
 
 function messageContext(message: Message, scope: Scope.Scope): BaseContext {

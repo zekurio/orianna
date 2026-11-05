@@ -37,14 +37,14 @@ const emojiOptions = [
 const stickerOptions = [
   {
     name: "name",
-    description: "Sticker name, which may contain spaces; a 7TV emote brings its own",
+    description:
+      'Sticker name, in quotes when it has spaces. A 7TV emote brings its own; `""` keeps it and lets you give a description',
     type: "string",
     required: false,
-    rest: true,
   },
   { name: "image", description: "The sticker image or a 7TV emote", type: "attachment" },
-  { name: "desc", description: "What the sticker shows", type: "string", required: false, named: true },
-  { name: "tags", description: "Comma-separated search tags", type: "string", required: false, named: true },
+  { name: "desc", description: "What the sticker shows, in quotes when it has spaces", type: "string", required: false },
+  { name: "tags", description: "Search tags, separated by commas", type: "string", required: false, rest: true },
 ] as const;
 
 /** What the propose and add commands take, for either kind. */
@@ -126,7 +126,7 @@ export const proposalCommands = Effect.fnUntraced(function* (
 
   // Emoji and sticker options differ, but both fit InputOptions.
   const options = kind.type === "sticker" ? stickerOptions : emojiOptions;
-  const inputCommands = [
+  const [proposeCommand, addCommand] = [
     defineCommand({
       name: "propose",
       description: `Propose a new ${kind.noun}; ${linkHelp}.`,
@@ -199,7 +199,7 @@ export const proposalCommands = Effect.fnUntraced(function* (
   const group: CommandGroup = {
     name: kind.type,
     description: `${kind.noun[0]!.toUpperCase()}${kind.noun.slice(1)} proposals.`,
-    subcommands: [...inputCommands, list, approve, reject, cancel],
+    subcommands: [proposeCommand, list, cancel, addCommand, approve, reject],
   };
   return group;
 });

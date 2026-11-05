@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { type CommandGroup, defineCommand, refuse } from "../commands/command.ts";
+import { type CommandGroup, defineCommand, refuse, type UserError } from "../commands/command.ts";
 import type { StarboardConfig } from "../config.ts";
 import type { Database } from "../db/index.ts";
 import type { Guilds } from "../guilds.ts";
@@ -20,47 +20,25 @@ export const starboardCommands = Effect.fnUntraced(function* () {
 
   const set = defineCommand({
     name: "set",
-    description: "Set starboard settings.",
+    description: "Change a starboard setting. Setting its channel turns the starboard on.",
     options: [
       {
-        name: "channel",
-        description: "The channel where the starboard messages will appear.",
+        name: "setting",
+        description:
+          "`channel` where starred messages appear, `threshold` of votes a message needs, " +
+          "`emoji` members vote with, or `karma` the author gets",
         type: "string",
-        required: false,
-        named: true,
       },
       {
-        name: "threshold",
-        description: "The minimum number of emoji votes until a message gets into the starboard.",
-        type: "integer",
-        required: false,
-        named: true,
-      },
-      {
-        name: "emoji",
-        description: "The emoji to be used for starring messages.",
+        name: "value",
+        description: "A channel mention or ID, a whole number, or an emoji, depending on the setting",
         type: "string",
-        required: false,
-        named: true,
-      },
-      {
-        name: "karma",
-        description: "The amount of karma an author gets when their message gets into the starboard.",
-        type: "integer",
-        required: false,
-        named: true,
       },
     ] as const,
     permission: "starboard.config",
     run: (ctx) =>
       Effect.gen(function* () {
-        const { channel, threshold, emoji, karma } = ctx.options;
-        const changes: StarboardChanges = {
-          ...(channel !== undefined && { channelId: yield* channelOf(channel) }),
-          ...(threshold !== undefined && { threshold }),
-          ...(emoji !== undefined && { emoji }),
-          ...(karma !== undefined && { karma }),
-        };
+        const changes = yield* starboardChange(ctx.options.setting, ctx.options.value);
         yield* ctx.reply({ embeds: [{ description: describe(yield* setStarboard(changes, ctx.userId)) }] });
       }).pipe(withGuild),
   });
@@ -99,7 +77,7 @@ export const starboardCommands = Effect.fnUntraced(function* () {
   const group: CommandGroup = {
     name: "starboard",
     description: "Set guild starboard settings.",
-    subcommands: [set, disable, optOutCommand, optInCommand],
+    subcommands: [optOutCommand, optInCommand, set, disable],
   };
   return group;
 });
@@ -115,8 +93,28 @@ export function describe(config: StarboardConfig): string {
   );
 }
 
+/** What `!starboard set <setting> <value>` changes. */
+function starboardChange(setting: string, value: string): Effect.Effect<StarboardChanges, UserError> {
+  switch (setting.toLowerCase()) {
+    case "channel":
+      return channelOf(value).pipe(Effect.map((channelId) => ({ channelId })));
+    case "threshold":
+      return wholeNumber(setting, value).pipe(Effect.map((threshold) => ({ threshold })));
+    case "emoji":
+      return Effect.succeed({ emoji: value });
+    case "karma":
+      return wholeNumber(setting, value).pipe(Effect.map((karma) => ({ karma })));
+    default:
+      return refuse("The settings are `channel`, `threshold`, `emoji` and `karma`.");
+  }
+}
+
+function wholeNumber(setting: string, value: string): Effect.Effect<number, UserError> {
+  return /^-?\d+$/.test(value) ? Effect.succeed(Number(value)) : refuse(`The ${setting} has to be a whole number.`);
+}
+
 /** A channel mention like `<#123>`, or a bare ID. */
-function channelOf(input: string) {
+function channelOf(input: string): Effect.Effect<string, UserError> {
   const id = /^<#(\d+)>$|^(\d+)$/.exec(input.trim());
   if (id) return Effect.succeed(id[1] ?? id[2]!);
   return refuse(`${input} isn't a channel. Mention it, like #general, or give its ID.`);

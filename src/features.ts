@@ -88,7 +88,7 @@ const startFeatures = Effect.fnUntraced(function* (
     commands.push(yield* proposalCommands(proposals, settings.pollsChannelId));
   }
   const community = settings.polls ? yield* makeCommunityPolls(settings.polls, guildId) : undefined;
-  if (community) commands.push(...pollCommands(community));
+  if (community) commands.push(...pollCommands(community, settings.polls!.defaultHours));
   // Built while it's off too, so `!starboard set` can turn it on.
   const starboard = yield* makeStarboard(settings.starboard, guildId);
   commands.push(yield* starboardCommands());

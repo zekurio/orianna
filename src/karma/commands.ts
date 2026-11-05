@@ -108,47 +108,31 @@ export const karmaCommands = Effect.fnUntraced(function* () {
 
   const set = defineCommand({
     name: "set",
-    description: "Turn karma on, or change how members vote. What you leave out stays as it is.",
+    description: "Turn karma on, or change a karma setting. The other settings stay as they are.",
     options: [
       {
-        name: "upvotes",
-        description: "Emoji that give the author of a message a point, separated by spaces.",
+        name: "setting",
+        description:
+          "`upvotes` and `downvotes` for the emoji members vote with, `votes` a member may give in an hour, " +
+          "or `penalty` for whether a downvote costs its giver a point too. Leave it out to only turn karma on",
         type: "string",
         required: false,
-        named: true,
       },
       {
-        name: "downvotes",
-        description: "Emoji that take a point, separated by spaces, or `none` for no downvotes.",
+        name: "value",
+        description:
+          "Emoji separated by spaces, or `none` for no downvotes; a whole number for votes; `on` or `off` for the penalty",
         type: "string",
         required: false,
-        named: true,
-      },
-      {
-        name: "votes",
-        description: "How many votes a member may give in an hour.",
-        type: "integer",
-        required: false,
-        named: true,
-      },
-      {
-        name: "penalty",
-        description: "`on` to make a downvote cost the member who gives it a point too, `off` not to.",
-        type: "string",
-        required: false,
-        named: true,
+        rest: true,
       },
     ] as const,
     permission: "karma.config",
     run: (ctx) =>
       Effect.gen(function* () {
-        const { upvotes, downvotes, votes, penalty } = ctx.options;
-        const changes: Partial<KarmaConfig> = {
-          ...(upvotes !== undefined && { upvotes: yield* emojiList(upvotes) }),
-          ...(downvotes !== undefined && { downvotes: yield* emojiList(downvotes) }),
-          ...(votes !== undefined && { votesPerHour: yield* votesPerHour(votes) }),
-          ...(penalty !== undefined && { penalty: yield* onOff(penalty) }),
-        };
+        const { setting, value } = ctx.options;
+        if (setting !== undefined && value === undefined) return yield* refuse(`Give a value for ${setting}.`);
+        const changes = setting !== undefined ? yield* karmaChange(setting, value!) : {};
         const config = yield* save(ctx.userId, (current) => Effect.succeed({ ...(current ?? KARMA_DEFAULTS), ...changes }));
         yield* ctx.reply(describe(config));
       }),
@@ -300,11 +284,30 @@ const emojiList = Effect.fnUntraced(function* (input: string) {
   return words;
 });
 
-function votesPerHour(votes: number) {
-  return votes >= 1 ? Effect.succeed(votes) : refuse("Votes per hour has to be a whole number, 1 or more.");
+/** What `!karma set <setting> <value>` changes. */
+function karmaChange(setting: string, value: string): Effect.Effect<Partial<KarmaConfig>, UserError, Settings> {
+  switch (setting.toLowerCase()) {
+    case "upvotes":
+      return emojiList(value).pipe(Effect.map((upvotes) => ({ upvotes })));
+    case "downvotes":
+      return emojiList(value).pipe(Effect.map((downvotes) => ({ downvotes })));
+    case "votes":
+      return votesPerHour(value).pipe(Effect.map((votesPerHour) => ({ votesPerHour })));
+    case "penalty":
+      return onOff(value).pipe(Effect.map((penalty) => ({ penalty })));
+    default:
+      return refuse("The settings are `upvotes`, `downvotes`, `votes` and `penalty`.");
+  }
 }
 
-function onOff(input: string) {
+function votesPerHour(input: string): Effect.Effect<number, UserError> {
+  const votes = Number(input.trim());
+  return /^\d+$/.test(input.trim()) && votes >= 1
+    ? Effect.succeed(votes)
+    : refuse("Votes per hour has to be a whole number, 1 or more.");
+}
+
+function onOff(input: string): Effect.Effect<boolean, UserError> {
   const value = input.trim().toLowerCase();
   if (["on", "yes", "true"].includes(value)) return Effect.succeed(true);
   if (["off", "no", "false"].includes(value)) return Effect.succeed(false);

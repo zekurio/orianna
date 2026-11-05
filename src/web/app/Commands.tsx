@@ -5,7 +5,6 @@ import { useDeferredValue, useMemo, useState } from "react";
 import { ListCardSkeleton, Placeholder, TextSkeleton } from "@/components/loading";
 import { PageHeader, SectionTitle } from "@/components/page";
 import { Problem } from "@/components/Problem";
-import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
@@ -13,32 +12,95 @@ import type { CommandInfo, CommandSection } from "../rpc.ts";
 import { Api } from "./api.ts";
 import { useSession } from "./App.tsx";
 import { useGuild } from "./guild.tsx";
+import { MessageText } from "./MessageText.tsx";
 
 // The commands page: what `!help` lists for the member, with every option
-// explained, and a search across all of it.
+// explained as `!help <command>` does, and a search across all of it.
+
+/** Descriptions mention no one; they only need the inline code rendered. */
+const NO_NAMES = { users: {}, channels: {}, emojis: {} };
 
 export function CommandsPage() {
   const { id: guildId } = useGuild();
   const commands = useAtomValue(Api.query("commands", { guildId }));
   const [query, setQuery] = useState("");
   return (
-    <>
-      <PageHeader title="Commands" lead="The ones you can run here." />
-      <InputGroup className="h-10 sm:max-w-md">
-        <InputGroupAddon>
-          <MagnifyingGlass />
-        </InputGroupAddon>
-        <InputGroupInput
-          type="search"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Find a command"
-          aria-label="Find a command"
-          autoFocus
-        />
-      </InputGroup>
+    // On wide screens the section links are fixed to the window's left edge,
+    // 16rem wide. The page stays centred like the others, moving right only
+    // as far as it takes to keep 2rem clear of them: its content starts at
+    // the centred page's edge, (100vw - 72rem) / 2, plus its 2.5rem padding.
+    <div className="flex flex-col gap-6 lg:ml-[max(0px,calc(15.5rem_-_max(0px,50vw_-_36rem)))]">
+      <PageHeader title="Commands" />
       {AsyncResult.matchWithError(commands, {
-        onInitial: () => (
+        onInitial: () => <CommandBrowser sections={undefined} query={query} onQuery={setQuery} />,
+        onError: () => <Problem />,
+        onDefect: () => <Problem />,
+        onSuccess: ({ value }) => <CommandBrowser sections={value} query={query} onQuery={setQuery} />,
+      })}
+    </div>
+  );
+}
+
+/** The element a section's link jumps to. */
+const sectionId = (title: string) => "commands-" + title.toLowerCase();
+
+/**
+ * The list, with the search and a link to each section along the window's
+ * left edge on wide screens, and only the search above it on narrow ones.
+ * Without sections, they're still loading.
+ */
+function CommandBrowser({
+  sections,
+  query,
+  onQuery,
+}: {
+  sections: readonly CommandSection[] | undefined;
+  query: string;
+  onQuery: (query: string) => void;
+}) {
+  const { prefix } = useGuild();
+  // Typing stays quick however long the list is.
+  const deferred = useDeferredValue(query);
+  const shown = useMemo(() => {
+    const terms = termsOf(deferred, prefix);
+    return (sections ?? [])
+      .map((section) => ({ ...section, commands: section.commands.filter((c) => matches(c, terms)) }))
+      .filter((section) => section.commands.length > 0);
+  }, [sections, deferred, prefix]);
+
+  return (
+    <div className="flex flex-col gap-6">
+      <aside className="flex flex-col gap-4 lg:fixed lg:top-16 lg:bottom-0 lg:left-0 lg:w-64 lg:overflow-y-auto lg:border-r lg:px-6 lg:pt-12 lg:pb-6">
+        <InputGroup className="sm:max-w-md lg:max-w-none">
+          <InputGroupAddon>
+            <MagnifyingGlass />
+          </InputGroupAddon>
+          <InputGroupInput
+            type="search"
+            value={query}
+            onChange={(e) => onQuery(e.target.value)}
+            placeholder="Find a command"
+            aria-label="Find a command"
+            autoFocus
+          />
+        </InputGroup>
+        {shown.length > 0 && (
+          <nav aria-label="Sections" className="hidden flex-col gap-0.5 lg:flex">
+            {shown.map((section) => (
+              <a
+                key={section.title}
+                href={"#" + sectionId(section.title)}
+                className="flex items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 text-sm text-muted-foreground no-underline hover:bg-muted hover:text-foreground"
+              >
+                {section.title}
+                <span className="tabular-nums">{section.commands.length}</span>
+              </a>
+            ))}
+          </nav>
+        )}
+      </aside>
+      <div className="min-w-0">
+        {sections === undefined ? (
           <Placeholder label="Loading the commands" className="flex flex-col gap-8">
             {[4, 3].map((rows, i) => (
               <div key={i} className="flex flex-col gap-3">
@@ -47,59 +109,42 @@ export function CommandsPage() {
               </div>
             ))}
           </Placeholder>
-        ),
-        onError: () => <Problem />,
-        onDefect: () => <Problem />,
-        onSuccess: ({ value }) => <CommandList sections={value} query={query} />,
-      })}
-    </>
-  );
-}
-
-function CommandList({ sections, query }: { sections: readonly CommandSection[]; query: string }) {
-  const { prefix } = useGuild();
-  // Typing stays quick however long the list is.
-  const deferred = useDeferredValue(query);
-  const shown = useMemo(() => {
-    const terms = termsOf(deferred, prefix);
-    return sections
-      .map((section) => ({ ...section, commands: section.commands.filter((c) => matches(c, terms)) }))
-      .filter((section) => section.commands.length > 0);
-  }, [sections, deferred, prefix]);
-
-  if (shown.length === 0) {
-    return (
-      <Empty>
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <MagnifyingGlass />
-          </EmptyMedia>
-          <EmptyTitle>No command matches</EmptyTitle>
-          <EmptyDescription>
-            Nothing matches <q>{deferred.trim()}</q>.
-          </EmptyDescription>
-        </EmptyHeader>
-      </Empty>
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-8">
-      {shown.map((section) => (
-        <section key={section.group ?? ""} className="flex flex-col gap-3">
-          <div className="flex flex-col gap-1">
-            <SectionTitle>{section.group === null ? "General" : `${prefix}${section.group}`}</SectionTitle>
-            {section.description && <p className="text-muted-foreground">{section.description}</p>}
+        ) : shown.length === 0 ? (
+          <Empty>
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <MagnifyingGlass />
+              </EmptyMedia>
+              <EmptyTitle>No command matches</EmptyTitle>
+              <EmptyDescription>
+                Nothing matches <q>{deferred.trim()}</q>.
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          <div className="flex flex-col gap-8">
+            {shown.map((section) => (
+              <section key={section.title} id={sectionId(section.title)} className="flex scroll-mt-24 flex-col gap-3">
+                <div className="flex flex-col gap-1">
+                  <SectionTitle>{section.title}</SectionTitle>
+                  {section.description && (
+                    <div className="text-muted-foreground">
+                      <MessageText text={section.description} names={NO_NAMES} />
+                    </div>
+                  )}
+                </div>
+                <Card className="gap-0 py-0">
+                  <ul className="divide-y">
+                    {section.commands.map((command) => (
+                      <CommandRow key={command.name} command={command} />
+                    ))}
+                  </ul>
+                </Card>
+              </section>
+            ))}
           </div>
-          <Card className="gap-0 py-0">
-            <ul className="divide-y">
-              {section.commands.map((command) => (
-                <CommandRow key={command.name} command={command} />
-              ))}
-            </ul>
-          </Card>
-        </section>
-      ))}
+        )}
+      </div>
     </div>
   );
 }
@@ -107,37 +152,47 @@ function CommandList({ sections, query }: { sections: readonly CommandSection[];
 function CommandRow({ command }: { command: CommandInfo }) {
   const { prefix } = useGuild();
   return (
-    <li className="flex flex-col gap-2 px-5 py-4">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-        <code className="wrap-anywhere">
-          <span className="font-semibold text-foreground">
-            {prefix}
-            {command.name}
-          </span>
-          {command.usage && <span className="text-muted-foreground"> {command.usage}</span>}
-        </code>
-        {command.adminOnly ? (
-          <Badge variant="secondary" title="Only the server owner and members with Administrator may run it.">
-            <ShieldStar />
-            Admins
-          </Badge>
-        ) : (
-          command.permission && (
-            <Badge variant="outline" className="font-mono" title="The permission it takes, which you have.">
-              {command.permission}
-            </Badge>
-          )
+    <li className="flex flex-col gap-3 px-5 py-4">
+      <div className="flex flex-col gap-1">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+          <p className="font-mono text-sm wrap-anywhere">
+            <span className="font-semibold">
+              {prefix}
+              {command.name}
+            </span>
+            {command.usage && <span className="text-muted-foreground"> {command.usage}</span>}
+          </p>
+          {command.adminOnly ? (
+            <span
+              className="flex items-center gap-1 text-xs text-muted-foreground"
+              title="Only the server owner and members with Administrator may run it."
+            >
+              <ShieldStar className="size-3.5" />
+              Admins
+            </span>
+          ) : (
+            command.permission && (
+              <span className="font-mono text-xs text-muted-foreground" title="The permission it takes, which you have.">
+                {command.permission}
+              </span>
+            )
+          )}
+        </div>
+        <MessageText text={command.description} names={NO_NAMES} />
+        {command.details && (
+          <div className="text-muted-foreground">
+            <MessageText text={command.details} names={NO_NAMES} />
+          </div>
         )}
       </div>
-      <p>{command.description}</p>
       {command.options.length > 0 && (
-        <dl className="grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[max-content_1fr]">
+        <dl className="grid gap-x-6 gap-y-1.5 text-sm sm:grid-cols-[max-content_1fr]">
           {command.options.map((option) => (
             <div key={option.name} className="contents">
-              <dt>
-                <code>{option.usage}</code>
-              </dt>
-              <dd className="text-muted-foreground">{option.description}</dd>
+              <dt className="font-mono">{option.usage}</dt>
+              <dd className="text-muted-foreground">
+                <MessageText text={option.description} names={NO_NAMES} />
+              </dd>
             </div>
           ))}
         </dl>
@@ -159,6 +214,7 @@ function matches(command: CommandInfo, terms: readonly string[]): boolean {
   const text = [
     command.name,
     command.description,
+    command.details ?? "",
     command.permission ?? "",
     ...command.options.flatMap((o) => [o.name, o.description]),
   ]

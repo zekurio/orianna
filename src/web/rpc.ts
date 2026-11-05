@@ -289,7 +289,7 @@ export type SettingsChangeInfo = typeof SettingsChangeInfo.Type;
 const CommandOption = Schema.Struct({
   name: Schema.String,
   description: Schema.String,
-  /** Like `<name>`, `[reason...]` or `[--tags tags]`. */
+  /** Like `<name>`, `[reason...]` or `<image: attachment or link>`. */
   usage: Schema.String,
 });
 
@@ -297,7 +297,10 @@ const CommandOption = Schema.Struct({
 export const CommandInfo = Schema.Struct({
   /** What goes after the prefix, like `starboard set`. */
   name: Schema.String,
+  /** One line, like `!help` lists it. */
   description: Schema.String,
+  /** What `!help <command>` adds to the description; null when nothing. */
+  details: Schema.NullOr(Schema.String),
   /** The options in the order they're given, as `!help` shows them. */
   usage: Schema.String,
   options: Schema.Array(CommandOption),
@@ -308,10 +311,11 @@ export const CommandInfo = Schema.Struct({
 });
 export type CommandInfo = typeof CommandInfo.Type;
 
-/** A command group, like `!starboard`, or the commands that stand on their own. */
+/** A feature's commands, like the starboard's, or the general ones. */
 export const CommandSection = Schema.Struct({
-  /** The group's name; null for the commands that stand on their own. */
-  group: Schema.NullOr(Schema.String),
+  /** Like `Starboard`, `Polls` or `General`. */
+  title: Schema.String,
+  /** The group's description; null for a section that isn't a group. */
   description: Schema.NullOr(Schema.String),
   commands: Schema.Array(CommandInfo),
 });

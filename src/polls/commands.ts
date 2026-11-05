@@ -2,30 +2,55 @@ import { Effect } from "effect";
 import { type CommandEntry, defineCommand } from "../commands/command.ts";
 import { embedPages } from "../messages/body.ts";
 import type { CommunityPolls } from "./community.ts";
+import { plural } from "./duration.ts";
 
 const LIST_PAGE_SIZE = 10;
 
-/** `!poll` starts a poll, `!polls` lists the open ones. */
-export function pollCommands(community: CommunityPolls): CommandEntry[] {
+/**
+ * `!poll` starts a poll, `!polls` lists the open ones. Polls without a
+ * duration run for `defaultHours`.
+ */
+export function pollCommands(community: CommunityPolls, defaultHours: number): CommandEntry[] {
   const poll = defineCommand({
     name: "poll",
-    description:
-      'Start a poll. Quote the question and up to 10 answers, e.g. `"Dinner?" "🍕 Pizza" "🍣 Sushi" 3h`. ' +
-      "Start an answer with an emoji to vote with it. Add a duration (`30m`, `3h`, `3d`, `1w`; " +
-      "4 weeks at most) or `multi` to allow several answers. Without quotes it's a yes/no question. " +
-      "🛑 ends your poll early; deleting it calls it off.",
+    description: "Start a poll.",
+    section: "Polls",
+    details: 'Like `"Dinner?" "🍕 Pizza" "🍣 Sushi" 3h`. React with 🛑 to end it early.',
     options: [
       {
-        name: "question",
-        description: "The question and answers in quotes, then a duration or multi",
+        name: "poll",
+        description: "The question, the answers, how long it runs and whether to allow several answers",
         type: "string",
         rest: true,
+        // parsePollInput reads these out of the text.
+        parts: [
+          {
+            name: "question",
+            description: "What to ask, in quotes if you add answers. Without answers it's yes or no",
+          },
+          {
+            name: "answers",
+            description: "Up to 10, each in quotes. Start one with an emoji to vote with it",
+            required: false,
+            repeated: true,
+          },
+          {
+            name: "duration",
+            description: `Like \`3h\` or \`2d\`, up to 4 weeks. Defaults to ${plural(defaultHours, "hour")}`,
+            required: false,
+          },
+          {
+            name: "multi",
+            description: "Let members pick more than one answer",
+            required: false,
+          },
+        ],
       },
     ],
     permission: "polls.create",
     run: (ctx) =>
       Effect.gen(function* () {
-        yield* community.start(ctx.userId, ctx.channelId, ctx.options.question);
+        yield* community.start(ctx.userId, ctx.channelId, ctx.options.poll);
         // The poll stands in for the command, the way a slash command's reply would.
         yield* ctx.deleteInvocation();
       }),
@@ -34,6 +59,7 @@ export function pollCommands(community: CommunityPolls): CommandEntry[] {
   const list = defineCommand({
     name: "polls",
     description: "Show open polls.",
+    section: "Polls",
     run: (ctx) =>
       Effect.gen(function* () {
         const open = community.open();
