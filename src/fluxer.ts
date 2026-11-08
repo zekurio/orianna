@@ -91,7 +91,14 @@ export class Fluxer extends Context.Service<
       const { instance, logLevel } = yield* AppConfig.current;
       const token = yield* readToken;
       const client = yield* Effect.acquireRelease(
-        request(`reaching ${instance}`, () => Client.fromDiscovery(instance, { logger: fluxerLogger(logLevel) })),
+        request(`reaching ${instance}`, () =>
+          Client.fromDiscovery(instance, {
+            logger: fluxerLogger(logLevel),
+            // fluxer.js keeps the last 50 messages of every channel by default,
+            // and nothing here reads them: messages are fetched by ID.
+            cache: { messages: false },
+          }),
+        ),
         (client) =>
           request("disconnecting", () => client.destroy()).pipe(
             Effect.catch((err) => Effect.logWarning(err.message)),
