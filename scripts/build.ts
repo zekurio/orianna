@@ -1,4 +1,5 @@
 import tailwind from "bun-plugin-tailwind";
+import cn from "./cn.ts";
 import icons from "./icons.ts";
 
 // `bun run build`: the bot, the web interface and the migrations in one
@@ -13,7 +14,7 @@ const result = await Bun.build({
   minify: true,
   define: { "process.env.NODE_ENV": JSON.stringify("production") },
   sourcemap: "linked",
-  plugins: [tailwind, icons],
+  plugins: [tailwind, icons, cn],
 });
 
 if (!result.success) {
