@@ -1,7 +1,8 @@
-# Bun.serve bundles the web interface with Tailwind; scripts/build.ts does
-# the same for the compiled bot.
+# Bun.serve bundles the web interface with these when running from source;
+# scripts/build.ts does the same for the compiled bot. Tailwind builds the
+# styles, and scripts/icons.ts keeps the icon weights the app draws.
 [serve.static]
-plugins = ["bun-plugin-tailwind"]
+plugins = ["bun-plugin-tailwind", "./scripts/icons.ts"]
 
 [install]
 # bun-plugin-tailwind asks for the `bun` package as a peer. The bot runs on

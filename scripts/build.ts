@@ -1,8 +1,10 @@
 import tailwind from "bun-plugin-tailwind";
+import icons from "./icons.ts";
 
 // `bun run build`: the bot, the web interface and the migrations in one
 // executable, dist/orianna. The `bun build` CLI can't load plugins yet, and
 // the web interface's styles need Tailwind's, so the build runs from here.
+// bunfig.toml has the plugins that apply when running from source as well.
 
 const result = await Bun.build({
   entrypoints: ["./src/main.ts"],
@@ -11,7 +13,7 @@ const result = await Bun.build({
   minify: true,
   define: { "process.env.NODE_ENV": JSON.stringify("production") },
   sourcemap: "linked",
-  plugins: [tailwind],
+  plugins: [tailwind, icons],
 });
 
 if (!result.success) {
