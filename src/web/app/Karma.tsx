@@ -2,8 +2,8 @@ import { useAtomMount, useAtomRefresh, useAtomValue } from "@effect/atom-react";
 import { ArrowClockwise, GearSix, MagnifyingGlass, ThumbsUp } from "@phosphor-icons/react";
 import { cn } from "cn";
 import { AsyncResult } from "effect/reactivity";
-import { useEffect, useState } from "react";
-import { Placeholder, TextSkeleton } from "@/components/loading";
+import { lazy, Suspense, useEffect, useState } from "react";
+import { FieldSkeleton, Placeholder, TextSkeleton } from "@/components/loading";
 import { PageHeader } from "@/components/page";
 import { Problem } from "@/components/Problem";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -14,15 +14,18 @@ import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTi
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { KarmaBoard, KarmaEntry } from "../rpc.ts";
-import { Api, KARMA_KEYS } from "./api.ts";
+import { Api, KARMA_KEYS, karmaSetupQuery } from "./api.ts";
 import { useSession } from "./App.tsx";
 import { useGuild } from "./guild.tsx";
-import { KarmaSettings, karmaSetupQuery } from "./KarmaForm.tsx";
 import { useKarmaView } from "./karmaView.ts";
 
 // The server's karma scoreboard, as shinpuru's `/karma` shows it, with a
 // search for members further down. Members with `karma.config` change karma
 // here too. A member's own karma is on their profile.
+
+// Few members may change karma, so the form's code loads only for them.
+const loadForm = () => import("./KarmaForm.tsx");
+const KarmaSettings = lazy(() => loadForm().then(({ KarmaSettings }) => ({ default: KarmaSettings })));
 
 const karmaQuery = (guildId: string) => Api.query("karma", { guildId }, { reactivityKeys: KARMA_KEYS });
 
@@ -66,17 +69,33 @@ export function KarmaPage() {
 function SettingsDialog() {
   const { id: guildId } = useGuild();
   const { settingsOpen, setSettingsOpen } = useKarmaView();
-  // Loaded with the page, so the form is there as soon as the dialog opens.
+  // The form and what it offers load with the page, so they're there as soon
+  // as the dialog opens.
   useAtomMount(karmaSetupQuery(guildId));
+  useEffect(() => void loadForm(), []);
   return (
     <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
       <DialogContent className="sm:max-w-2xl" aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle>Karma settings</DialogTitle>
         </DialogHeader>
-        <KarmaSettings onCancel={() => setSettingsOpen(false)} onDone={() => setSettingsOpen(false)} />
+        <Suspense fallback={<KarmaSettingsSkeleton />}>
+          <KarmaSettings onCancel={() => setSettingsOpen(false)} onDone={() => setSettingsOpen(false)} />
+        </Suspense>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** The settings form's fields, while they load, so the dialog doesn't jump when they come in. */
+export function KarmaSettingsSkeleton() {
+  return (
+    <Placeholder label="Loading the settings" className="grid gap-x-6 gap-y-5 sm:grid-cols-2">
+      <FieldSkeleton />
+      <FieldSkeleton />
+      <FieldSkeleton />
+      <FieldSkeleton />
+    </Placeholder>
   );
 }
 

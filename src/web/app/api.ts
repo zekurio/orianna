@@ -16,6 +16,13 @@ export class Api extends AtomRpc.Service<Api>()("orianna/web/Api", {
 export const KARMA_KEYS = ["karma"];
 
 /**
+ * What the karma settings form offers. The karma page mounts it ahead with
+ * `useAtomMount`, so the form is ready when it opens.
+ */
+export const karmaSetupQuery = (guildId: string) =>
+  Api.query("karmaSetup", { guildId }, { reactivityKeys: KARMA_KEYS });
+
+/**
  * What a failed call says to the member: the message of a refusal, or that
  * something went wrong.
  */

@@ -11,6 +11,7 @@ import { guildPath, useGuild } from "../guild.tsx";
 import { navigate } from "../router.tsx";
 import { GeneralSection } from "./General.tsx";
 import { HistorySection } from "./History.tsx";
+import { type Tab, pathOf } from "./paths.ts";
 import { PermissionsSection } from "./Permissions.tsx";
 import { ProposalsSection } from "./Proposals.tsx";
 import { RoleMenusSection } from "./RoleMenus.tsx";
@@ -20,8 +21,6 @@ import { type SectionProps, type Settings, setupQuery } from "./shared.tsx";
 // members with Administrator, the same ones `!settings` exports and imports.
 // Karma's are on its own page.
 
-type Tab = "general" | "permissions" | "proposals" | "role-menus" | "history";
-
 const TABS: { tab: Tab; label: string; icon: Icon }[] = [
   { tab: "general", label: "General", icon: GearSix },
   { tab: "permissions", label: "Permissions", icon: Key },
@@ -29,16 +28,6 @@ const TABS: { tab: Tab; label: string; icon: Icon }[] = [
   { tab: "role-menus", label: "Role menus", icon: ListChecks },
   { tab: "history", label: "History", icon: ClockCounterClockwise },
 ];
-
-const pathOf = (tab: Tab) => (tab === "general" ? "/admin" : `/admin/${tab}`);
-
-/** `/admin`, or `/admin/<tab>`. */
-export function parseAdminPath(path: string): Tab | undefined {
-  const match = /^\/admin(?:\/([a-z-]+))?\/?$/.exec(path);
-  if (!match) return undefined;
-  const tab = (match[1] ?? "general") as Tab;
-  return TABS.some((t) => t.tab === tab) ? tab : undefined;
-}
 
 export function AdminPage({ tab }: { tab: Tab }) {
   const guild = useGuild();

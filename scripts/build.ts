@@ -51,6 +51,8 @@ const web = check(
     // The app routes in the browser, so its files come from the root
     // whatever the page.
     publicPath: "/",
+    // Pages few members open, like the Admin tab, load when they do.
+    splitting: true,
     minify: true,
     define,
     plugins: [tailwind, icons, cn],

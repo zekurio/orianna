@@ -5,7 +5,6 @@ import { AsyncResult } from "effect/reactivity";
 import { type FormEvent, type KeyboardEvent, useId, useState } from "react";
 import { toast } from "sonner";
 import { EmojiPicker, type ServerEmoji } from "@/components/EmojiPicker";
-import { FieldSkeleton, Placeholder } from "@/components/loading";
 import { Problem } from "@/components/Problem";
 import { Button } from "@/components/ui/button";
 import { DialogFooter } from "@/components/ui/dialog";
@@ -24,8 +23,9 @@ import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { KarmaInput, type KarmaRuleInput, type KarmaSetup } from "../rpc.ts";
 import { numberValue, type Problems, problemAt } from "./admin/shared.tsx";
-import { Api, failureMessage, KARMA_KEYS } from "./api.ts";
+import { Api, failureMessage, KARMA_KEYS, karmaSetupQuery } from "./api.ts";
 import { useGuild } from "./guild.tsx";
+import { KarmaSettingsSkeleton } from "./Karma.tsx";
 
 // The karma settings, for members with `karma.config`, in a dialog on the
 // karma page. They're the `karma` section of the bot settings, so each change
@@ -65,23 +65,11 @@ function check(draft: KarmaInput): string[] {
   return problems;
 }
 
-/** What the form offers. Mount it ahead with `useAtomMount`, so the form is ready when it opens. */
-export const karmaSetupQuery = (guildId: string) =>
-  Api.query("karmaSetup", { guildId }, { reactivityKeys: KARMA_KEYS });
-
 /** The form, once what it offers is in. */
 export function KarmaSettings({ onCancel, onDone }: { onCancel: () => void; onDone: () => void }) {
   const setup = useAtomValue(karmaSetupQuery(useGuild().id));
   return AsyncResult.matchWithError(setup, {
-    // The form's fields, so the dialog doesn't jump when they come in.
-    onInitial: () => (
-      <Placeholder label="Loading the settings" className="grid gap-x-6 gap-y-5 sm:grid-cols-2">
-        <FieldSkeleton />
-        <FieldSkeleton />
-        <FieldSkeleton />
-        <FieldSkeleton />
-      </Placeholder>
-    ),
+    onInitial: () => <KarmaSettingsSkeleton />,
     onError: (error) => <Problem message={error._tag === "Refused" ? error.message : undefined} />,
     onDefect: () => <Problem />,
     onSuccess: ({ value }) => <KarmaForm setup={value} onCancel={onCancel} onDone={onDone} />,

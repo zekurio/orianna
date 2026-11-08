@@ -2,20 +2,24 @@ import { useAtomValue } from "@effect/atom-react";
 import { ArrowClockwise } from "@phosphor-icons/react";
 import { Schema } from "effect";
 import { AsyncResult } from "effect/reactivity";
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createContext, lazy, Suspense, useContext, useEffect, useRef, useState } from "react";
 import { type Session, SignInError } from "../rpc.ts";
 import { Api } from "./api.ts";
 import { Header, TabBar } from "./Header.tsx";
 import { CommandsPage } from "./Commands.tsx";
-import { AdminPage, parseAdminPath } from "./admin/AdminPage.tsx";
+import { parseAdminPath } from "./admin/paths.ts";
 import { GuildContext, guildPath, homeGuild, parseGuildPath, useLastGuild } from "./guild.tsx";
 import { KarmaPage } from "./Karma.tsx";
 import { NoGuildsPage, NotFoundPage, ProfilePage } from "./pages.tsx";
 import { navigate, usePath } from "./router.tsx";
 import { SignIn } from "./SignIn.tsx";
 import { cn } from "cn";
-import { container, standalone } from "@/components/page";
+import { Placeholder, SettingsGroupSkeleton } from "@/components/loading";
+import { container, PageHeader, standalone } from "@/components/page";
 import { Button } from "@/components/ui/button";
+
+// Only admins open the Admin tab, so its code waits until one does.
+const AdminPage = lazy(() => import("./admin/AdminPage.tsx").then(({ AdminPage }) => ({ default: AdminPage })));
 
 const SIGN_IN_ERRORS: Record<SignInError, string> = {
   denied: "Signing in was cancelled on Fluxer.",
@@ -136,7 +140,13 @@ function Page({ path }: { path: string }) {
 
   const adminTab = parseAdminPath(inGuild.page);
   // Keyed by guild, so a page starts over in another guild.
-  if (adminTab) return <AdminPage key={guild.id} tab={adminTab} />;
+  if (adminTab) {
+    return (
+      <Suspense fallback={<AdminSkeleton />}>
+        <AdminPage key={guild.id} tab={adminTab} />
+      </Suspense>
+    );
+  }
   switch (inGuild.page) {
     case "/karma":
       return <KarmaPage key={guild.id} />;
@@ -145,4 +155,17 @@ function Page({ path }: { path: string }) {
     default:
       return <NotFoundPage path={path} />;
   }
+}
+
+/** The Admin tab while its code loads. */
+function AdminSkeleton() {
+  return (
+    <>
+      <PageHeader title="Admin" />
+      <Placeholder label="Loading the settings" className="flex flex-col gap-8">
+        <SettingsGroupSkeleton rows={2} />
+        <SettingsGroupSkeleton rows={4} />
+      </Placeholder>
+    </>
+  );
 }
