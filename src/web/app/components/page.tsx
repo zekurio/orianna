@@ -7,7 +7,7 @@ export const container = "mx-auto w-full max-w-page px-4 sm:px-6 lg:px-10";
 
 /** Pages without the header, like signing in, centred on the screen. */
 export const standalone =
-  "flex min-h-screen flex-col items-center justify-center gap-4 px-6 py-8 text-center text-muted-foreground";
+  "flex min-h-dvh flex-col items-center justify-center gap-4 px-6 py-8 text-center text-muted-foreground";
 
 /** A page's title, what it's for, and what can be done on it. */
 export function PageHeader({ title, lead, actions }: { title: string; lead?: ReactNode; actions?: ReactNode }) {

@@ -101,10 +101,14 @@ function Shell() {
   return (
     <GuildContext value={guild ?? null}>
       {/* The page scrolls in its own box under the header, so scrolling past
-          either end bounces the page and leaves the header where it is. */}
+          either end bounces the page and leaves the header where it is. The
+          box is positioned so hidden labels and inputs, which are
+          absolutely positioned, scroll inside it instead of making the
+          window scroll too. Space for the scrollbar is always kept, so the
+          page doesn't shift sideways when it grows long enough to scroll. */}
       <div className="flex h-dvh flex-col">
         <Header path={path} />
-        <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
+        <div ref={scroller} className="relative min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
           <main className={cn(container, "flex min-h-full flex-col gap-6 py-6 sm:py-12")}>
             <Page path={path} />
           </main>
