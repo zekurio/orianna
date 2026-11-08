@@ -248,10 +248,29 @@ const serve = (web: WebConfig) =>
         login: route("starting a sign-in", login),
         callback: route("signing in", callback),
         logout: route("signing out", sameOrigin(logout)),
-        rpc: route("answering the app", sameOrigin((req) => Effect.promise(() => rpc(req))), "Debug"),
+        rpc: route(
+          "answering the app",
+          sameOrigin((req) => Effect.promise(() => rpc(req).then((res) => compressed(req, res)))),
+          "Debug",
+        ),
       });
     }),
   );
+
+/**
+ * An answer of a call, gzipped when it's long enough for that to pay, like
+ * every emoji there is for the picker. The app makes each call on its own, so
+ * waiting for the whole answer holds up nothing.
+ */
+async function compressed(req: Request, res: Response): Promise<Response> {
+  if (!/\bgzip\b/.test(req.headers.get("accept-encoding") ?? "")) return res;
+  const body = await res.bytes();
+  if (body.byteLength < 1024) return new Response(body, res);
+  const headers = new Headers(res.headers);
+  headers.set("Content-Encoding", "gzip");
+  headers.set("Vary", "Accept-Encoding");
+  return new Response(Bun.gzipSync(body), { status: res.status, headers });
+}
 
 function redirect(location: string): Response {
   return new Response(null, { status: 302, headers: { Location: location } });
