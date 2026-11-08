@@ -10,6 +10,10 @@ import icons from "./icons.ts";
 const result = await Bun.build({
   entrypoints: ["./src/main.ts"],
   compile: { outfile: "dist/orianna", assets: ["./drizzle"] },
+  // Parsed and compiled ahead, so the bot starts in under half the time.
+  // Bytecode is CommonJS unless told otherwise.
+  bytecode: true,
+  format: "esm",
   // What --production does.
   minify: true,
   define: { "process.env.NODE_ENV": JSON.stringify("production") },
