@@ -105,10 +105,16 @@ function Shell() {
           box is positioned so hidden labels and inputs, which are
           absolutely positioned, scroll inside it instead of making the
           window scroll too. Space for the scrollbar is always kept, so the
-          page doesn't shift sideways when it grows long enough to scroll. */}
-      <div className="flex h-dvh flex-col">
+          page doesn't shift sideways when it grows long enough to scroll.
+          The shell is fixed to the viewport rather than sized to it: phone
+          browsers can make the window a little taller than the viewport,
+          like Chrome with its address bar along the bottom, and a swipe
+          would then scroll the window, pushing the header off the top and
+          leaving a gap under the tab bar. Scrolling also stops at the
+          box's ends instead of carrying on to the window. */}
+      <div className="fixed inset-0 flex flex-col">
         <Header path={path} />
-        <div ref={scroller} className="relative min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+        <div ref={scroller} className="relative min-h-0 flex-1 overflow-y-auto overscroll-y-contain [scrollbar-gutter:stable]">
           <main className={cn(container, "flex min-h-full flex-col gap-6 py-6 sm:py-12")}>
             <Page path={path} />
           </main>

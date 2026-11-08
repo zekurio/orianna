@@ -60,7 +60,9 @@ export function SettingRow({
       <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
         <div className="flex min-w-0 flex-1 basis-36 flex-col gap-1">
           {id ? (
-            <Label htmlFor={id} className="text-base leading-snug">
+            // Only as wide as its text: a label stretched across the row
+            // would open or toggle the control from anywhere on it.
+            <Label htmlFor={id} className="self-start text-base leading-snug">
               {title}
             </Label>
           ) : (
