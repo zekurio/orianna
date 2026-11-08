@@ -5,7 +5,6 @@ import { RpcSerialization, RpcServer } from "effect/rpc";
 import { AppConfig, ConfigError, type WebConfig } from "../config.ts";
 import { type FluxerError, logFailure } from "../fluxer.ts";
 import { millis, tagLogs } from "../log.ts";
-import app from "./app/index.html";
 import { appRoutes } from "./assets.ts";
 import { FluxerOAuth } from "./fluxer.ts";
 import { AuthenticationLive, CallLogLive, HandlersLive } from "./handlers.ts";
@@ -13,8 +12,8 @@ import { OAuth } from "./oauth.ts";
 import { type SignInError, WebRpcs } from "./rpc.ts";
 import { randomToken, SESSION_COOKIE, SESSION_TTL, Sessions } from "./sessions.ts";
 
-// The web interface: a React app that Bun bundles from app/index.html, the
-// calls it makes at /rpc, and signing in and out. Members sign in with their
+// The web interface: a React app built from app/index.html, the calls it
+// makes at /rpc, and signing in and out. Members sign in with their
 // Fluxer account; the session cookie names a row in web_sessions. The
 // requests the bot answers itself are logged; the app's pages and scripts
 // are served without telling.
@@ -62,11 +61,14 @@ export class WebListener extends Context.Service<
 }
 
 const listen = Effect.fnUntraced(function* (web: WebConfig) {
-  // The compiled bot has the app bundled already, and serves it compressed.
-  // Run from source, Bun bundles it on demand and reloads open pages when a
-  // file changes.
-  const development = !Bun.isStandaloneExecutable;
-  const bundled = development ? undefined : yield* Effect.promise(() => appRoutes(app));
+  // The compiled bot serves the app scripts/build.ts built and compressed
+  // ahead, which the build lists in ORIANNA_WEB_FILES. Run from source, Bun
+  // bundles the app on demand and reloads open pages when a file changes; the
+  // compiled bot leaves that part out.
+  const development = !process.env.ORIANNA_WEB_FILES;
+  const app = process.env.ORIANNA_WEB_FILES
+    ? appRoutes(JSON.parse(process.env.ORIANNA_WEB_FILES))
+    : { files: {}, page: (yield* Effect.promise(() => import("./app/index.html"))).default };
   let routes: Routes | undefined;
   const ready = Promise.withResolvers<Routes>();
   const later =
@@ -90,14 +92,14 @@ const listen = Effect.fnUntraced(function* (web: WebConfig) {
         port: web.port,
         development,
         routes: {
-          ...bundled?.files,
+          ...app.files,
           "/auth/login": { GET: later("login") },
           [CALLBACK_PATH]: { GET: later("callback") },
           "/auth/logout": { POST: later("logout") },
           "/rpc": rpcRoute,
           "/rpc/": rpcRoute,
           // The app routes in the browser, so every other page is the app.
-          "/*": bundled?.page ?? app,
+          "/*": app.page,
         },
         error: () => new Response(PROBLEM, { status: 500 }),
       }),
@@ -113,8 +115,6 @@ const listen = Effect.fnUntraced(function* (web: WebConfig) {
     await server.stop(true);
   });
   yield* Effect.addFinalizer(() => close);
-  // Not before listening, which is what the bot starts with.
-  void bundled?.compress();
   yield* Effect.logInfo(`web interface listening on ${server.url.origin}, open it at ${web.publicUrl}`).pipe(
     tagLogs("http"),
   );
