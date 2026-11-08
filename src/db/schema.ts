@@ -164,76 +164,6 @@ export const roleMenuReactions = snakeCase.table(
   ],
 );
 
-/** A file on a starboard post, as the web interface shows it. */
-export type StarboardMedia = {
-  url: string;
-  name: string;
-  kind: "image" | "video" | "file";
-  /**
-   * A blurred copy the bot uploaded with the post, of an NSFW image on a
-   * starboard that isn't NSFW.
-   */
-  blurred?: boolean;
-  /**
-   * For a blurred copy, a hash of the image's URL, so an edit that swaps the
-   * image blurs the new one. The web interface never gets it.
-   */
-  source?: string;
-  /** A blurred copy sent with the post, for want of an image store. */
-  attached?: boolean;
-  /** An image from a link in the text, not a file on the message. */
-  linked?: boolean;
-};
-
-/**
- * Messages that made it into the starboard. A row goes when its post is
- * taken down because votes dropped, and stays as `removed` when someone
- * deleted the post.
- */
-export const starboardEntries = snakeCase.table(
-  "starboard_entries",
-  {
-    messageId: text().notNull(),
-    guildId: text().notNull(),
-    channelId: text().notNull(),
-    authorId: text().notNull(),
-    /** The bot's post. Null once someone deleted it. */
-    postChannelId: text(),
-    postId: text(),
-    /** The votes, the author's own included, as of the last update. */
-    count: integer().notNull(),
-    /** Someone deleted the post, so the message doesn't go up again. */
-    removed: integer({ mode: "boolean" }).notNull().default(false),
-    postedAt: integer({ mode: "timestamp_ms" }).notNull(),
-    /**
-     * What the post shows of the message, as of the last update, for the web
-     * interface. Null on entries from before the bot kept it, until it catches up.
-     */
-    content: text(),
-    authorName: text(),
-    authorAvatar: text(),
-    media: text({ mode: "json" }).$type<StarboardMedia[]>(),
-    /** When the message was sent. */
-    sentAt: integer({ mode: "timestamp_ms" }),
-  },
-  (t) => [
-    primaryKey({ columns: [t.messageId] }),
-    uniqueIndex("starboard_entries_post_id_idx").on(t.postId),
-    index("starboard_entries_guild_id_author_id_idx").on(t.guildId, t.authorId),
-    index("starboard_entries_guild_id_posted_at_idx").on(t.guildId, t.postedAt),
-  ],
-);
-
-/** Members whose messages never go into the starboard, in any guild, as on shinpuru. */
-export const starboardOptOuts = snakeCase.table(
-  "starboard_opt_outs",
-  {
-    userId: text().notNull(),
-    optedOutAt: integer({ mode: "timestamp_ms" }).notNull(),
-  },
-  (t) => [primaryKey({ columns: [t.userId] })],
-);
-
 /** Each member's karma in a guild; src/karma/karma.ts keeps it. */
 export const karma = snakeCase.table(
   "karma",
@@ -265,24 +195,6 @@ export const karmaVotes = snakeCase.table(
     // For the votes a member gave in the last hour.
     index("karma_votes_guild_id_voter_id_voted_at_idx").on(t.guildId, t.voterId, t.votedAt),
   ],
-);
-
-/**
- * Karma the starboard gave, one per message, so a message that drops out and
- * gets in again doesn't pay twice.
- */
-export const karmaBonuses = snakeCase.table(
-  "karma_bonuses",
-  {
-    messageId: text().notNull(),
-    guildId: text().notNull(),
-    userId: text().notNull(),
-    amount: integer().notNull(),
-    givenAt: integer({ mode: "timestamp_ms" }).notNull(),
-    /** Someone deleted the post, which took the karma back. */
-    revoked: integer({ mode: "boolean" }).notNull().default(false),
-  },
-  (t) => [primaryKey({ columns: [t.messageId] })],
 );
 
 /**
@@ -334,20 +246,4 @@ export const webSessions = snakeCase.table(
     expiresAt: integer({ mode: "timestamp_ms" }).notNull(),
   },
   (t) => [primaryKey({ columns: [t.tokenHash] }), index("web_sessions_expires_at_idx").on(t.expiresAt)],
-);
-
-/**
- * Images the web interface serves at `/imagestore/<id>.<ext>`, for embeds
- * to link to, like shinpuru's image store. src/imagestore.ts keeps them.
- */
-export const storedImages = snakeCase.table(
-  "stored_images",
-  {
-    /** Random, so nobody can guess the URL of an image they weren't shown. */
-    id: text().notNull(),
-    image: blob({ mode: "buffer" }).notNull(),
-    contentType: text().notNull(),
-    storedAt: integer({ mode: "timestamp_ms" }).notNull(),
-  },
-  (t) => [primaryKey({ columns: [t.id] })],
 );

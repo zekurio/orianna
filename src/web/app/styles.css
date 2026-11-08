@@ -41,6 +41,14 @@
   --ring: #91d1dc;
   --link: #91d1dc;
   --radius: 0.75rem;
+  /* Toasts sit above the tab bar that narrow screens have along the bottom. */
+  --toast-bottom: calc(5rem + env(safe-area-inset-bottom));
+}
+
+@media (width >= 64rem) {
+  :root {
+    --toast-bottom: 1.5rem;
+  }
 }
 
 @theme inline {

@@ -1,8 +1,14 @@
 import { type ReactNode, useState } from "react";
-import type { Names } from "../rpc.ts";
 
-// Message text as Fluxer shows it, as far as the starboard needs: mentions, custom
-// emoji, links, bold, inline code and spoilers. Everything else stays as typed.
+// Message text as Fluxer shows it: mentions, custom emoji, links, bold, inline
+// code and spoilers. Everything else stays as typed.
+
+/** Names for the members and channels the text mentions, and pictures of its custom emoji, by ID. */
+export interface Names {
+  users: Readonly<Record<string, string>>;
+  channels: Readonly<Record<string, string>>;
+  emojis: Readonly<Record<string, string>>;
+}
 
 const TOKEN =
   /<@!?(\d+)>|<#(\d+)>|<(a?):(\w+):(\d+)>|`([^`\n]+)`|\*\*([^*\n]+)\*\*|\|\|([^|]+)\|\||(https?:\/\/[^\s<>]+)/g;

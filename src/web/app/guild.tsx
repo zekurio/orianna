@@ -4,11 +4,11 @@ import { persist } from "zustand/middleware";
 import type { GuildInfo } from "../rpc.ts";
 
 // The bot serves every guild it's in, and the app shows one at a time. A
-// guild's pages live under its ID, like `/123/starboard`, so links keep the
+// guild's pages live under its ID, like `/123/karma`, so links keep the
 // guild; the profile is the member's own and lives outside, at `/profile`.
 
-/** A path in a guild, like `/123/starboard`. */
-export function guildPath(guildId: string, page = "/starboard"): string {
+/** A path in a guild, like `/123/karma`. */
+export function guildPath(guildId: string, page = "/karma"): string {
   return `/${guildId}${page}`;
 }
 

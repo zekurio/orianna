@@ -89,24 +89,6 @@ const RoleMenusSchema = Schema.Struct({
   menus: Schema.Array(RoleMenuSchema).pipe(orDefault([])),
 });
 
-const StarboardSchema = Schema.Struct({
-  /**
-   * Where the bot posts the messages that make it. The starboard is off
-   * without one. Moving it leaves the posts so far where they are, and the
-   * web interface shows only the ones in the new channel.
-   */
-  channelId: Schema.optionalKey(Snowflake),
-  /** The minimum number of votes, the author's own included, until a message gets into the starboard. */
-  threshold: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(orDefault(5)),
-  /** A Unicode emoji, `name:id` or `<:name:id>` (`<a:name:id>` for an animated one). It can't be a karma emoji too. */
-  emoji: Schema.String.check(Schema.isMinLength(1)).pipe(orDefault("⭐")),
-  /**
-   * Karma for the author the first time one of their messages gets in, while
-   * karma is on. Deleting the post takes it back. 0 gives none.
-   */
-  karma: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(orDefault(3)),
-});
-
 /** Emoji for upvotes or downvotes, 20 at most in each list. */
 const KarmaEmojiSchema = Schema.Array(Schema.String).check(Schema.isMaxLength(20));
 
@@ -126,7 +108,10 @@ const KarmaRuleSchema = Schema.Struct({
 });
 
 const KarmaSchema = Schema.Struct({
-  /** Reactions that give the message's author a point, written like `starboard.emoji`. */
+  /**
+   * Reactions that give the message's author a point: Unicode emoji, `name:id`
+   * or `<:name:id>` (`<a:name:id>` for an animated one).
+   */
   upvotes: KarmaEmojiSchema.pipe(orDefault(["👍"])),
   /** Reactions that take one. Empty for no downvotes. */
   downvotes: KarmaEmojiSchema.pipe(orDefault(["👎"])),
@@ -142,7 +127,7 @@ const KarmaSchema = Schema.Struct({
 
 /**
  * Bot settings: what the bot does in the guild. They live in the database,
- * where the web interface, `!settings`, `!starboard` and `!karma` edit them
+ * where the web interface, `!settings` and `!karma` edit them
  * while the bot runs; src/settings/settings.ts keeps them. Nothing here is
  * a secret or needs a restart. The channels they name have to be the
  * guild's own, and take messages.
@@ -167,7 +152,6 @@ export const BotSettingsSchema = Schema.Struct({
    * - `sticker.propose`, `sticker.add`, `sticker.decide`, `sticker.cancel-any`
    * - `polls.create`: start a poll with `!poll`
    * - `polls.end-any`: end anyone's poll early with 🛑, not just one's own
-   * - `starboard.config`: change the starboard with `!starboard set` and `disable`
    * - `karma.config`: change karma with `!karma set`, `disable`, `block`,
    *   `unblock`, `addrule` and `removerule`, and see it with `settings`
    *
@@ -179,9 +163,8 @@ export const BotSettingsSchema = Schema.Struct({
    *
    * Members with Manage Expressions get `+emoji.*` and `+sticker.*`. The
    * guild owner and members with Administrator may do everything, and only
-   * they may change the other settings; `starboard.config` and
-   * `karma.config` cover the `starboard` and `karma` sections. `!perms`
-   * shows what a member may do and which rule decided it.
+   * they may change the other settings; `karma.config` covers the `karma`
+   * section. `!perms` shows what a member may do and which rule decided it.
    */
   permissions: PermissionsSchema.pipe(orDefault({})),
   /** Channel where emoji and sticker proposals are put to a vote. Required when either is on. */
@@ -210,21 +193,13 @@ export const BotSettingsSchema = Schema.Struct({
    */
   roleMenus: Schema.optionalKey(RoleMenusSchema),
   /**
-   * The starboard, where members vote memorable messages in with an emoji.
-   * Once enough react to a message, the bot posts it in the starboard
-   * channel. It needs View Channel and Read Message History where members
-   * react, and Send Messages, Embed Links and Attach Files in the starboard
-   * channel. Off while this section or its `channelId` is missing.
-   */
-  starboard: Schema.optionalKey(StarboardSchema),
-  /**
    * Karma, as on shinpuru: members vote on each other's messages with
-   * reactions, and the starboard adds to it. A member's vote on a message
-   * counts once, and removing the reaction doesn't take it back. Votes on
-   * their own messages, and from or for bots, don't count. The bot needs
-   * View Channel and Read Message History where members react, Manage Roles
-   * for `role` rules, with its own role above theirs, and Kick Members or Ban
-   * Members for those rules. Off while this section is missing.
+   * reactions. A member's vote on a message counts once, and removing the
+   * reaction doesn't take it back. Votes on their own messages, and from or
+   * for bots, don't count. The bot needs View Channel and Read Message
+   * History where members react, Manage Roles for `role` rules, with its own
+   * role above theirs, and Kick Members or Ban Members for those rules. Off
+   * while this section is missing.
    */
   karma: Schema.optionalKey(KarmaSchema),
 });
@@ -302,7 +277,6 @@ export type PollsConfig = typeof PollsConfigSchema.Type;
 export type PermissionsConfig = typeof PermissionsSchema.Type;
 export type RoleMenusConfig = typeof RoleMenusSchema.Type;
 export type RoleMenuConfig = typeof RoleMenuSchema.Type;
-export type StarboardConfig = typeof StarboardSchema.Type;
 export type KarmaConfig = typeof KarmaSchema.Type;
 export type KarmaRule = typeof KarmaRuleSchema.Type;
 
@@ -339,7 +313,7 @@ export function parseConfig(raw: unknown): Effect.Effect<Config, ConfigError> {
 
 /**
  * Validates bot settings and fills in defaults. Problems have the same paths
- * as the keys in the document, like `/starboard/threshold`. `guildId` is the
+ * as the keys in the document, like `/polls/defaultHours`. `guildId` is the
  * guild's, whose @everyone role can't have rules of its own.
  */
 export function parseSettings(raw: unknown, guildId: string): Effect.Effect<BotSettings, InvalidSettings> {
@@ -350,7 +324,6 @@ export function parseSettings(raw: unknown, guildId: string): Effect.Effect<BotS
         ...checkPollsChannel(settings),
         ...checkPermissions(settings, guildId),
         ...checkRoleMenus(settings),
-        ...checkStarboard(settings),
         ...checkKarma(settings),
       ];
       return problems.length > 0 ? Effect.fail(new InvalidSettings({ problems })) : Effect.succeed(settings);
@@ -453,22 +426,14 @@ function checkRoleMenus(settings: BotSettings): string[] {
   return problems;
 }
 
-/** What the schema can't express: an emoji the bot can read. */
-function checkStarboard(settings: BotSettings): string[] {
-  const emoji = settings.starboard?.emoji;
-  if (emoji === undefined || parseEmoji(emoji)) return [];
-  return [`/starboard/emoji: ${emoji} is not an emoji; use a Unicode emoji, name:id or <:name:id>`];
-}
-
 /**
  * What the schema can't express: emoji the bot can read, each in one list,
- * none the starboard votes with, and what each rule's action needs.
+ * and what each rule's action needs.
  */
 function checkKarma(settings: BotSettings): string[] {
-  const { karma, starboard } = settings;
+  const { karma } = settings;
   if (!karma) return [];
   const problems: string[] = [];
-  const starboardKey = starboard && parseEmoji(starboard.emoji)?.key;
   const seen = new Set<string>();
   for (const list of ["upvotes", "downvotes"] as const) {
     karma[list].forEach((emoji, i) => {
@@ -476,8 +441,6 @@ function checkKarma(settings: BotSettings): string[] {
       const parsed = parseEmoji(emoji);
       if (!parsed) {
         problems.push(`${at}: ${emoji} is not an emoji; use a Unicode emoji, name:id or <:name:id>`);
-      } else if (parsed.key === starboardKey) {
-        problems.push(`${at}: ${emoji} is the starboard's emoji, so it can't vote for karma too`);
       } else if (seen.has(parsed.key)) {
         problems.push(`${at}: ${emoji} is already a karma emoji`);
       }
@@ -511,9 +474,6 @@ export function settingsChannels(settings: BotSettings): { path: string; channel
         channels.push({ path: `/roleMenus/menus/${i}/channelId`, channelId: menu.channelId });
       }
     });
-  }
-  if (settings.starboard?.channelId !== undefined) {
-    channels.push({ path: "/starboard/channelId", channelId: settings.starboard.channelId });
   }
   return channels;
 }

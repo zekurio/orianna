@@ -1,16 +1,9 @@
 import { PlusIcon, TrashIcon } from "@phosphor-icons/react";
 import { useId, useState } from "react";
 import { EmojiPicker } from "@/components/EmojiPicker";
+import { SettingRow, SettingsGroup } from "@/components/settings";
 import { Button } from "@/components/ui/button";
-import {
-  Field,
-  FieldContent,
-  FieldDescription,
-  FieldError,
-  FieldLabel,
-  FieldLegend,
-  FieldSet,
-} from "@/components/ui/field";
+import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
@@ -22,7 +15,7 @@ import {
   problemAt,
   problemsUnder,
   type SectionProps,
-  SettingsCard,
+  SettingsForm,
   useSave,
 } from "./shared.tsx";
 
@@ -69,36 +62,40 @@ export function RoleMenusSection({ setup, settings }: SectionProps) {
   const rest = problemsUnder(problems, ROOT).filter((p) => !draft || !shownHere(p));
 
   return (
-    <SettingsCard
-      title="Role menus"
-      description="Members react to a message to pick their roles."
+    <SettingsForm
       dirty={differs(draft, saved)}
       busy={busy}
       problems={rest}
       onSave={() => save({ roleMenus: draft ?? null })}
       onReset={() => setDraft(saved)}
     >
-      <Field orientation="horizontal">
-        <Switch id={`${id}-on`} checked={draft !== undefined} onCheckedChange={turn} />
-        <FieldContent>
-          <FieldLabel htmlFor={`${id}-on`}>Role menus</FieldLabel>
-          <FieldDescription>The bot's role has to be above the roles it gives.</FieldDescription>
-        </FieldContent>
-      </Field>
+      <SettingsGroup title="Role menus">
+        <SettingRow
+          id={`${id}-on`}
+          title="Post role menus"
+          description="The bot's role has to be above the roles it gives."
+          control={<Switch id={`${id}-on`} checked={draft !== undefined} onCheckedChange={turn} />}
+        />
+        {draft && (
+          <SettingRow
+            id={`${id}-channel`}
+            title="Default channel"
+            wide
+            problem={problemAt(problems, `${ROOT}/channelId`)}
+            control={
+              <ChannelSelect
+                id={`${id}-channel`}
+                value={draft.channelId}
+                channels={setup.channels}
+                onChange={(channelId) => setDraft({ ...draft, channelId })}
+              />
+            }
+          />
+        )}
+      </SettingsGroup>
 
       {draft && (
         <>
-          <Field data-invalid={problemAt(problems, `${ROOT}/channelId`) ? true : undefined} className="sm:max-w-sm">
-            <FieldLabel htmlFor={`${id}-channel`}>Default channel</FieldLabel>
-            <ChannelSelect
-              id={`${id}-channel`}
-              value={draft.channelId}
-              channels={setup.channels}
-              onChange={(channelId) => setDraft({ ...draft, channelId })}
-            />
-            <FieldError>{problemAt(problems, `${ROOT}/channelId`)}</FieldError>
-          </Field>
-
           {draft.menus.map((menu, i) => (
             <MenuEditor
               // By position: names change while they're typed.
@@ -112,13 +109,18 @@ export function RoleMenusSection({ setup, settings }: SectionProps) {
             />
           ))}
 
-          <Button type="button" variant="outline" className="self-start" onClick={() => setMenus([...draft.menus, emptyMenu()])}>
+          <Button
+            type="button"
+            variant="outline"
+            className="self-start"
+            onClick={() => setMenus([...draft.menus, emptyMenu()])}
+          >
             <PlusIcon />
             Add menu
           </Button>
         </>
       )}
-    </SettingsCard>
+    </SettingsForm>
   );
 }
 
@@ -146,18 +148,28 @@ function MenuEditor({
   const { channelId: _channelId, ...withoutChannel } = menu;
 
   return (
-    <FieldSet className="rounded-lg border p-4">
-      <div className="flex items-center justify-between gap-2">
-        <FieldLegend className="mb-0">{menu.title || menu.name || "New menu"}</FieldLegend>
-        <Button type="button" variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={onRemove}>
+    <SettingsGroup
+      title={menu.title || menu.name || "New menu"}
+      action={
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="text-destructive hover:text-destructive"
+          onClick={onRemove}
+        >
           <TrashIcon />
           Remove menu
         </Button>
-      </div>
-
-      <div className="grid gap-x-6 gap-y-5 sm:grid-cols-2">
-        <Field data-invalid={invalid("name")}>
-          <FieldLabel htmlFor={`${id}-name`}>Name</FieldLabel>
+      }
+    >
+      <SettingRow
+        id={`${id}-name`}
+        title="Name"
+        wide
+        description="Lowercase letters, digits and hyphens. Renaming reposts the menu."
+        problem={problem("name")}
+        control={
           <Input
             id={`${id}-name`}
             value={menu.name}
@@ -167,13 +179,17 @@ function MenuEditor({
             autoComplete="off"
             spellCheck={false}
             aria-invalid={invalid("name")}
+            aria-describedby={`${id}-name-description`}
+            className="w-full sm:w-56"
           />
-          <FieldDescription>Lowercase letters, digits and hyphens. Renaming reposts the menu.</FieldDescription>
-          <FieldError>{problem("name")}</FieldError>
-        </Field>
-
-        <Field data-invalid={invalid("title")}>
-          <FieldLabel htmlFor={`${id}-title`}>Title</FieldLabel>
+        }
+      />
+      <SettingRow
+        id={`${id}-title`}
+        title="Title"
+        wide
+        problem={problem("title")}
+        control={
           <Input
             id={`${id}-title`}
             value={menu.title}
@@ -181,28 +197,29 @@ function MenuEditor({
             placeholder="Notifications"
             maxLength={256}
             aria-invalid={invalid("title")}
+            className="w-full sm:w-56"
           />
-          <FieldError>{problem("title")}</FieldError>
-        </Field>
-
-        <Field data-invalid={invalid("description")} className="sm:col-span-2">
-          <FieldLabel htmlFor={`${id}-description`}>Description</FieldLabel>
-          <Textarea
-            id={`${id}-description`}
-            value={menu.description ?? ""}
-            onChange={(e) => onChange({ ...withoutDescription, ...optional("description", e.target.value) })}
-            placeholder="Pick what you'd like to be pinged for."
-            maxLength={1000}
-            aria-invalid={invalid("description")}
-          />
-          <FieldDescription>Optional.</FieldDescription>
-          <FieldError>{problem("description")}</FieldError>
-        </Field>
-
-        <Field data-invalid={invalid("mode")}>
-          <FieldLabel htmlFor={`${id}-mode`}>Members can take</FieldLabel>
+        }
+      />
+      <SettingRow id={`${id}-description`} title="Description" description="Optional." problem={problem("description")}>
+        <Textarea
+          id={`${id}-description`}
+          value={menu.description ?? ""}
+          onChange={(e) => onChange({ ...withoutDescription, ...optional("description", e.target.value) })}
+          placeholder="Pick what you'd like to be pinged for."
+          maxLength={1000}
+          aria-invalid={invalid("description")}
+          aria-describedby={`${id}-description-description`}
+        />
+      </SettingRow>
+      <SettingRow
+        id={`${id}-mode`}
+        title="Members can take"
+        wide
+        problem={problem("mode")}
+        control={
           <Select value={menu.mode} onValueChange={(mode) => onChange({ ...menu, mode: mode as Menu["mode"] })}>
-            <SelectTrigger id={`${id}-mode`} className="w-full">
+            <SelectTrigger id={`${id}-mode`} className="w-full sm:w-56">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -210,27 +227,25 @@ function MenuEditor({
               <SelectItem value="single">One at a time</SelectItem>
             </SelectContent>
           </Select>
-          <FieldError>{problem("mode")}</FieldError>
-        </Field>
-
-        <Field data-invalid={invalid("channelId")}>
-          <FieldLabel htmlFor={`${id}-channel`}>Channel</FieldLabel>
+        }
+      />
+      <SettingRow
+        id={`${id}-channel`}
+        title="Channel"
+        wide
+        problem={problem("channelId")}
+        control={
           <ChannelSelect
             id={`${id}-channel`}
             value={menu.channelId ?? DEFAULT_CHANNEL}
             channels={setup.channels}
             withDefault
-            onChange={(channelId) =>
-              onChange(channelId === DEFAULT_CHANNEL ? withoutChannel : { ...menu, channelId })
-            }
+            onChange={(channelId) => onChange(channelId === DEFAULT_CHANNEL ? withoutChannel : { ...menu, channelId })}
           />
-          <FieldError>{problem("channelId")}</FieldError>
-        </Field>
-      </div>
-
-      <FieldSet>
-        <FieldLegend variant="label">Roles</FieldLegend>
-        <ul className="flex flex-col gap-4">
+        }
+      />
+      <SettingRow title="Roles" problem={problem("options")}>
+        <ul className="flex flex-col gap-3">
           {menu.options.map((option, j) => (
             <OptionRow
               key={j}
@@ -243,20 +258,18 @@ function MenuEditor({
             />
           ))}
         </ul>
-        <FieldError>{problem("options")}</FieldError>
         <Button
           type="button"
-          variant="outline"
-          size="sm"
-          className="self-start"
+          variant="ghost"
+          className="-ml-2.5 self-start text-muted-foreground"
           disabled={menu.options.length >= MAX_OPTIONS}
           onClick={() => onChange({ ...menu, options: [...menu.options, emptyOption()] })}
         >
           <PlusIcon />
           Add role
         </Button>
-      </FieldSet>
-    </FieldSet>
+      </SettingRow>
+    </SettingsGroup>
   );
 }
 
@@ -363,7 +376,7 @@ function ChannelSelect({
   const known = value === DEFAULT_CHANNEL || channels.some((c) => c.id === value);
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger id={id} className="w-full">
+      <SelectTrigger id={id} className="w-full sm:w-56">
         <SelectValue placeholder="Pick a channel" />
       </SelectTrigger>
       <SelectContent>

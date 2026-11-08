@@ -1,9 +1,8 @@
-import { cdnEmojiURL, type Guild } from "@fluxerjs/core";
+import { cdnEmojiURL, type Guild, type GuildChannel, Routes } from "@fluxerjs/core";
 import { Cause, Effect, Exit, Layer, Option, Predicate, Ref, Result, Schema } from "effect";
 import { Headers } from "effect/http";
 import { type Command, formatUsage, isGroup, mayRun, optionHelp, type UserError } from "../commands/command.ts";
 import { CommandList } from "../commands/router.ts";
-import { Database } from "../db/index.ts";
 import { type ParsedEmoji, parseEmoji } from "../emoji.ts";
 import { Fluxer, type FluxerError, logFailure, request, tagOf } from "../fluxer.ts";
 import { CurrentGuild } from "../guild.ts";
@@ -14,9 +13,6 @@ import { currentKarma, disableKarma, setKarma } from "../karma/manage.ts";
 import { millis, tagLogs } from "../log.ts";
 import { GuildAccess, PERMISSIONS } from "../permissions/rules.ts";
 import { Settings } from "../settings/settings.ts";
-import { currentStarboard, disableStarboard, setStarboard } from "../starboard/manage.ts";
-import { optedOut, optIn, optOut } from "../starboard/optout.ts";
-import { LiveStarboard, StarboardGuild } from "../starboard/starboard.ts";
 import { unicodeEmoji } from "./emoji.ts";
 import {
   Authentication,
@@ -27,14 +23,12 @@ import {
   type EmojiInfo,
   type GuildInfo,
   type KarmaEntry,
+  type KarmaOff,
   type KarmaStanding,
-  type Names,
   NotMember,
   Refused,
   SettingsRejected,
   SignedOut,
-  STARBOARD_PAGE_SIZE,
-  type StarboardEntry,
   WebRpcs,
 } from "./rpc.ts";
 import { SESSION_COOKIE, Sessions } from "./sessions.ts";
@@ -78,11 +72,6 @@ const answer =
       Effect.flatMap((result) => (Result.isSuccess(result) ? Effect.succeed(result.success) : Effect.fail(result.failure))),
     );
 
-/** Mentions in message text, by kind. */
-const USER_MENTION = /<@!?(\d+)>/g;
-const CHANNEL_MENTION = /<#(\d+)>/g;
-const CUSTOM_EMOJI = /<(a?):\w+:(\d+)>/g;
-
 /**
  * A server's icon. `Guild.iconURL` always asks for a PNG, which shows an animated icon frozen
  * on its first frame. An `a_` hash marks an animated one, and the CDN serves those as GIFs.
@@ -90,6 +79,18 @@ const CUSTOM_EMOJI = /<(a?):\w+:(\d+)>/g;
 function guildIconUrl(guild: Guild): string | null {
   const url = guild.iconURL({ size: 64 });
   return url && guild.icon?.startsWith("a_") ? url.replace(/\.png(?=\?|$)/, ".gif") : url;
+}
+
+/** The guild's channels that take messages, threads aside, in the order the client lists them. */
+function textChannels(channels: readonly GuildChannel[]) {
+  const position = (c: GuildChannel) => c.position ?? 0;
+  const categories = new Map(channels.map((c) => [c.id, position(c)]));
+  // Categories first, then channels within them.
+  const order = (c: GuildChannel) => [c.parentId ? (categories.get(c.parentId) ?? 0) : -1, position(c)] as const;
+  return channels
+    .filter((c) => c.isTextBased() && !c.isThread())
+    .sort((a, b) => order(a)[0] - order(b)[0] || order(a)[1] - order(b)[1])
+    .map((c) => ({ id: c.id, name: c.name ?? c.id, nsfw: "nsfw" in c && c.nsfw === true }));
 }
 
 /** The `guildId` of a call about a guild. */
@@ -185,19 +186,24 @@ export const HandlersLive = WebRpcs.toLayer(
     const { client } = yield* Fluxer;
     const guilds = yield* Guilds;
     const commandList = yield* CommandList;
-    // The starboard opt-out holds in every guild.
-    const everywhere = yield* Effect.context<Guilds | Database>();
     const emojiUrl = (id: string, animated: boolean) =>
       cdnEmojiURL(id, animated, { mediaBase: client.instance.endpoints.media });
     /** The picture of a custom emoji, null for a Unicode one. */
     const customEmojiUrl = (emoji: ParsedEmoji | undefined) =>
       emoji && /^\d+$/.test(emoji.key) ? emojiUrl(emoji.key, emoji.text.startsWith("<a:")) : null;
-    const serverEmojis = (emojis: readonly { id: string; name: string; animated: boolean }[]) =>
-      emojis.map((e) => ({
-        text: `<${e.animated ? "a" : ""}:${e.name}:${e.id}>`,
-        name: e.name,
-        url: emojiUrl(e.id, e.animated),
-      }));
+    /** The guild's custom emoji, for the emoji pickers. */
+    const serverEmojis = (guildId: string) =>
+      request("listing emojis", () =>
+        client.rest.get<{ id: string; name: string; animated?: boolean }[]>(Routes.guildEmojis(guildId)),
+      ).pipe(
+        Effect.map((list) =>
+          list.map((e) => ({
+            text: `<${e.animated ? "a" : ""}:${e.name}:${e.id}>`,
+            name: e.name,
+            url: emojiUrl(e.id, e.animated === true),
+          })),
+        ),
+      );
 
     /** Runs a call about a guild with the guild's services. */
     const inGuild = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -215,15 +221,6 @@ export const HandlersLive = WebRpcs.toLayer(
       return { userId, guildId: guild.id, admin: guild.admin };
     });
 
-    /** The guild's starboard, while it's on and the member can see its channel. */
-    const visibleStarboard = Effect.gen(function* () {
-      const { userId } = yield* member;
-      const starboard = yield* LiveStarboard.current;
-      const board = starboard.board;
-      if (!board || !(yield* (yield* GuildAccess).canView(userId, board.channelId))) return undefined;
-      return { starboard, board };
-    });
-
     /** Refuses members who may not change the bot settings, as `!settings` does. */
     const mayAdmin = Effect.gen(function* () {
       const { userId, admin } = yield* member;
@@ -237,15 +234,6 @@ export const HandlersLive = WebRpcs.toLayer(
 
     /** Turns settings that don't validate into the problems the app shows next to each field. */
     const rejected = (err: { problems: readonly string[] }) => new SettingsRejected({ problems: [...err.problems] });
-
-    /** Refuses members without `starboard.config`. */
-    const mayConfig = Effect.gen(function* () {
-      const { userId } = yield* member;
-      if (!(yield* (yield* GuildAccess).can(userId, "starboard.config"))) {
-        return yield* new Refused({ message: "Changing the starboard takes the starboard.config permission." });
-      }
-      return userId;
-    });
 
     /** Refuses members without `karma.config`. */
     const mayConfigKarma = Effect.gen(function* () {
@@ -261,43 +249,6 @@ export const HandlersLive = WebRpcs.toLayer(
       const emoji = parseEmoji(text);
       return { emoji: emoji?.text ?? text, url: customEmojiUrl(emoji) };
     };
-
-    /** The names the entries' mentions show, of channels the member can see. */
-    const namesFor = Effect.fnUntraced(function* (texts: readonly string[], channelIds: readonly string[]) {
-      const { userId } = yield* member;
-      const access = yield* GuildAccess;
-      const guild = yield* StarboardGuild;
-      const all = texts.join("\n");
-      const userIds = new Set([...all.matchAll(USER_MENTION)].map((m) => m[1]!));
-      const mentioned = new Set([...channelIds, ...[...all.matchAll(CHANNEL_MENTION)].map((m) => m[1]!)]);
-      const names: Record<keyof Names, Record<string, string>> = { users: {}, channels: {}, emojis: {} };
-      for (const [, animated, id] of all.matchAll(CUSTOM_EMOJI)) {
-        names.emojis[id!] = emojiUrl(id!, animated === "a");
-      }
-      yield* Effect.forEach(
-        userIds,
-        (id) =>
-          request("fetching a user", () => client.users.fetch(id)).pipe(
-            Effect.map((user) => {
-              names.users[id] = user.globalName ?? user.username;
-            }),
-            Effect.ignore,
-          ),
-        { concurrency: 4, discard: true },
-      );
-      yield* Effect.forEach(
-        mentioned,
-        (id) =>
-          Effect.gen(function* () {
-            if (!(yield* access.canView(userId, id))) return;
-            const channel = yield* guild.channel(id);
-            if (channel) names.channels[id] = channel.name;
-          }).pipe(Effect.ignore),
-        { concurrency: 4, discard: true },
-      );
-      const result: Names = names;
-      return result;
-    });
 
     /** The guild as the session lists it, when the user is a member of it. */
     const sharedGuild = (userId: string, guildId: string) =>
@@ -317,7 +268,6 @@ export const HandlersLive = WebRpcs.toLayer(
           name: guild.name,
           iconUrl: guildIconUrl(guild),
           admin: permissions.bypass !== null,
-          configStarboard: permissions.has("starboard.config"),
           configKarma: permissions.has("karma.config"),
           prefix,
         };
@@ -333,22 +283,26 @@ export const HandlersLive = WebRpcs.toLayer(
       });
     });
 
-    /** The member's karma in the current guild, undefined while it's off there. Fails with a UserError for a non-member. */
+    /** The member's karma in the current guild. Fails with a UserError for a non-member. */
     const standingIn = (userId: string, guildId: string) =>
       Effect.gen(function* () {
         yield* (yield* GuildAccess).permissionsOf(userId);
-        const { karma: config, starboard } = yield* Settings.current;
-        if (!config) return undefined;
+        const { karma: config } = yield* Settings.current;
         const karma = yield* Karma;
-        const guild = yield* request("fetching the guild", () => client.guilds.resolve(guildId));
+        const fluxerGuild = yield* request("fetching the guild", () => client.guilds.resolve(guildId));
+        const guild = { id: fluxerGuild.id, name: fluxerGuild.name, iconUrl: guildIconUrl(fluxerGuild) };
         const own = yield* karma.of(userId);
+        if (!config) {
+          const off: KarmaOff = { guild, own, off: true };
+          return off;
+        }
         const [ranked] = own === 0 ? [] : yield* karma.ranked({ userIds: [userId] });
         const recent = yield* karma.recentVotes(userId);
         const votesLeft = Math.max(0, config.votesPerHour - recent.length);
         // A vote comes back once enough of the recent ones are an hour old to drop under the limit.
         const freedBy = recent[recent.length - config.votesPerHour];
         const standing: KarmaStanding = {
-          guild: { id: guild.id, name: guild.name, iconUrl: guildIconUrl(guild) },
+          guild,
           own,
           rank: ranked?.rank ?? null,
           upvotes: config.upvotes.map(emojiInfo),
@@ -358,7 +312,6 @@ export const HandlersLive = WebRpcs.toLayer(
           nextVoteAt: votesLeft === 0 && freedBy ? freedBy.getTime() + HOUR : null,
           blocked: config.blocklist.includes(userId),
           penalty: config.penalty,
-          starboardGain: starboard?.channelId === undefined ? 0 : starboard.karma,
         };
         return standing;
       });
@@ -399,18 +352,17 @@ export const HandlersLive = WebRpcs.toLayer(
           Effect.gen(function* () {
             yield* mayAdmin;
             const { id: guildId } = yield* CurrentGuild;
-            const guild = yield* StarboardGuild;
             const fluxerGuild = yield* request("fetching the guild", () => client.guilds.resolve(guildId));
             const roles = yield* request("fetching roles", () => fluxerGuild.fetchRoles());
-            const channels = yield* guild.textChannels;
+            const channels = yield* request("listing channels", () => fluxerGuild.fetchChannels());
             return {
               settings: yield* Settings.current,
-              channels: channels.map(({ id, name, nsfw }) => ({ id, name, nsfw })),
+              channels: textChannels(channels),
               roles: roles
                 .filter((r) => r.id !== guildId)
                 .sort((a, b) => b.position - a.position)
                 .map(({ id, name, color }) => ({ id, name, color })),
-              emojis: serverEmojis(yield* guild.emojis),
+              emojis: yield* serverEmojis(guildId),
               permissions: [...PERMISSIONS],
             };
           }),
@@ -483,17 +435,17 @@ export const HandlersLive = WebRpcs.toLayer(
             });
             const general: CommandInfo[] = [];
             // By title. A group and the commands that name it as their section share one.
-            const features = new Map<string, { description: string | null; commands: CommandInfo[] }>();
+            const features = new Map<string, CommandInfo[]>();
             const feature = (title: string) => {
-              let section = features.get(title);
-              if (!section) features.set(title, (section = { description: null, commands: [] }));
-              return section;
+              let commands = features.get(title);
+              if (!commands) features.set(title, (commands = []));
+              return commands;
             };
             const entries = (yield* Ref.get(commandList)).get(guildId) ?? new Map();
             for (const entry of entries.values()) {
               if (!isGroup(entry)) {
                 if (!mayRun(entry, permissions)) continue;
-                (entry.section === undefined ? general : feature(entry.section).commands).push(info(entry.name, entry));
+                (entry.section === undefined ? general : feature(entry.section)).push(info(entry.name, entry));
                 continue;
               }
               const commands = [
@@ -501,122 +453,21 @@ export const HandlersLive = WebRpcs.toLayer(
                 ...entry.subcommands.filter((c) => mayRun(c, permissions)).map((c) => info(`${entry.name} ${c.name}`, c)),
               ];
               if (commands.length === 0) continue;
-              const section = feature(entry.name[0]!.toUpperCase() + entry.name.slice(1));
-              section.description = entry.description;
-              section.commands.push(...commands);
+              feature(entry.name[0]!.toUpperCase() + entry.name.slice(1)).push(...commands);
             }
             // General first, then the features by name, then the ones only admins
             // may run anything in, like the settings.
             const adminOnly = (s: { commands: readonly CommandInfo[] }) => s.commands.every((c) => c.adminOnly);
             const sections: CommandSection[] = [...features]
-              .map(([title, s]) => ({ title, ...s }))
+              .map(([title, commands]) => ({ title, commands }))
               .sort((a, b) => Number(adminOnly(a)) - Number(adminOnly(b)) || a.title.localeCompare(b.title));
-            return [{ title: "General", description: null, commands: general }, ...sections].filter(
+            return [{ title: "General", commands: general }, ...sections].filter(
               (s) => s.commands.length > 0,
             );
           }),
         ).pipe(hide("listing the commands")),
 
-      starboard: () =>
-        inGuild(
-          Effect.gen(function* () {
-            const visible = yield* visibleStarboard;
-            if (!visible) return null;
-            const { board } = visible;
-            const channel = yield* (yield* StarboardGuild).channel(board.channelId);
-            return {
-              emoji: board.emoji.text,
-              emojiUrl: customEmojiUrl(board.emoji),
-              channelId: board.channelId,
-              channelName: channel?.name ?? "deleted-channel",
-              threshold: board.threshold,
-              nsfw: channel?.nsfw ?? false,
-            };
-          }),
-        ).pipe(hide("loading the starboard")),
-
-      starboardEntries: ({ sort, offset }) =>
-        inGuild(
-          Effect.gen(function* () {
-            const visible = yield* visibleStarboard;
-            if (!visible) return { entries: [], total: 0, names: { users: {}, channels: {}, emojis: {} } };
-            const guild = yield* StarboardGuild;
-            const { rows, total } = yield* visible.starboard.posts(sort, offset, STARBOARD_PAGE_SIZE);
-            const entries = rows.map(
-              (row): StarboardEntry => ({
-                messageId: row.messageId,
-                channelId: row.channelId,
-                authorId: row.authorId,
-                authorName: row.authorName,
-                authorAvatar: row.authorAvatar,
-                content: row.content,
-                media: row.media ?? [],
-                score: row.count,
-                messageUrl: guild.messageLink(row.channelId, row.messageId),
-              }),
-            );
-            const names = yield* namesFor(
-              rows.map((r) => r.content ?? ""),
-              rows.map((r) => r.channelId),
-            );
-            return { entries, total, names };
-          }),
-        ).pipe(hide("loading the starboard entries")),
-
       unicodeEmoji: () => Effect.sync(unicodeEmoji).pipe(hide("listing the emoji")),
-
-      starboardOptOut: () =>
-        Effect.gen(function* () {
-          const { userId } = yield* CurrentMember;
-          return yield* optedOut(userId).pipe(Effect.provideContext(everywhere));
-        }).pipe(hide("loading the starboard opt-out")),
-
-      setStarboardOptOut: ({ optedOut: next }) =>
-        Effect.gen(function* () {
-          const { userId } = yield* CurrentMember;
-          if (next) return yield* optOut(userId).pipe(Effect.provideContext(everywhere));
-          yield* optIn(userId).pipe(Effect.provideContext(everywhere));
-          return 0;
-        }).pipe(hide("changing the starboard opt-out")),
-
-      starboardSetup: () =>
-        inGuild(
-          Effect.gen(function* () {
-            const userId = yield* mayConfig;
-            const guild = yield* StarboardGuild;
-            const config = yield* currentStarboard;
-            const channels = yield* guild.textChannels;
-            const visible = new Set(yield* (yield* GuildAccess).visibleChannels(userId, channels.map((c) => c.id)));
-            const emoji = parseEmoji(config.emoji);
-            return {
-              config: {
-                channelId: config.channelId ?? null,
-                threshold: config.threshold,
-                emoji: emoji?.text ?? config.emoji,
-                emojiUrl: customEmojiUrl(emoji),
-                karma: config.karma,
-              },
-              channels: channels.filter((c) => visible.has(c.id)).map(({ id, name, nsfw }) => ({ id, name, nsfw })),
-              emojis: serverEmojis(yield* guild.emojis),
-            };
-          }),
-        ).pipe(answer("loading the starboard settings")),
-
-      setStarboard: ({ starboard }) =>
-        inGuild(
-          Effect.gen(function* () {
-            const userId = yield* mayConfig;
-            yield* setStarboard(starboard, userId);
-          }),
-        ).pipe(answer("setting the starboard")),
-
-      disableStarboard: () =>
-        inGuild(
-          Effect.gen(function* () {
-            const userId = yield* mayConfig;
-            yield* disableStarboard(userId);
-          }),
-        ).pipe(answer("disabling the starboard")),
 
       karma: () =>
         inGuild(
@@ -653,7 +504,7 @@ export const HandlersLive = WebRpcs.toLayer(
             { concurrency: 4 },
           );
           return standings
-            .filter((s): s is KarmaStanding => s !== undefined)
+            .filter((s): s is KarmaStanding | KarmaOff => s !== undefined)
             .sort((a, b) => a.guild.name.localeCompare(b.guild.name));
         }).pipe(hide("loading your karma")),
 
@@ -674,7 +525,7 @@ export const HandlersLive = WebRpcs.toLayer(
                 .filter((r) => r.id !== guildId)
                 .sort((a, b) => b.position - a.position)
                 .map(({ id, name }) => ({ id, name })),
-              emojis: serverEmojis(yield* (yield* StarboardGuild).emojis),
+              emojis: yield* serverEmojis(guildId),
             };
           }),
         ).pipe(answer("loading the karma settings")),

@@ -11,7 +11,8 @@ createRoot(document.getElementById("root") as HTMLElement).render(
   <StrictMode>
     <IconContext value={icons}>
       <App />
-      <Toaster position="bottom-right" />
+      {/* Clear of the tab bar along the bottom of narrow screens; see styles.css. */}
+      <Toaster position="bottom-right" offset={{ bottom: "var(--toast-bottom)" }} mobileOffset={{ bottom: "var(--toast-bottom)" }} />
     </IconContext>
   </StrictMode>,
 );

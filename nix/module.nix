@@ -48,7 +48,7 @@ in
         src/config.ts for every key. Unknown keys are rejected when the bot
         starts, and any change restarts it.
 
-        Bot settings like `permissions`, `emoji` or `starboard` live in the bot's
+        Bot settings like `permissions`, `emoji` or `karma` live in the bot's
         database, one set per server, and are edited on the web interface
         or with `!settings`, not here.
       '';

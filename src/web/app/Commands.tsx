@@ -19,30 +19,33 @@ import { MessageText } from "./MessageText.tsx";
 /** Descriptions mention no one; they only need the inline code rendered. */
 const NO_NAMES = { users: {}, channels: {}, emojis: {} };
 
+const FINE_POINTER = window.matchMedia("(pointer: fine)").matches;
+
 export function CommandsPage() {
   const { id: guildId } = useGuild();
   const commands = useAtomValue(Api.query("commands", { guildId }));
   const [query, setQuery] = useState("");
-  return (
+  const failed = (
     <>
       <PageHeader title="Commands" />
-      {AsyncResult.matchWithError(commands, {
-        onInitial: () => <CommandBrowser sections={undefined} query={query} onQuery={setQuery} />,
-        onError: () => <Problem />,
-        onDefect: () => <Problem />,
-        onSuccess: ({ value }) => <CommandBrowser sections={value} query={query} onQuery={setQuery} />,
-      })}
+      <Problem />
     </>
   );
+  return AsyncResult.matchWithError(commands, {
+    onInitial: () => <CommandBrowser sections={undefined} query={query} onQuery={setQuery} />,
+    onError: () => failed,
+    onDefect: () => failed,
+    onSuccess: ({ value }) => <CommandBrowser sections={value} query={query} onQuery={setQuery} />,
+  });
 }
 
 /** The element a section's link jumps to. */
 const sectionId = (title: string) => "commands-" + title.toLowerCase();
 
 /**
- * The list, with the search and a link to each section beside it on wide
- * screens, and only the search above it on narrow ones. Without sections,
- * they're still loading.
+ * The page, with the search and a link to each section along the window's
+ * left edge on wide screens, and only the search above the list on narrow
+ * ones. Without sections, they're still loading.
  */
 function CommandBrowser({
   sections,
@@ -75,7 +78,8 @@ function CommandBrowser({
           onChange={(e) => onQuery(e.target.value)}
           placeholder="Find a command"
           aria-label="Find a command"
-          autoFocus
+          // A phone would open its keyboard over the list.
+          autoFocus={FINE_POINTER}
         />
       </InputGroup>
       {shown.length > 0 && (
@@ -96,7 +100,7 @@ function CommandBrowser({
   );
 
   return (
-    <WithSidebar sidebar={sidebar}>
+    <WithSidebar header={<PageHeader title="Commands" />} sidebar={sidebar}>
       {sections === undefined ? (
         <Placeholder label="Loading the commands" className="flex flex-col gap-8">
           {[4, 3].map((rows, i) => (
@@ -121,15 +125,8 @@ function CommandBrowser({
       ) : (
         <div className="flex flex-col gap-8">
           {shown.map((section) => (
-            <section key={section.title} id={sectionId(section.title)} className="flex scroll-mt-12 flex-col gap-3">
-              <div className="flex flex-col gap-1">
-                <SectionTitle>{section.title}</SectionTitle>
-                {section.description && (
-                  <div className="text-muted-foreground">
-                    <MessageText text={section.description} names={NO_NAMES} />
-                  </div>
-                )}
-              </div>
+            <section key={section.title} id={sectionId(section.title)} className="flex scroll-mt-8 flex-col gap-3">
+              <SectionTitle>{section.title}</SectionTitle>
               <Card className="gap-0 py-0">
                 <ul className="divide-y">
                   {section.commands.map((command) => (
@@ -148,7 +145,7 @@ function CommandBrowser({
 function CommandRow({ command }: { command: CommandInfo }) {
   const { prefix } = useGuild();
   return (
-    <li className="flex flex-col gap-3 px-5 py-4">
+    <li className="flex flex-col gap-3 px-3 py-3.5 sm:px-5 sm:py-4">
       <div className="flex flex-col gap-1">
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
           <p className="font-mono text-sm wrap-anywhere">

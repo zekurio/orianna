@@ -1,6 +1,7 @@
-import { useId, useState } from "react";
-import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel, FieldSet, FieldLegend } from "@/components/ui/field";
+import { type ChangeEvent, useId, useState } from "react";
+import { SettingRow, SettingsGroup } from "@/components/settings";
 import { Input } from "@/components/ui/input";
+import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from "@/components/ui/input-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -11,7 +12,7 @@ import {
   problemsUnder,
   type SectionProps,
   type Settings,
-  SettingsCard,
+  SettingsForm,
   useSave,
 } from "./shared.tsx";
 
@@ -28,35 +29,40 @@ const POLLS_DEFAULTS: Polls = { defaultHours: 24, maxOpenPerUser: 5 };
 /** Leaves the polls channel unset. */
 const NO_CHANNEL = "none";
 
-export function ProposalsSection(props: SectionProps) {
-  return (
-    <div className="flex flex-col gap-6">
-      <ProposalsCard {...props} />
-      <PollsCard {...props} />
-    </div>
-  );
-}
+/** The fields shown for a proposal kind and for polls, so their problems aren't listed twice. */
+const PROPOSAL_FIELDS = ["votingHours", "maxOpenPerUser", "maxImageBytes", "threshold"];
+const POLLS_FIELDS = ["defaultHours", "maxOpenPerUser"];
 
-function ProposalsCard({ setup, settings }: SectionProps) {
-  const { save, busy, problems } = useSave("proposals");
-  const saved = { pollsChannelId: settings.pollsChannelId, emoji: settings.emoji, sticker: settings.sticker };
+const unshown = (problems: Problems, path: string, fields: readonly string[]) =>
+  problemsUnder(problems, path).filter((p) => !fields.some((key) => p.startsWith(`${path}/${key}: `)));
+
+export function ProposalsSection({ setup, settings }: SectionProps) {
+  const { save, busy, problems } = useSave("proposals and polls");
+  const saved = {
+    pollsChannelId: settings.pollsChannelId,
+    emoji: settings.emoji,
+    sticker: settings.sticker,
+    polls: settings.polls,
+  };
   const [draft, setDraft] = useState(saved);
   const id = useId();
 
   const needsChannel = (draft.emoji || draft.sticker) && !draft.pollsChannelId;
   const channelProblem = needsChannel ? "Proposals need a channel to vote in." : problemAt(problems, "/pollsChannelId");
-  const invalid = needsChannel || [draft.emoji, draft.sticker].some((p) => p && proposalProblems(p).length > 0);
+  const invalid =
+    needsChannel ||
+    [draft.emoji, draft.sticker].some((p) => p && proposalProblems(p).length > 0) ||
+    (draft.polls !== undefined && pollsProblems(draft.polls).length > 0);
   const known = new Set(setup.channels.map((c) => c.id));
 
   return (
-    <SettingsCard
-      title="Emoji and sticker proposals"
-      description="Members put emojis and stickers up for a vote."
+    <SettingsForm
       dirty={differs(draft, saved)}
       busy={busy}
       problems={[
-        ...problemsUnder(problems, "/emoji").filter((p) => !shownProblem(p, "/emoji")),
-        ...problemsUnder(problems, "/sticker").filter((p) => !shownProblem(p, "/sticker")),
+        ...unshown(problems, "/emoji", PROPOSAL_FIELDS),
+        ...unshown(problems, "/sticker", PROPOSAL_FIELDS),
+        ...unshown(problems, "/polls", POLLS_FIELDS),
       ]}
       onSave={() => {
         if (invalid) return;
@@ -64,62 +70,66 @@ function ProposalsCard({ setup, settings }: SectionProps) {
           pollsChannelId: draft.pollsChannelId ?? null,
           emoji: draft.emoji ?? null,
           sticker: draft.sticker ?? null,
+          polls: draft.polls ?? null,
         });
       }}
       onReset={() => setDraft(saved)}
     >
-      <Field data-invalid={channelProblem ? true : undefined} className="sm:max-w-sm">
-        <FieldLabel htmlFor={`${id}-channel`}>Polls channel</FieldLabel>
-        <Select
-          value={draft.pollsChannelId ?? NO_CHANNEL}
-          onValueChange={(value) =>
-            setDraft((d) => ({ ...d, pollsChannelId: value === NO_CHANNEL ? undefined : value }))
+      <SettingsGroup title="Voting">
+        <SettingRow
+          id={`${id}-channel`}
+          title="Polls channel"
+          wide
+          problem={channelProblem}
+          control={
+            <Select
+              value={draft.pollsChannelId ?? NO_CHANNEL}
+              onValueChange={(value) =>
+                setDraft((d) => ({ ...d, pollsChannelId: value === NO_CHANNEL ? undefined : value }))
+              }
+            >
+              <SelectTrigger
+                id={`${id}-channel`}
+                className="w-full sm:w-56"
+                aria-invalid={channelProblem ? true : undefined}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_CHANNEL}>None</SelectItem>
+                {draft.pollsChannelId && !known.has(draft.pollsChannelId) && (
+                  <SelectItem value={draft.pollsChannelId}>A channel the bot can't see</SelectItem>
+                )}
+                {setup.channels.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    #{c.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           }
-        >
-          <SelectTrigger id={`${id}-channel`} className="w-full" aria-invalid={channelProblem ? true : undefined}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={NO_CHANNEL}>None</SelectItem>
-            {draft.pollsChannelId && !known.has(draft.pollsChannelId) && (
-              <SelectItem value={draft.pollsChannelId}>A channel the bot can't see</SelectItem>
-            )}
-            {setup.channels.map((c) => (
-              <SelectItem key={c.id} value={c.id}>
-                #{c.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <FieldDescription>Where proposals are voted on.</FieldDescription>
-        <FieldError>{channelProblem}</FieldError>
-      </Field>
+        />
+      </SettingsGroup>
 
-      <ProposalFields
-        legend="Emoji proposals"
+      <ProposalGroup
+        title="Emoji proposals"
         label="Members can propose emoji"
         path="/emoji"
         value={draft.emoji}
         problems={problems}
         onChange={(emoji) => setDraft((d) => ({ ...d, emoji }))}
       />
-      <ProposalFields
-        legend="Sticker proposals"
+      <ProposalGroup
+        title="Sticker proposals"
         label="Members can propose stickers"
         path="/sticker"
         value={draft.sticker}
         problems={problems}
         onChange={(sticker) => setDraft((d) => ({ ...d, sticker }))}
       />
-    </SettingsCard>
+      <PollsGroup value={draft.polls} problems={problems} onChange={(polls) => setDraft((d) => ({ ...d, polls }))} />
+    </SettingsForm>
   );
-}
-
-/** The fields shown for a proposal kind, so their problems aren't listed twice. */
-const PROPOSAL_FIELDS = ["votingHours", "maxOpenPerUser", "maxImageBytes", "threshold"];
-
-function shownProblem(problem: string, path: string): boolean {
-  return PROPOSAL_FIELDS.some((key) => problem.startsWith(`${path}/${key}: `));
 }
 
 /** What's wrong with a proposal kind's numbers, before the bot sees them. */
@@ -132,15 +142,22 @@ function proposalProblems(p: Proposal): string[] {
   ].filter((key): key is string => key !== false);
 }
 
-function ProposalFields({
-  legend,
+function pollsProblems(p: Polls): string[] {
+  return [
+    !(p.defaultHours > 0 && p.defaultHours <= 672) && "defaultHours",
+    !(Number.isInteger(p.maxOpenPerUser) && p.maxOpenPerUser >= 1) && "maxOpenPerUser",
+  ].filter((key): key is string => key !== false);
+}
+
+function ProposalGroup({
+  title,
   label,
   path,
   value,
   problems,
   onChange,
 }: {
-  legend: string;
+  title: string;
   label: string;
   path: string;
   value: Proposal | undefined;
@@ -154,124 +171,124 @@ function ProposalFields({
   const set = (change: Partial<Proposal>) => value && onChange({ ...value, ...change });
 
   return (
-    // The border goes on a wrapper: a fieldset draws its legend into its own top border.
-    // The legend also sits outside the fieldset's flex layout, so it takes a margin for
-    // the gap a card leaves under its title.
-    <div className="border-t pt-5">
-      <FieldSet className="gap-4">
-        <FieldLegend className="mb-4">{legend}</FieldLegend>
-        <Field orientation="horizontal">
+    <SettingsGroup title={title}>
+      <SettingRow
+        id={`${id}-on`}
+        title={label}
+        control={
           <Switch
             id={`${id}-on`}
             checked={value !== undefined}
             onCheckedChange={(on) => onChange(on ? PROPOSAL_DEFAULTS : undefined)}
           />
-          <FieldLabel htmlFor={`${id}-on`}>{label}</FieldLabel>
-        </Field>
-        {value && (
-          <FieldGroup className="grid gap-x-6 gap-y-5 sm:grid-cols-2">
-            <NumberField
-              id={`${id}-hours`}
-              label="Voting time, in hours"
-              value={value.votingHours}
-              min={1}
-              onChange={(votingHours) => set({ votingHours })}
-              problem={problem("votingHours", "More than 0 hours.")}
-            />
-            <NumberField
-              id={`${id}-open`}
-              label="Open proposals per member"
-              value={value.maxOpenPerUser}
-              min={1}
-              onChange={(maxOpenPerUser) => set({ maxOpenPerUser })}
-              problem={problem("maxOpenPerUser", "A whole number, 1 or more.")}
-            />
-            <NumberField
-              id={`${id}-size`}
-              label="Largest upload, in KiB"
-              hint="The instance's limit, 512 KiB by default."
-              value={value.maxImageBytes / 1024}
-              min={1}
-              onChange={(kib) => set({ maxImageBytes: Math.round(kib * 1024) })}
-              problem={problem("maxImageBytes", "1 KiB or more.")}
-            />
-            <NumberField
-              id={`${id}-threshold`}
-              label="Votes needed, in percent"
-              hint="Of members who can see the polls channel. It also needs more ✅ than ❌."
-              value={Math.round(value.threshold * 1000) / 10}
-              min={1}
-              max={100}
-              onChange={(percent) => set({ threshold: percent / 100 })}
-              problem={problem("threshold", "More than 0 and at most 100 percent.")}
-            />
-          </FieldGroup>
-        )}
-      </FieldSet>
-    </div>
+        }
+      />
+      {value && (
+        <>
+          <NumberRow
+            id={`${id}-hours`}
+            title="Voting time"
+            unit="hours"
+            value={value.votingHours}
+            min={1}
+            onChange={(votingHours) => set({ votingHours })}
+            problem={problem("votingHours", "More than 0 hours.")}
+          />
+          <NumberRow
+            id={`${id}-open`}
+            title="Open proposals per member"
+            value={value.maxOpenPerUser}
+            min={1}
+            onChange={(maxOpenPerUser) => set({ maxOpenPerUser })}
+            problem={problem("maxOpenPerUser", "A whole number, 1 or more.")}
+          />
+          <NumberRow
+            id={`${id}-size`}
+            title="Largest upload"
+            description="The instance's limit, 512 KiB by default."
+            unit="KiB"
+            value={value.maxImageBytes / 1024}
+            min={1}
+            onChange={(kib) => set({ maxImageBytes: Math.round(kib * 1024) })}
+            problem={problem("maxImageBytes", "1 KiB or more.")}
+          />
+          <NumberRow
+            id={`${id}-threshold`}
+            title="Votes needed"
+            description="Of members who can see the polls channel. It also needs more ✅ than ❌."
+            unit="%"
+            value={Math.round(value.threshold * 1000) / 10}
+            min={1}
+            max={100}
+            onChange={(percent) => set({ threshold: percent / 100 })}
+            problem={problem("threshold", "More than 0 and at most 100 percent.")}
+          />
+        </>
+      )}
+    </SettingsGroup>
   );
 }
 
-function PollsCard({ settings }: SectionProps) {
-  const { save, busy, problems } = useSave("polls");
-  const [draft, setDraft] = useState(settings.polls);
+function PollsGroup({
+  value,
+  problems,
+  onChange,
+}: {
+  value: Polls | undefined;
+  problems: Problems;
+  onChange: (value: Polls | undefined) => void;
+}) {
   const id = useId();
-
-  const hoursBad = draft !== undefined && !(draft.defaultHours > 0 && draft.defaultHours <= 672);
-  const openBad = draft !== undefined && !(Number.isInteger(draft.maxOpenPerUser) && draft.maxOpenPerUser >= 1);
-  const set = (change: Partial<Polls>) => setDraft((d) => d && { ...d, ...change });
+  const local = value ? pollsProblems(value) : [];
+  const problem = (key: string, message: string) =>
+    local.includes(key) ? message : problemAt(problems, `/polls/${key}`);
+  const set = (change: Partial<Polls>) => value && onChange({ ...value, ...change });
 
   return (
-    <SettingsCard
-      title="Polls"
-      dirty={differs(draft, settings.polls)}
-      busy={busy}
-      problems={problemsUnder(problems, "/polls").filter(
-        (p) => !p.startsWith("/polls/defaultHours: ") && !p.startsWith("/polls/maxOpenPerUser: "),
-      )}
-      onSave={() => {
-        if (!hoursBad && !openBad) save({ polls: draft ?? null });
-      }}
-      onReset={() => setDraft(settings.polls)}
-    >
-      <Field orientation="horizontal">
-        <Switch
-          id={`${id}-on`}
-          checked={draft !== undefined}
-          onCheckedChange={(on) => setDraft(on ? POLLS_DEFAULTS : undefined)}
-        />
-        <FieldLabel htmlFor={`${id}-on`}>Members can start polls</FieldLabel>
-      </Field>
-      {draft && (
-        <FieldGroup className="grid gap-x-6 gap-y-5 sm:grid-cols-2">
-          <NumberField
+    <SettingsGroup title="Polls">
+      <SettingRow
+        id={`${id}-on`}
+        title="Members can start polls"
+        control={
+          <Switch
+            id={`${id}-on`}
+            checked={value !== undefined}
+            onCheckedChange={(on) => onChange(on ? POLLS_DEFAULTS : undefined)}
+          />
+        }
+      />
+      {value && (
+        <>
+          <NumberRow
             id={`${id}-hours`}
-            label="Default length, in hours"
-            hint="For polls started without one. 672 at most."
-            value={draft.defaultHours}
+            title="Default length"
+            description="For polls started without one. 672 at most."
+            unit="hours"
+            value={value.defaultHours}
             min={1}
             max={672}
             onChange={(defaultHours) => set({ defaultHours })}
-            problem={hoursBad ? "More than 0 and at most 672 hours." : problemAt(problems, "/polls/defaultHours")}
+            problem={problem("defaultHours", "More than 0 and at most 672 hours.")}
           />
-          <NumberField
+          <NumberRow
             id={`${id}-open`}
-            label="Open polls per member"
-            value={draft.maxOpenPerUser}
+            title="Open polls per member"
+            value={value.maxOpenPerUser}
             min={1}
             onChange={(maxOpenPerUser) => set({ maxOpenPerUser })}
-            problem={openBad ? "A whole number, 1 or more." : problemAt(problems, "/polls/maxOpenPerUser")}
+            problem={problem("maxOpenPerUser", "A whole number, 1 or more.")}
           />
-        </FieldGroup>
+        </>
       )}
-    </SettingsCard>
+    </SettingsGroup>
   );
 }
 
-function NumberField({
+function NumberRow({
   id,
-  label,
-  hint,
+  title,
+  description,
+  unit,
   value,
   min,
   max,
@@ -279,31 +296,46 @@ function NumberField({
   problem,
 }: {
   id: string;
-  label: string;
-  hint?: string;
+  title: string;
+  description?: string;
+  unit?: string;
   value: number;
   min?: number;
   max?: number;
   onChange: (value: number) => void;
   problem: string | undefined;
 }) {
+  const props = {
+    id,
+    type: "number",
+    inputMode: "decimal",
+    min,
+    max,
+    value: numberValue(value),
+    onChange: (e: ChangeEvent<HTMLInputElement>) => onChange(e.target.valueAsNumber),
+    "aria-invalid": problem ? true : undefined,
+    "aria-describedby": `${id}-description`,
+    // Without the spinner buttons, which crowd the number in a field this narrow.
+    className: "text-right tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none",
+  } as const;
   return (
-    <Field data-invalid={problem ? true : undefined}>
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
-      <Input
-        id={id}
-        type="number"
-        inputMode="decimal"
-        min={min}
-        max={max}
-        value={numberValue(value)}
-        onChange={(e) => onChange(e.target.valueAsNumber)}
-        aria-invalid={problem ? true : undefined}
-        aria-describedby={`${id}-hint ${id}-problem`}
-        className="sm:max-w-40"
-      />
-      {hint && <FieldDescription id={`${id}-hint`}>{hint}</FieldDescription>}
-      <FieldError id={`${id}-problem`}>{problem}</FieldError>
-    </Field>
+    <SettingRow
+      id={id}
+      title={title}
+      description={description}
+      problem={problem}
+      control={
+        unit ? (
+          <InputGroup className="w-32">
+            <InputGroupInput {...props} />
+            <InputGroupAddon align="inline-end">
+              <InputGroupText>{unit}</InputGroupText>
+            </InputGroupAddon>
+          </InputGroup>
+        ) : (
+          <Input {...props} className={`w-32 ${props.className}`} />
+        )
+      }
+    />
   );
 }

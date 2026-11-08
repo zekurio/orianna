@@ -5,11 +5,10 @@ import { type FormEvent, type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import { Problem } from "@/components/Problem";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
 import type { BotSettings } from "../../../config.ts";
 import type { AdminSetup } from "../../rpc.ts";
-import { Api, failureMessage, KARMA_KEYS, STARBOARD_KEYS } from "../api.ts";
+import { Api, failureMessage, KARMA_KEYS } from "../api.ts";
 import { useGuild } from "../guild.tsx";
 
 // What the Admin tab's sections share. Each section edits a few top-level
@@ -30,8 +29,8 @@ export const ADMIN_KEYS = ["admin"];
 
 export const setupQuery = (guildId: string) => Api.query("adminSetup", { guildId }, { reactivityKeys: ADMIN_KEYS });
 
-/** Saving can change the prefix in the session, and the starboard or karma if their sections changed. */
-const SAVE_KEYS = [...ADMIN_KEYS, "session", ...STARBOARD_KEYS, ...KARMA_KEYS];
+/** Saving can change the prefix in the session, and karma if its section changed. */
+const SAVE_KEYS = [...ADMIN_KEYS, "session", ...KARMA_KEYS];
 
 /** The bot's problems with the last save, by path. */
 export type Problems = readonly string[];
@@ -80,12 +79,11 @@ export function useSave(label: string) {
 }
 
 /**
- * A section of the Admin tab: a card with a form, and Save and Reset for
- * what changed. `problems` are the ones no field shows.
+ * A tab of the Admin page: its groups of settings, and a bar along the bottom
+ * with Save and Reset while something changed. `problems` are the ones no
+ * row shows.
  */
-export function SettingsCard({
-  title,
-  description,
+export function SettingsForm({
   dirty,
   busy,
   problems = [],
@@ -93,8 +91,6 @@ export function SettingsCard({
   onReset,
   children,
 }: {
-  title: string;
-  description?: ReactNode;
   dirty: boolean;
   busy: boolean;
   problems?: readonly string[];
@@ -107,29 +103,29 @@ export function SettingsCard({
     if (dirty && !busy) onSave();
   };
   return (
-    <form onSubmit={submit} noValidate>
-      <Card>
-        <CardHeader>
-          <CardTitle>{title}</CardTitle>
-          {description && <CardDescription>{description}</CardDescription>}
-        </CardHeader>
-        <CardContent className="flex flex-col gap-6">
-          {children}
-          {problems.length > 0 && <Problem message={problems.join("\n")} />}
-        </CardContent>
-        <CardFooter className="justify-end gap-2 border-t">
-          {dirty && (
+    <form onSubmit={submit} noValidate className="flex flex-1 flex-col gap-8">
+      {children}
+      {problems.length > 0 && <Problem message={problems.join("\n")} />}
+      {/* On narrow screens it covers the tab bar, which leaving the changes
+          would take; on wide ones it sits on the window's bottom edge while
+          the page scrolls under it, and at the end of the page too: it reaches
+          into the page's 3rem padding. The form fills the page, so a short one
+          pushes it down there as well. */}
+      {(dirty || busy) && (
+        <div className="z-20 flex animate-in items-center justify-between gap-3 bg-popover duration-200 fade-in slide-in-from-bottom-2 max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:box-content max-lg:h-16 max-lg:border-t max-lg:px-4 max-lg:pb-[env(safe-area-inset-bottom)] lg:sticky lg:bottom-0 lg:mt-auto lg:-mb-12 lg:rounded-t-xl lg:border lg:border-b-0 lg:py-2.5 lg:pr-2.5 lg:pl-4 lg:shadow-lg lg:shadow-black/30">
+          <span className="text-sm text-muted-foreground">Unsaved changes</span>
+          <div className="flex gap-2">
             <Button type="button" variant="ghost" onClick={onReset} disabled={busy}>
               <ArrowCounterClockwiseIcon />
               Reset
             </Button>
-          )}
-          <Button type="submit" disabled={!dirty || busy}>
-            {busy ? <Spinner /> : <FloppyDiskIcon />}
-            {busy ? "Saving…" : "Save"}
-          </Button>
-        </CardFooter>
-      </Card>
+            <Button type="submit" disabled={busy}>
+              {busy ? <Spinner /> : <FloppyDiskIcon />}
+              {busy ? "Saving…" : "Save"}
+            </Button>
+          </div>
+        </div>
+      )}
     </form>
   );
 }

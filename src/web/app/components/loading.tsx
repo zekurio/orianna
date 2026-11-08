@@ -1,6 +1,6 @@
 import { cn } from "cn";
 import type { ReactNode } from "react";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Card, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 
 // What stands in for content while it loads: skeletons in its shape, which
@@ -52,7 +52,7 @@ export function ListCardSkeleton({ rows = 3, title = true }: { rows?: number; ti
       )}
       <ul className="divide-y">
         {Array.from({ length: rows }, (_, i) => (
-          <li key={i} className="flex flex-col gap-2.5 px-5 py-4">
+          <li key={i} className="flex flex-col gap-2.5 px-3 py-3.5 sm:px-5 sm:py-4">
             <TextSkeleton className={i % 2 ? "w-56" : "w-72"} />
             <TextSkeleton className={i % 2 ? "w-1/2" : "w-2/3"} />
           </li>
@@ -62,19 +62,19 @@ export function ListCardSkeleton({ rows = 3, title = true }: { rows?: number; ti
   );
 }
 
-/** A form card: a title, a description, and `fields` fields. */
-export function FormCardSkeleton({ fields = 2 }: { fields?: number }) {
+/** A group of settings: its heading, and `rows` rows with a control on the right. */
+export function SettingsGroupSkeleton({ rows = 2 }: { rows?: number }) {
   return (
-    <Card>
-      <CardHeader className="gap-2">
-        <TextSkeleton className="h-5 w-40" />
-        <TextSkeleton className="w-2/3" />
-      </CardHeader>
-      <CardContent className="grid gap-6 sm:grid-cols-2">
-        {Array.from({ length: fields }, (_, i) => (
-          <FieldSkeleton key={i} />
+    <div className="flex flex-col gap-3">
+      <TextSkeleton className="mx-1 my-2 h-5 w-32" />
+      <div className="divide-y rounded-xl border bg-card">
+        {Array.from({ length: rows }, (_, i) => (
+          <div key={i} className="flex items-center justify-between gap-6 px-3 py-3.5 sm:px-5 sm:py-4">
+            <TextSkeleton className={i % 2 ? "w-40" : "w-56"} />
+            <Skeleton className="h-8 w-32 rounded-lg" />
+          </div>
         ))}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }

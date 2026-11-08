@@ -12,7 +12,6 @@ import { ImageMagick } from "./expressions/process.ts";
 import { type Milestones, serveGuilds } from "./features.ts";
 import { Fluxer, listen, logFailure, login } from "./fluxer.ts";
 import { Guilds } from "./guilds.ts";
-import { ImageStore } from "./imagestore.ts";
 import { MinimumLogLevel, PrettyLogger, tagLogs } from "./log.ts";
 import { perms } from "./permissions/commands.ts";
 import { FluxerPollTransport } from "./polls/fluxer.ts";
@@ -20,20 +19,25 @@ import { PollService } from "./polls/service.ts";
 import { attachReactions } from "./reactions.ts";
 import { settingsCommands } from "./settings/commands.ts";
 import { SettingsStore } from "./settings/settings.ts";
-import { WebServer } from "./web/server.ts";
+import { WebListener, WebServer } from "./web/server.ts";
 
 const Platform = Layer.mergeAll(BunServices.layer, BunDns.layer, FetchHttpClient.layer);
 
-const Core = Fluxer.layer.pipe(
-  Layer.provideMerge(SettingsStore.layer),
-  Layer.provideMerge(Database.layer),
-  Layer.provideMerge(MinimumLogLevel),
-  Layer.provideMerge(AppConfig.layer),
-  Layer.provideMerge(Platform),
-);
+const Config = MinimumLogLevel.pipe(Layer.provideMerge(AppConfig.layer), Layer.provideMerge(Platform));
+
+/**
+ * Reaching Fluxer, opening the database and listening for the web interface
+ * don't wait for each other, so they start together once the config file is
+ * read. The bot is ready when the slowest is, which is usually Fluxer.
+ */
+const Core = Layer.mergeAll(
+  Fluxer.layer,
+  SettingsStore.layer.pipe(Layer.provideMerge(Database.layer)),
+  WebListener.layer,
+).pipe(Layer.provideMerge(Config));
 
 /** What every guild shares; each guild's own services come from Guilds. */
-const Shared = Layer.mergeAll(CommandList.layer, FluxerPollTransport, ImageMagick.layer, ImageStore.layer).pipe(
+const Shared = Layer.mergeAll(CommandList.layer, FluxerPollTransport, ImageMagick.layer).pipe(
   Layer.provideMerge(Core),
 );
 
@@ -103,7 +107,7 @@ const run = Effect.fnUntraced(function* (hangups: Queue.Queue<void>) {
   yield* (yield* ImageMagick).check.pipe(
     Effect.flatMap((problems) =>
       Effect.forEach(problems, (problem) =>
-        Effect.logError(`emoji and sticker images and blurring NSFW images on the starboard won't work: ${problem}`),
+        Effect.logError(`emoji and sticker images won't work: ${problem}`),
       ),
     ),
     Effect.forkScoped,

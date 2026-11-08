@@ -1,6 +1,4 @@
 import { Context, Effect, Exit, Layer, Scope, Semaphore } from "effect";
-import type { HttpClient } from "effect/http";
-import type { Dns } from "effect/net";
 import type { ConfigError } from "./config.ts";
 import { Database } from "./db/index.ts";
 import { FluxerExpressionGuild } from "./expressions/fluxer.ts";
@@ -18,8 +16,6 @@ import { FluxerRoleGuild } from "./roles/fluxer.ts";
 import type { RoleGuild } from "./roles/menus.ts";
 import { FluxerSettingsGuild } from "./settings/fluxer.ts";
 import { Settings, type SettingsGuild, SettingsStore } from "./settings/settings.ts";
-import { FluxerStarboardGuild } from "./starboard/fluxer.ts";
-import { LiveStarboard, type StarboardGuild } from "./starboard/starboard.ts";
 
 // The bot serves every guild it's in. Each guild gets its own services, for
 // its settings and for talking to Fluxer about it; features, commands and web
@@ -33,14 +29,12 @@ export type GuildServices =
   | GuildAccess
   | RoleGuild
   | ExpressionGuild
-  | StarboardGuild
   | KarmaGuild
   | Karma
-  | CommunityPollChat
-  | LiveStarboard;
+  | CommunityPollChat;
 
 /** What every guild's services are built from. */
-type Shared = Fluxer | Database | SettingsStore | PollTransport | HttpClient.HttpClient | Dns.Dns;
+type Shared = Fluxer | Database | SettingsStore | PollTransport;
 
 const guildLayer = (guildId: string) =>
   Karma.layer.pipe(
@@ -49,10 +43,8 @@ const guildLayer = (guildId: string) =>
         FluxerGuildAccess,
         FluxerRoleGuild,
         FluxerExpressionGuild,
-        FluxerStarboardGuild,
         FluxerKarmaGuild,
         FluxerCommunityPollChat,
-        LiveStarboard.layer,
       ),
     ),
     Layer.provideMerge(Settings.layer),

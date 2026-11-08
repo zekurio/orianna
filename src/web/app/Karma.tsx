@@ -43,9 +43,9 @@ export function KarmaPage() {
               <ArrowClockwise />
             </Button>
             {configKarma && (
-              <Button variant="outline" onClick={() => setSettingsOpen(true)}>
+              <Button variant="outline" className="max-sm:w-8 max-sm:px-0" onClick={() => setSettingsOpen(true)}>
                 <GearSix />
-                Settings
+                <span className="max-sm:sr-only">Settings</span>
               </Button>
             )}
           </>
@@ -70,7 +70,7 @@ function SettingsDialog() {
   useAtomMount(karmaSetupQuery(guildId));
   return (
     <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl" aria-describedby={undefined}>
+      <DialogContent className="sm:max-w-2xl" aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle>Karma settings</DialogTitle>
         </DialogHeader>
@@ -95,7 +95,7 @@ function ScoreboardSkeleton({ rows = 5 }: { rows?: number }) {
     <Card className="gap-0 py-0">
       <ul className="divide-y">
         {Array.from({ length: rows }, (_, i) => (
-          <li key={i} className="flex items-center gap-3 px-5 py-3">
+          <li key={i} className="flex items-center gap-3 px-3 py-3 sm:px-5">
             <TextSkeleton className="w-5" />
             <Skeleton className="size-8 rounded-full" />
             <TextSkeleton className={i % 2 ? "w-28" : "w-40"} />
@@ -205,7 +205,7 @@ function Scoreboard({ entries }: { entries: readonly KarmaEntry[] }) {
     <Card className="gap-0 py-0">
       <ol className="divide-y">
         {entries.map((entry) => (
-          <li key={entry.userId} className="flex items-center gap-3 px-5 py-3">
+          <li key={entry.userId} className="flex items-center gap-3 px-3 py-3 sm:px-5">
             <span className="w-6 shrink-0 text-right text-muted-foreground tabular-nums">{entry.rank}</span>
             <Avatar className="size-8">
               <AvatarImage src={entry.avatarUrl} alt="" />

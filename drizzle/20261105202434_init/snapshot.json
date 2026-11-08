@@ -1,17 +1,13 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "04548979-eded-45a2-9a45-81a5db813b06",
+  "id": "cea5c5f6-c55f-48c7-820b-0b6f043cf14c",
   "prevIds": [
     "00000000-0000-0000-0000-000000000000"
   ],
   "ddl": [
     {
       "name": "karma",
-      "entityType": "tables"
-    },
-    {
-      "name": "karma_bonuses",
       "entityType": "tables"
     },
     {
@@ -44,18 +40,6 @@
     },
     {
       "name": "settings_changes",
-      "entityType": "tables"
-    },
-    {
-      "name": "starboard_entries",
-      "entityType": "tables"
-    },
-    {
-      "name": "starboard_opt_outs",
-      "entityType": "tables"
-    },
-    {
-      "name": "stored_images",
       "entityType": "tables"
     },
     {
@@ -93,66 +77,6 @@
       "notNull": true,
       "autoincrement": false,
       "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "karma_bonuses",
-      "name": "message_id",
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "karma_bonuses",
-      "name": "guild_id",
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "karma_bonuses",
-      "name": "user_id",
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "karma_bonuses",
-      "name": "amount",
-      "type": "integer",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "karma_bonuses",
-      "name": "given_at",
-      "type": "integer",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "karma_bonuses",
-      "name": "revoked",
-      "type": "integer",
-      "notNull": true,
-      "autoincrement": false,
-      "default": "false",
       "generated": null,
       "entityType": "columns"
     },
@@ -747,206 +671,6 @@
       "entityType": "columns"
     },
     {
-      "table": "starboard_entries",
-      "name": "message_id",
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "starboard_entries",
-      "name": "guild_id",
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "starboard_entries",
-      "name": "channel_id",
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "starboard_entries",
-      "name": "author_id",
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "starboard_entries",
-      "name": "post_channel_id",
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "starboard_entries",
-      "name": "post_id",
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "starboard_entries",
-      "name": "count",
-      "type": "integer",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "starboard_entries",
-      "name": "removed",
-      "type": "integer",
-      "notNull": true,
-      "autoincrement": false,
-      "default": "false",
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "starboard_entries",
-      "name": "posted_at",
-      "type": "integer",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "starboard_entries",
-      "name": "content",
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "starboard_entries",
-      "name": "author_name",
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "starboard_entries",
-      "name": "author_avatar",
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "starboard_entries",
-      "name": "media",
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "starboard_entries",
-      "name": "sent_at",
-      "type": "integer",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "starboard_opt_outs",
-      "name": "user_id",
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "starboard_opt_outs",
-      "name": "opted_out_at",
-      "type": "integer",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "stored_images",
-      "name": "id",
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "stored_images",
-      "name": "image",
-      "type": "blob",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "stored_images",
-      "name": "content_type",
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
-      "table": "stored_images",
-      "name": "stored_at",
-      "type": "integer",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "entityType": "columns"
-    },
-    {
       "table": "votes",
       "name": "poll_id",
       "type": "integer",
@@ -1199,56 +923,6 @@
       "entityType": "indexes"
     },
     {
-      "table": "starboard_entries",
-      "name": "starboard_entries_post_id_idx",
-      "columns": [
-        {
-          "value": "post_id",
-          "isExpression": false
-        }
-      ],
-      "isUnique": true,
-      "where": null,
-      "origin": "manual",
-      "entityType": "indexes"
-    },
-    {
-      "table": "starboard_entries",
-      "name": "starboard_entries_guild_id_author_id_idx",
-      "columns": [
-        {
-          "value": "guild_id",
-          "isExpression": false
-        },
-        {
-          "value": "author_id",
-          "isExpression": false
-        }
-      ],
-      "isUnique": false,
-      "where": null,
-      "origin": "manual",
-      "entityType": "indexes"
-    },
-    {
-      "table": "starboard_entries",
-      "name": "starboard_entries_guild_id_posted_at_idx",
-      "columns": [
-        {
-          "value": "guild_id",
-          "isExpression": false
-        },
-        {
-          "value": "posted_at",
-          "isExpression": false
-        }
-      ],
-      "isUnique": false,
-      "where": null,
-      "origin": "manual",
-      "entityType": "indexes"
-    },
-    {
       "table": "web_sessions",
       "name": "web_sessions_expires_at_idx",
       "columns": [
@@ -1335,15 +1009,6 @@
       "entityType": "pks"
     },
     {
-      "table": "karma_bonuses",
-      "name": "karma_bonuses_pk",
-      "columns": [
-        "message_id"
-      ],
-      "nameExplicit": false,
-      "entityType": "pks"
-    },
-    {
       "table": "karma_votes",
       "name": "karma_votes_pk",
       "columns": [
@@ -1390,33 +1055,6 @@
       "name": "settings_pk",
       "columns": [
         "guild_id"
-      ],
-      "nameExplicit": false,
-      "entityType": "pks"
-    },
-    {
-      "table": "starboard_entries",
-      "name": "starboard_entries_pk",
-      "columns": [
-        "message_id"
-      ],
-      "nameExplicit": false,
-      "entityType": "pks"
-    },
-    {
-      "table": "starboard_opt_outs",
-      "name": "starboard_opt_outs_pk",
-      "columns": [
-        "user_id"
-      ],
-      "nameExplicit": false,
-      "entityType": "pks"
-    },
-    {
-      "table": "stored_images",
-      "name": "stored_images_pk",
-      "columns": [
-        "id"
       ],
       "nameExplicit": false,
       "entityType": "pks"

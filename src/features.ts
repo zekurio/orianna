@@ -18,9 +18,6 @@ import { attachPollMessageDeletes } from "./polls/fluxer.ts";
 import { attachRoleMenuEvents } from "./roles/fluxer.ts";
 import { makeRoleMenus } from "./roles/menus.ts";
 import { Settings } from "./settings/settings.ts";
-import { starboardCommands } from "./starboard/commands.ts";
-import { attachStarboardEvents } from "./starboard/fluxer.ts";
-import { LiveStarboard, makeStarboard } from "./starboard/starboard.ts";
 
 // The features each guild's settings turn on, built from the settings and
 // built again when they change. main.ts runs them for every guild the bot is
@@ -89,10 +86,6 @@ const startFeatures = Effect.fnUntraced(function* (
   }
   const community = settings.polls ? yield* makeCommunityPolls(settings.polls, guildId) : undefined;
   if (community) commands.push(...pollCommands(community, settings.polls!.defaultHours));
-  // Built while it's off too, so `!starboard set` can turn it on.
-  const starboard = yield* makeStarboard(settings.starboard, guildId);
-  commands.push(yield* starboardCommands());
-  yield* LiveStarboard.provide(starboard);
   // Built while it's off too, so `!karma set` can turn it on.
   commands.push(yield* karmaCommands());
   // Built even without a `roleMenus` section, so removing it takes the menus down.
@@ -101,16 +94,12 @@ const startFeatures = Effect.fnUntraced(function* (
   yield* Effect.acquireRelease(router.setCommands(guildId, commands), () => router.setCommands(guildId, base));
   if (community) yield* attachPollMessageDeletes(community);
   yield* attachRoleMenuEvents(roleMenus);
-  if (starboard.board) yield* attachStarboardEvents(starboard);
   if (settings.karma) yield* attachKarmaEvents(yield* Karma);
 
   // Right away when the bot is already logged in, which is the case after a
   // change, and again on every login. 🛑 from while offline waits for the
   // votes, so a poll it ends counts them.
   yield* whenever(milestones.logins, roleMenus.sync);
-  if (starboard.board) yield* whenever(milestones.logins, starboard.catchUp);
-  // Posts the opt-out missed while the starboard was starting over, or couldn't delete.
-  yield* whenever(milestones.logins, Effect.asVoid(starboard.takeDownOptedOut()));
   if (community) {
     const reconcile = community.reconcile().pipe(Effect.catchCause(logFailure("poll reconcile")));
     yield* whenever(milestones.pollCatchUps, reconcile);

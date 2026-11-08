@@ -1,13 +1,10 @@
 import { MagnifyingGlass, UsersThree } from "@phosphor-icons/react";
 import { PageHeader } from "@/components/page";
-import { SettingsGroup } from "@/components/settings";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { useSession } from "./App.tsx";
 import { ProfileKarma } from "./ProfileKarma.tsx";
-import { StarboardOptOut } from "./StarboardOptOut.tsx";
 import { Link } from "./router.tsx";
 
 // The profile page behind the user menu, the page for paths that aren't one,
@@ -18,25 +15,20 @@ export function ProfilePage() {
   return (
     <>
       <PageHeader title="Profile" />
-      <Card>
-        <CardContent className="flex items-center gap-4">
-          <Avatar className="size-14">
-            <AvatarImage src={user.avatarUrl} alt="" />
-            <AvatarFallback>{user.name.slice(0, 1)}</AvatarFallback>
-          </Avatar>
-          <div className="grid min-w-0 gap-0.5">
-            <strong className="truncate font-heading text-[1.375rem] leading-tight">{user.name}</strong>
-            <span className="text-muted-foreground">
-              {user.tag !== user.name ? `${user.tag} · ` : ""}
-              {guilds.length === 1 ? "1 server" : `${guilds.length} servers`} with Orianna
-            </span>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="flex items-center gap-4 px-1">
+        <Avatar className="size-14">
+          <AvatarImage src={user.avatarUrl} alt="" />
+          <AvatarFallback>{user.name.slice(0, 1)}</AvatarFallback>
+        </Avatar>
+        <div className="grid min-w-0 gap-0.5">
+          <strong className="truncate font-heading text-[1.375rem]/7">{user.name}</strong>
+          <span className="text-muted-foreground">
+            {user.tag !== user.name ? `${user.tag} · ` : ""}
+            {guilds.length === 1 ? "1 server" : `${guilds.length} servers`} with Orianna
+          </span>
+        </div>
+      </div>
       <ProfileKarma />
-      <SettingsGroup title="Privacy" description="Applies in every server.">
-        <StarboardOptOut />
-      </SettingsGroup>
     </>
   );
 }

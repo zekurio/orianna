@@ -9,14 +9,12 @@ settings, which start at the defaults.
   emote, and a wide image turns into a row of emojis.
 - `!poll` starts a poll that shows its results while people vote.
 - Role menus give a role to whoever reacts to a message.
-- The starboard, copied from shinpuru, reposts messages once they get enough
-  ⭐ reactions.
-- Members give each other karma by reacting to messages, as on shinpuru, and
-  getting into the starboard adds to it. Rules can hand out roles at a value.
+- Members give each other karma by reacting to messages, as on shinpuru.
+  Rules can hand out roles at a value.
 - Permission rules decide who may run which command.
 - Members sign in to a web interface with their Fluxer account. They can browse
-  the starboard and the karma scoreboard and see the commands they're allowed
-  to run, and admins change the settings there.
+  the karma scoreboard and see the commands they're allowed to run, and admins
+  change the settings there.
 
 Fluxer has no slash commands or buttons yet, so commands start with a prefix,
 `!` by default, and every vote is a reaction.
@@ -100,8 +98,6 @@ leaves off.
 | `!poll` | Where members run it | Send Messages, Embed Links, Add Reactions, Manage Messages, Read Message History |
 | Role menus | The server | Manage Roles, with the bot's highest role above every menu role |
 | Role menus | The menu channels | Send Messages, Embed Links, Add Reactions, Manage Messages, Read Message History |
-| Starboard | Where members react | View Channel, Read Message History |
-| Starboard | The starboard channel | Send Messages, Embed Links, Attach Files |
 | Karma | Where members react | View Channel, Read Message History |
 | Karma rules | The server | Manage Roles, with the bot's highest role above every rule role; Kick Members and Ban Members for those rules |
 

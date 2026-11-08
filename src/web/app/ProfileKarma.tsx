@@ -1,80 +1,68 @@
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
-import { Star } from "@phosphor-icons/react";
 import { cn } from "cn";
 import { AsyncResult } from "effect/reactivity";
 import { Fragment, type ReactNode, useEffect, useState } from "react";
 import { InfoButton } from "@/components/InfoButton";
 import { Placeholder, TextSkeleton } from "@/components/loading";
-import { Lead, SectionTitle } from "@/components/page";
-import { Card } from "@/components/ui/card";
+import { SettingsGroup } from "@/components/settings";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { EmojiInfo, KarmaStanding } from "../rpc.ts";
+import type { EmojiInfo, KarmaOff, KarmaStanding } from "../rpc.ts";
 import { Api, KARMA_KEYS } from "./api.ts";
 import { guildPath } from "./guild.tsx";
 import { GuildIcon } from "./Header.tsx";
 import { inlineEmoji } from "./MessageText.tsx";
 import { Link } from "./router.tsx";
 
-// The member's karma on the profile: one row for each server where karma is
-// on, with their place on its scoreboard and the votes they have left. How
-// karma works in a server is behind the row's info button.
+// The member's karma on the profile: one row for each server, with their
+// place on its scoreboard and the votes they have left. Servers where karma
+// is off are greyed out. How karma works in a server is behind the row's
+// info button.
 
 const myKarmaQuery = Api.query("myKarma", undefined, { reactivityKeys: KARMA_KEYS });
 
 export function ProfileKarma() {
   const standings = useAtomValue(myKarmaQuery);
   return (
-    <section className="flex flex-col gap-3">
-      <div className="flex flex-col gap-1">
-        <SectionTitle>Karma</SectionTitle>
-        <Lead>Yours in each server where it's on.</Lead>
-      </div>
+    <SettingsGroup title="Karma">
       {AsyncResult.matchWithError(standings, {
         onInitial: () => <StandingsSkeleton />,
         onError: () => <Note>Couldn't load your karma.</Note>,
         onDefect: () => <Note>Couldn't load your karma.</Note>,
-        onSuccess: ({ value }) =>
-          value.length === 0 ? (
-            <Note>Karma is off in every server you share with Orianna.</Note>
-          ) : (
-            <Card className="gap-0 py-0">
-              <ul className="divide-y">
-                {value.map((standing) => (
-                  <Standing key={standing.guild.id} standing={standing} />
-                ))}
-              </ul>
-            </Card>
-          ),
+        onSuccess: ({ value }) => (
+          <ul className="divide-y">
+            {value.map((standing) =>
+              "off" in standing ? (
+                <Off key={standing.guild.id} standing={standing} />
+              ) : (
+                <Standing key={standing.guild.id} standing={standing} />
+              ),
+            )}
+          </ul>
+        ),
       })}
-    </section>
+    </SettingsGroup>
   );
 }
 
 function Note({ children }: { children: ReactNode }) {
-  return (
-    <Card className="px-5 py-4">
-      <p className="text-muted-foreground">{children}</p>
-    </Card>
-  );
+  return <p className="px-5 py-4 text-muted-foreground">{children}</p>;
 }
 
 function StandingsSkeleton() {
   return (
     <Placeholder label="Loading your karma">
-      <Card className="gap-0 py-0">
-        <ul className="divide-y">
-          {Array.from({ length: 2 }, (_, i) => (
-            <li key={i} className="flex items-center gap-4 px-5 py-4">
-              <Skeleton className="size-10 rounded-lg" />
-              <div className="flex flex-1 flex-col gap-2">
-                <TextSkeleton className={i % 2 ? "w-28" : "w-40"} />
-                <TextSkeleton className="h-3 w-48" />
-              </div>
-              <Skeleton className="h-7 w-10" />
-            </li>
-          ))}
-        </ul>
-      </Card>
+      <ul className="divide-y">
+        {Array.from({ length: 2 }, (_, i) => (
+          <li key={i} className="flex items-center gap-4 px-5 py-4">
+            <Skeleton className="size-10 rounded-lg" />
+            <div className="flex flex-1 flex-col gap-2">
+              <TextSkeleton className={i % 2 ? "w-28" : "w-40"} />
+              <TextSkeleton className="h-3 w-48" />
+            </div>
+            <Skeleton className="h-7 w-10" />
+          </li>
+        ))}
+      </ul>
     </Placeholder>
   );
 }
@@ -110,6 +98,22 @@ function Standing({ standing }: { standing: KarmaStanding }) {
       <InfoButton label="How karma works here" title={`Karma in ${guild.name}`}>
         <Rules standing={standing} />
       </InfoButton>
+    </li>
+  );
+}
+
+/** A server where karma is off, greyed out, with what the member had when it was on. */
+function Off({ standing: { guild, own } }: { standing: KarmaOff }) {
+  return (
+    <li className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-4 px-5 py-4 opacity-50 grayscale">
+      <GuildIcon guild={guild} className="size-10" />
+      <div className="flex min-w-0 flex-col gap-1">
+        <span className="truncate font-medium text-foreground">{guild.name}</span>
+        <span className="text-sm text-muted-foreground">Off</span>
+      </div>
+      <strong className="font-heading text-2xl leading-tight font-semibold text-muted-foreground tabular-nums">
+        {own}
+      </strong>
     </li>
   );
 }
@@ -151,7 +155,7 @@ function Votes({ standing }: { standing: KarmaStanding }) {
           </span>
         )}
       </div>
-      <span className="truncate">
+      <span className="min-w-0">
         {votesLeft > 0
           ? `${votesLeft} of ${votesPerHour} ${votesPerHour === 1 ? "vote" : "votes"} left`
           : nextVoteAt !== null && now !== null
@@ -176,10 +180,10 @@ function useNow(interval: number | null): number | null {
 
 /** What gives and takes karma in a server, as a key: what to do, and what it's worth. */
 function Rules({ standing }: { standing: KarmaStanding }) {
-  const { upvotes, downvotes, penalty, starboardGain, votesPerHour } = standing;
+  const { upvotes, downvotes, penalty, votesPerHour } = standing;
   const up = upvotes.length > 0;
   const down = downvotes.length > 0;
-  if (!up && !down && starboardGain === 0) {
+  if (!up && !down) {
     return <p className="text-muted-foreground">Nothing gives karma here right now.</p>;
   }
   return (
@@ -194,11 +198,6 @@ function Rules({ standing }: { standing: KarmaStanding }) {
           <Rule symbol={<Emojis list={downvotes} />} amount={-1}>
             React to take a point away
             {penalty && <span className="block text-muted-foreground">It costs you a point too.</span>}
-          </Rule>
-        )}
-        {starboardGain > 0 && (
-          <Rule symbol={<Star weight="fill" className="size-[1.2em] text-primary" />} amount={starboardGain}>
-            Get a message onto the starboard
           </Rule>
         )}
       </ul>

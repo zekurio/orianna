@@ -17,7 +17,7 @@ export function PageHeader({ title, lead, actions }: { title: string; lead?: Rea
   return (
     <header className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
       <div className="flex min-w-0 flex-col gap-2">
-        <h1 className="text-3xl leading-tight sm:text-4xl">{title}</h1>
+        <h1 className="text-3xl/9 sm:text-4xl/11">{title}</h1>
         {lead && <Lead>{lead}</Lead>}
       </div>
       {actions && <div className="flex flex-wrap gap-3">{actions}</div>}
@@ -36,21 +36,33 @@ export function SectionTitle({ children }: { children: ReactNode }) {
 }
 
 /**
- * Content with a column beside it on wide screens, like the commands page's
- * search and section links, and above it on narrow ones. The column scrolls
- * with the page until it reaches the top, then stays there. It scrolls by
- * itself when it's taller than the window.
+ * A page with a column of its own, like the commands page's search and
+ * section links. On wide screens the column runs down the window's left
+ * edge, 16rem wide, and stays put while the page scrolls; the page stays
+ * centred like the others, moving right only as far as it takes to keep 2rem
+ * clear of it. Its content starts at the centred page's edge,
+ * (100vw - 72rem) / 2, plus its 2.5rem padding. On narrow screens the column
+ * goes between the header and the content.
  */
-export function WithSidebar({ sidebar, children }: { sidebar: ReactNode; children: ReactNode }) {
+export function WithSidebar({
+  header,
+  sidebar,
+  children,
+}: {
+  header: ReactNode;
+  sidebar: ReactNode;
+  children: ReactNode;
+}) {
   return (
-    <div className="flex flex-col gap-6 lg:grid lg:grid-cols-[14rem_minmax(0,1fr)] lg:items-start lg:gap-10">
-      {/* Held inside the page's scroll box, which is the window less the 4rem
-          header, with the page's 3rem padding above and below. The 0.25rem
-          padding keeps focus rings from being clipped by the scrolling. */}
-      <aside className="flex flex-col gap-4 lg:sticky lg:top-11 lg:-m-1 lg:max-h-[calc(100dvh-9.5rem)] lg:overflow-y-auto lg:p-1">
-        {sidebar}
-      </aside>
-      <div className="min-w-0">{children}</div>
+    <div className="flex flex-1 flex-col gap-6 lg:ml-[max(0px,calc(15.5rem_-_max(0px,50vw_-_36rem)))]">
+      {header}
+      {/* Below the header, which is 4rem tall on wide screens. */}
+      {sidebar && (
+        <aside className="flex flex-col gap-4 lg:fixed lg:top-16 lg:bottom-0 lg:left-0 lg:w-64 lg:overflow-y-auto lg:border-r lg:px-6 lg:pt-12 lg:pb-6">
+          {sidebar}
+        </aside>
+      )}
+      <div className="flex min-w-0 flex-1 flex-col">{children}</div>
     </div>
   );
 }

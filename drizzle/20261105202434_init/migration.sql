@@ -5,15 +5,6 @@ CREATE TABLE `karma` (
 	CONSTRAINT `karma_pk` PRIMARY KEY(`guild_id`, `user_id`)
 );
 --> statement-breakpoint
-CREATE TABLE `karma_bonuses` (
-	`message_id` text PRIMARY KEY NOT NULL,
-	`guild_id` text NOT NULL,
-	`user_id` text NOT NULL,
-	`amount` integer NOT NULL,
-	`given_at` integer NOT NULL,
-	`revoked` integer DEFAULT false NOT NULL
-);
---> statement-breakpoint
 CREATE TABLE `karma_votes` (
 	`message_id` text NOT NULL,
 	`voter_id` text NOT NULL,
@@ -104,35 +95,6 @@ CREATE TABLE `settings_changes` (
 	`after` text NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE `starboard_entries` (
-	`message_id` text PRIMARY KEY NOT NULL,
-	`guild_id` text NOT NULL,
-	`channel_id` text NOT NULL,
-	`author_id` text NOT NULL,
-	`post_channel_id` text,
-	`post_id` text,
-	`count` integer NOT NULL,
-	`removed` integer DEFAULT false NOT NULL,
-	`posted_at` integer NOT NULL,
-	`content` text,
-	`author_name` text,
-	`author_avatar` text,
-	`media` text,
-	`sent_at` integer
-);
---> statement-breakpoint
-CREATE TABLE `starboard_opt_outs` (
-	`user_id` text PRIMARY KEY NOT NULL,
-	`opted_out_at` integer NOT NULL
-);
---> statement-breakpoint
-CREATE TABLE `stored_images` (
-	`id` text PRIMARY KEY NOT NULL,
-	`image` blob NOT NULL,
-	`content_type` text NOT NULL,
-	`stored_at` integer NOT NULL
-);
---> statement-breakpoint
 CREATE TABLE `votes` (
 	`poll_id` integer NOT NULL,
 	`user_id` text NOT NULL,
@@ -159,7 +121,4 @@ CREATE INDEX `proposals_guild_id_type_status_idx` ON `proposals` (`guild_id`,`ty
 CREATE INDEX `role_menu_reactions_guild_id_user_id_idx` ON `role_menu_reactions` (`guild_id`,`user_id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `role_menus_message_id_idx` ON `role_menus` (`message_id`);--> statement-breakpoint
 CREATE INDEX `settings_changes_guild_id_idx` ON `settings_changes` (`guild_id`);--> statement-breakpoint
-CREATE UNIQUE INDEX `starboard_entries_post_id_idx` ON `starboard_entries` (`post_id`);--> statement-breakpoint
-CREATE INDEX `starboard_entries_guild_id_author_id_idx` ON `starboard_entries` (`guild_id`,`author_id`);--> statement-breakpoint
-CREATE INDEX `starboard_entries_guild_id_posted_at_idx` ON `starboard_entries` (`guild_id`,`posted_at`);--> statement-breakpoint
 CREATE INDEX `web_sessions_expires_at_idx` ON `web_sessions` (`expires_at`);

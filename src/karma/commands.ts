@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { type CommandGroup, defineCommand, memberId, refuse, type UserError } from "../commands/command.ts";
 import { KARMA_DEFAULTS, type KarmaConfig, type KarmaRule } from "../config.ts";
-import { emojiKey, parseEmoji } from "../emoji.ts";
+import { parseEmoji } from "../emoji.ts";
 import { ACCENT, type MessageBody } from "../messages/body.ts";
 import { RoleGuild } from "../roles/menus.ts";
 import { Settings } from "../settings/settings.ts";
@@ -266,26 +266,20 @@ export const karmaCommands = Effect.fnUntraced(function* () {
   return group;
 });
 
-/** Emoji separated by spaces, or `none`; each one checked against the starboard's. */
+/** Emoji separated by spaces, or `none`. */
 const emojiList = Effect.fnUntraced(function* (input: string) {
   const words = input.trim().split(/\s+/);
   if (words.length === 1 && words[0]!.toLowerCase() === "none") return [];
-  const starboard = (yield* Settings.current).starboard;
   for (const word of words) {
     if (!parseEmoji(word)) {
       return yield* refuse(`${word} isn't an emoji. Use a Unicode emoji or a custom one like <:name:id>.`);
-    }
-    if (starboard && emojiKey(word) === emojiKey(starboard.emoji)) {
-      return yield* refuse(
-        `${word} is the starboard's emoji, so it can't vote for karma too. Pick another, or change the starboard's emoji first.`,
-      );
     }
   }
   return words;
 });
 
 /** What `!karma set <setting> <value>` changes. */
-function karmaChange(setting: string, value: string): Effect.Effect<Partial<KarmaConfig>, UserError, Settings> {
+function karmaChange(setting: string, value: string): Effect.Effect<Partial<KarmaConfig>, UserError> {
   switch (setting.toLowerCase()) {
     case "upvotes":
       return emojiList(value).pipe(Effect.map((upvotes) => ({ upvotes })));

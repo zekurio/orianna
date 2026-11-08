@@ -1,10 +1,11 @@
 import { useAtomValue } from "@effect/atom-react";
 import { CheckSquare, ClockCounterClockwise, GearSix, type Icon, Key, ListChecks } from "@phosphor-icons/react";
 import { AsyncResult } from "effect/reactivity";
-import type { ReactNode } from "react";
-import { FormCardSkeleton, Placeholder } from "@/components/loading";
-import { PageHeader } from "@/components/page";
+import { type ReactNode, useSyncExternalStore } from "react";
+import { Placeholder, SettingsGroupSkeleton } from "@/components/loading";
+import { PageHeader, WithSidebar } from "@/components/page";
 import { Problem } from "@/components/Problem";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { guildPath, useGuild } from "../guild.tsx";
 import { navigate } from "../router.tsx";
@@ -17,7 +18,7 @@ import { type SectionProps, type Settings, setupQuery } from "./shared.tsx";
 
 // The Admin tab: the settings of the whole server, for the guild owner and
 // members with Administrator, the same ones `!settings` exports and imports.
-// The starboard's and karma's are on their own pages.
+// Karma's are on its own page.
 
 type Tab = "general" | "permissions" | "proposals" | "role-menus" | "history";
 
@@ -41,24 +42,72 @@ export function parseAdminPath(path: string): Tab | undefined {
 
 export function AdminPage({ tab }: { tab: Tab }) {
   const guild = useGuild();
+  const wide = useWide();
   if (!guild.admin) return <PageHeader title="Admin" lead="Only the server owner and administrators can see this." />;
+  const open = (next: string) => navigate(guildPath(guild.id, pathOf(next as Tab)));
   return (
-    <>
-      <PageHeader title="Admin" />
-      <Tabs value={tab} onValueChange={(next) => navigate(guildPath(guild.id, pathOf(next as Tab)))} className="gap-6">
-        <TabsList className="max-w-full justify-start overflow-x-auto">
-          {TABS.map(({ tab: t, label, icon: TabIcon }) => (
-            <TabsTrigger key={t} value={t}>
-              <TabIcon />
-              {label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-        <TabsContent value={tab}>
+    // The tabs run down the window's left edge on wide screens, like the
+    // commands page's section links. Narrower ones have no room for them
+    // all, and pick one from a menu beside the title instead.
+    <Tabs value={tab} onValueChange={open} orientation="vertical" className="flex-1 flex-col gap-0">
+      <WithSidebar
+        header={
+          <PageHeader
+            title="Admin"
+            actions={
+              !wide && (
+                <Select value={tab} onValueChange={open}>
+                  <SelectTrigger aria-label="Settings">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent align="end" className="min-w-48">
+                    {TABS.map(({ tab: t, label, icon: TabIcon }) => (
+                      <SelectItem key={t} value={t}>
+                        <TabIcon />
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )
+            }
+          />
+        }
+        sidebar={
+          wide && (
+            <TabsList className="w-full items-stretch gap-0.5 bg-transparent p-0">
+              {TABS.map(({ tab: t, label, icon: TabIcon }) => (
+                <TabsTrigger
+                  key={t}
+                  value={t}
+                  className="h-9 flex-none justify-start px-2.5 text-base data-active:bg-muted"
+                >
+                  <TabIcon />
+                  {label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          )
+        }
+      >
+        <TabsContent value={tab} className="flex flex-col">
           <Loaded>{(props) => <Section tab={tab} {...props} />}</Loaded>
         </TabsContent>
-      </Tabs>
-    </>
+      </WithSidebar>
+    </Tabs>
+  );
+}
+
+const WIDE = window.matchMedia("(width >= 64rem)");
+
+/** Whether the window is wide enough for the tabs to run down its left edge, as WithSidebar's column does. */
+function useWide(): boolean {
+  return useSyncExternalStore(
+    (onChange) => {
+      WIDE.addEventListener("change", onChange);
+      return () => WIDE.removeEventListener("change", onChange);
+    },
+    () => WIDE.matches,
   );
 }
 
@@ -67,9 +116,9 @@ function Loaded({ children }: { children: (props: SectionProps) => ReactNode }) 
   const setup = useAtomValue(setupQuery(useGuild().id));
   return AsyncResult.matchWithError(setup, {
     onInitial: () => (
-      <Placeholder label="Loading the settings" className="flex flex-col gap-6">
-        <FormCardSkeleton fields={2} />
-        <FormCardSkeleton fields={4} />
+      <Placeholder label="Loading the settings" className="flex flex-col gap-8">
+        <SettingsGroupSkeleton rows={2} />
+        <SettingsGroupSkeleton rows={4} />
       </Placeholder>
     ),
     onError: (error) => <Problem message={error._tag === "Refused" ? error.message : undefined} />,

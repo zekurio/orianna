@@ -2,7 +2,7 @@ import { and, asc, count, desc, eq, gt, inArray, ne, sql } from "drizzle-orm";
 import { Context, Effect, Layer, Semaphore } from "effect";
 import type { KarmaConfig, KarmaRule } from "../config.ts";
 import { Database, type Transaction } from "../db/index.ts";
-import { karma, karmaBonuses, karmaVotes } from "../db/schema.ts";
+import { karma, karmaVotes } from "../db/schema.ts";
 import { parseEmoji, type ReactionEmoji, reactionKey } from "../emoji.ts";
 import type { FluxerError } from "../fluxer.ts";
 import { CurrentGuild } from "../guild.ts";
@@ -11,9 +11,9 @@ import { RoleGuild } from "../roles/menus.ts";
 import { Settings } from "../settings/settings.ts";
 
 // Karma, as shinpuru has it: members vote on each other's messages with
-// reactions, the starboard adds to it, and rules act on a member whose karma
-// crosses a value. The settings are read on every vote, so a change applies
-// to the next one. There's no global karma: each guild counts its own.
+// reactions, and rules act on a member whose karma crosses a value. The
+// settings are read on every vote, so a change applies to the next one.
+// There's no global karma: each guild counts its own.
 
 /** A member as the scoreboard shows them. */
 export interface KarmaMember {
@@ -62,10 +62,6 @@ export class Karma extends Context.Service<
       voterId: string,
       emoji: ReactionEmoji,
     ) => Effect.Effect<void, FluxerError>;
-    /** Gives the author of a message that got into the starboard `amount`, once per message. */
-    readonly starboardBonus: (messageId: string, authorId: string, amount: number) => Effect.Effect<void>;
-    /** Takes back what {@link starboardBonus} gave for a message whose post someone deleted. */
-    readonly revokeBonus: (messageId: string) => Effect.Effect<void>;
     /** A member's karma, 0 for one who has none. */
     readonly of: (userId: string) => Effect.Effect<number>;
     /** The members with the most karma, most first. Those at 0 are left out. */
@@ -200,48 +196,6 @@ export class Karma extends Context.Service<
               ),
             );
           }),
-
-        starboardBonus: (messageId, authorId, amount) =>
-          lock.withPermits(1)(
-            Effect.gen(function* () {
-              const config = (yield* settings.get).karma;
-              if (!config || amount === 0 || config.blocklist.includes(authorId)) return;
-              const change = db.transaction((tx) => {
-                const given = tx
-                  .insert(karmaBonuses)
-                  .values({ messageId, guildId, userId: authorId, amount, givenAt: new Date() })
-                  .onConflictDoNothing()
-                  .returning()
-                  .get();
-                return given && add(tx, authorId, amount);
-              });
-              if (change) yield* applyRules(config.rules, change);
-            }),
-          ),
-
-        // Also while karma is off, so turning it back on doesn't bring back what a deleted post gave.
-        revokeBonus: (messageId) =>
-          lock.withPermits(1)(
-            Effect.gen(function* () {
-              const config = (yield* settings.get).karma;
-              const change = db.transaction((tx) => {
-                const bonus = tx
-                  .update(karmaBonuses)
-                  .set({ revoked: true })
-                  .where(
-                    and(
-                      eq(karmaBonuses.messageId, messageId),
-                      eq(karmaBonuses.guildId, guildId),
-                      eq(karmaBonuses.revoked, false),
-                    ),
-                  )
-                  .returning()
-                  .get();
-                return bonus && add(tx, bonus.userId, -bonus.amount);
-              });
-              if (change && config) yield* applyRules(config.rules, change);
-            }),
-          ),
 
         of: (userId) =>
           Effect.sync(

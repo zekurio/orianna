@@ -119,7 +119,7 @@ function problemBlock(problems: readonly string[]): string {
   return `\`\`\`\n${shown.join("\n")}\n\`\`\`${left > 0 ? `\n…and ${left} more.` : ""}`;
 }
 
-/** e.g. "<t:…:R> <@123> changed `emoji` and `starboard`" */
+/** e.g. "<t:…:R> <@123> changed `emoji` and `karma`" */
 function describe(change: SettingsChange): string {
   const when = timestamp(change.changedAt);
   if (change.source === "defaults") return `${when} set to the defaults when the bot joined`;

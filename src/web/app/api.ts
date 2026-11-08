@@ -12,9 +12,6 @@ export class Api extends AtomRpc.Service<Api>()("orianna/web/Api", {
   ),
 }) {}
 
-/** Everything shown of the starboard, refreshed when it's set differently. */
-export const STARBOARD_KEYS = ["starboard"];
-
 /** Everything shown of karma, refreshed when it's set differently. */
 export const KARMA_KEYS = ["karma"];
 

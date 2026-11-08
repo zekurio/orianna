@@ -2,10 +2,10 @@ import { useAtomValue } from "@effect/atom-react";
 import { ArrowClockwise } from "@phosphor-icons/react";
 import { Schema } from "effect";
 import { AsyncResult } from "effect/reactivity";
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { type Session, SignInError } from "../rpc.ts";
 import { Api } from "./api.ts";
-import { Header } from "./Header.tsx";
+import { Header, TabBar } from "./Header.tsx";
 import { CommandsPage } from "./Commands.tsx";
 import { AdminPage, parseAdminPath } from "./admin/AdminPage.tsx";
 import { GuildContext, guildPath, homeGuild, parseGuildPath, useLastGuild } from "./guild.tsx";
@@ -13,7 +13,6 @@ import { KarmaPage } from "./Karma.tsx";
 import { NoGuildsPage, NotFoundPage, ProfilePage } from "./pages.tsx";
 import { navigate, usePath } from "./router.tsx";
 import { SignIn } from "./SignIn.tsx";
-import { StarboardPage } from "./Starboard.tsx";
 import { cn } from "cn";
 import { container, standalone } from "@/components/page";
 import { Button } from "@/components/ui/button";
@@ -81,6 +80,7 @@ function Shell() {
   const path = usePath();
   const { guilds } = useSession();
   const { guildId: last, remember } = useLastGuild();
+  const scroller = useRef<HTMLDivElement>(null);
   const inGuild = parseGuildPath(path);
   const guild = inGuild && guilds.find((g) => g.id === inGuild.guildId);
 
@@ -92,6 +92,11 @@ function Shell() {
     if (path === "/" && home) navigate(guildPath(home.id), { replace: true });
     else if (inGuild?.page === "/") navigate(guildPath(inGuild.guildId), { replace: true });
   }, [path]);
+  // The page scrolls in its own box, which the browser leaves where it was
+  // when another page comes in.
+  useEffect(() => {
+    scroller.current?.scrollTo(0, 0);
+  }, [path]);
 
   return (
     <GuildContext value={guild ?? null}>
@@ -99,11 +104,12 @@ function Shell() {
           either end bounces the page and leaves the header where it is. */}
       <div className="flex h-dvh flex-col">
         <Header path={path} />
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <main className={cn(container, "flex flex-col gap-6 py-8 sm:py-12")}>
+        <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
+          <main className={cn(container, "flex min-h-full flex-col gap-6 py-6 sm:py-12")}>
             <Page path={path} />
           </main>
         </div>
+        <TabBar path={path} />
       </div>
     </GuildContext>
   );
@@ -122,8 +128,6 @@ function Page({ path }: { path: string }) {
   // Keyed by guild, so a page starts over in another guild.
   if (adminTab) return <AdminPage key={guild.id} tab={adminTab} />;
   switch (inGuild.page) {
-    case "/starboard":
-      return <StarboardPage key={guild.id} />;
     case "/karma":
       return <KarmaPage key={guild.id} />;
     case "/commands":

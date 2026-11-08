@@ -192,7 +192,6 @@ function KarmaForm({ setup, onCancel, onDone }: { setup: KarmaSetup; onCancel: (
 
         <FieldSet>
           <FieldLegend variant="label">Rules</FieldLegend>
-          <FieldDescription>What happens when a member's karma crosses a value.</FieldDescription>
           {draft.rules.length > 0 && (
             <ul className="flex flex-col gap-4">
               {draft.rules.map((rule, i) => (
@@ -348,7 +347,6 @@ function Blocklist({
   return (
     <FieldSet>
       <FieldLegend variant="label">Blocklist</FieldLegend>
-      <FieldDescription>Members who can't give or get karma.</FieldDescription>
       {value.length > 0 && (
         <ul className="flex flex-col divide-y rounded-lg border">
           {value.map((userId, i) => {

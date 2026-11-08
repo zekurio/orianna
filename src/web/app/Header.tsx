@@ -6,7 +6,6 @@ import {
   type Icon,
   ShieldStar,
   SignOut,
-  Star,
   ThumbsUp,
   UserCircle,
 } from "@phosphor-icons/react";
@@ -30,7 +29,6 @@ import { Link, navigate } from "./router.tsx";
 
 /** A guild's pages, by their path within it. */
 const TABS: { page: string; label: string; icon: Icon }[] = [
-  { page: "/starboard", label: "Starboard", icon: Star },
   { page: "/karma", label: "Karma", icon: ThumbsUp },
   { page: "/commands", label: "Commands", icon: BookOpenText },
 ];
@@ -38,56 +36,66 @@ const TABS: { page: string; label: string; icon: Icon }[] = [
 /** Settings for the whole guild, for its owner and members with Administrator. */
 const ADMIN_TAB = { page: "/admin", label: "Admin", icon: ShieldStar };
 
-export function Header({ path }: { path: string }) {
+/**
+ * The guild the tabs lead to: the page's, or outside a guild, like on the
+ * profile, the last one looked at.
+ */
+function useTabGuild(): GuildInfo | undefined {
   const { guilds } = useSession();
   const { guildId: last } = useLastGuild();
   const current = useContext(GuildContext);
-  // Outside a guild, like on the profile, the switcher shows the last one and
-  // the tabs lead back to it.
-  const guild = current ?? homeGuild(guilds, last);
+  return current ?? homeGuild(guilds, last);
+}
+
+/** The tabs of `guild`, and whether each is the page at `path`. */
+function tabsOf(guild: GuildInfo, path: string) {
   const page = parseGuildPath(path)?.page;
-  const tabs = guild?.admin ? [...TABS, ADMIN_TAB] : TABS;
+  return (guild.admin ? [...TABS, ADMIN_TAB] : TABS).map((tab) => ({
+    ...tab,
+    to: guildPath(guild.id, tab.page),
+    here: page === tab.page || page?.startsWith(`${tab.page}/`) === true,
+  }));
+}
+
+export function Header({ path }: { path: string }) {
+  const guild = useTabGuild();
   return (
-    <header className="z-10 shrink-0 border-b bg-background">
-      {/* The full width, unlike the pages, so the tabs have room to grow. */}
-      <div className="flex h-16 w-full items-center gap-x-4 px-4 sm:gap-x-10 sm:px-6 max-sm:h-auto max-sm:flex-wrap max-sm:gap-y-1 max-sm:pt-3">
-        <div className="flex min-w-0 items-center gap-3">
+    <header className="z-10 shrink-0 border-b bg-background pt-[env(safe-area-inset-top)]">
+      {/* The full width, unlike the pages, so the tabs have room to grow. On
+          narrow screens, like phones, the tabs move to the bottom of the
+          screen, under the thumb. */}
+      <div className="flex h-14 w-full items-center gap-x-2 px-3 sm:h-16 sm:gap-x-6 sm:px-6 xl:gap-x-10">
+        <div className="flex min-w-0 flex-1 items-center gap-1.5 sm:gap-3 lg:flex-initial">
           <Link
             to="/"
             className="flex shrink-0 items-center gap-2 font-heading text-[1.375rem] leading-none font-semibold text-foreground no-underline"
           >
             <img src={portrait} alt="" width={36} height={36} />
-            Orianna
+            <span className="max-sm:sr-only">Orianna</span>
           </Link>
           <span aria-hidden="true" className="text-2xl font-light text-border">
             /
           </span>
           <GuildSwitcher current={guild} path={path} />
         </div>
-        <nav
-          className="flex gap-1 self-stretch max-sm:order-1 max-sm:-mx-3.5 max-sm:h-12 max-sm:basis-full"
-          aria-label="Pages"
-        >
+        <nav className="flex shrink-0 gap-1 self-stretch max-lg:hidden" aria-label="Pages">
           {guild &&
-            tabs.map(({ page: to, label, icon: TabIcon }) => {
-              const here = page === to || page?.startsWith(`${to}/`) === true;
-              return (
-                <Link
-                  key={to}
-                  to={guildPath(guild.id, to)}
-                  aria-current={here ? "page" : undefined}
-                  className={cn(
-                    "relative flex items-center gap-2 px-3.5 font-heading text-[1.0625rem] font-medium no-underline",
-                    here
-                      ? "text-primary after:absolute after:inset-x-3.5 after:bottom-0 after:h-1 after:rounded-t after:bg-primary"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  <TabIcon weight={here ? "fill" : undefined} />
-                  {label}
-                </Link>
-              );
-            })}
+            tabsOf(guild, path).map(({ to, here, label, icon: TabIcon }) => (
+              <Link
+                key={to}
+                to={to}
+                aria-current={here ? "page" : undefined}
+                className={cn(
+                  "relative flex items-center gap-2 px-3.5 font-heading text-[1.0625rem]/6 font-medium no-underline",
+                  here
+                    ? "text-primary after:absolute after:inset-x-3.5 after:bottom-0 after:h-1 after:rounded-t after:bg-primary"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <TabIcon weight={here ? "fill" : undefined} />
+                {label}
+              </Link>
+            ))}
         </nav>
         <UserMenu />
       </div>
@@ -95,10 +103,39 @@ export function Header({ path }: { path: string }) {
   );
 }
 
+/** The tabs on narrow screens: a bar along the bottom, within reach of a thumb. */
+export function TabBar({ path }: { path: string }) {
+  const guild = useTabGuild();
+  if (!guild) return null;
+  return (
+    <nav
+      className="z-10 flex shrink-0 border-t bg-background px-1 pb-[env(safe-area-inset-bottom)] lg:hidden"
+      aria-label="Pages"
+    >
+      {tabsOf(guild, path).map(({ to, here, label, icon: TabIcon }) => (
+        <Link
+          key={to}
+          to={to}
+          aria-current={here ? "page" : undefined}
+          className={cn(
+            "relative flex h-16 min-w-0 flex-1 flex-col items-center justify-center gap-1 font-heading text-[0.8125rem]/4 font-medium no-underline [-webkit-tap-highlight-color:transparent]",
+            here
+              ? "text-primary before:absolute before:top-0 before:left-1/2 before:h-1 before:w-12 before:-translate-x-1/2 before:rounded-b before:bg-primary"
+              : "text-muted-foreground active:text-foreground",
+          )}
+        >
+          <TabIcon size="1.5rem" weight={here ? "fill" : undefined} />
+          <span className="max-w-full truncate">{label}</span>
+        </Link>
+      ))}
+    </nav>
+  );
+}
+
 /**
  * The guild the page is about, or outside a guild the one the tabs lead to,
  * and a menu of the others the member shares with the bot. Picking one keeps
- * the page, like the starboard, in that guild; outside a guild, like on the
+ * the page, like karma, in that guild; outside a guild, like on the
  * profile, it stays on the page and points the tabs at that guild.
  */
 function GuildSwitcher({ current, path }: { current: GuildInfo | undefined; path: string }) {
@@ -112,11 +149,11 @@ function GuildSwitcher({ current, path }: { current: GuildInfo | undefined; path
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" className="h-10 min-w-0 gap-2 px-2 font-medium text-foreground">
           <GuildIcon guild={current} />
-          <span className="truncate max-sm:max-w-[9rem]">{current.name}</span>
+          <span className="truncate">{current.name}</span>
           <CaretUpDown className="text-muted-foreground" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-64">
+      <DropdownMenuContent align="start" sideOffset={8} collisionPadding={12} className="w-72">
         <DropdownMenuLabel>Servers</DropdownMenuLabel>
         {guilds.map((guild) => (
           <DropdownMenuItem key={guild.id} onSelect={() => pick(guild.id)}>
@@ -154,19 +191,25 @@ function UserMenu() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" className="group ml-auto h-10 gap-2.5 rounded-full p-1 sm:pr-3.5">
+        <Button variant="outline" className="group h-10 shrink-0 gap-2.5 rounded-full p-1 sm:ml-auto sm:pr-3.5 lg:max-xl:pr-1">
           <Avatar>
             <AvatarImage src={user.avatarUrl} alt="" />
             <AvatarFallback>{user.name.slice(0, 1)}</AvatarFallback>
           </Avatar>
-          <span className="max-sm:hidden">{user.name}</span>
-          <CaretDown className="text-muted-foreground transition-transform group-data-[state=open]:rotate-180 max-sm:hidden" />
+          <span className="max-sm:hidden lg:max-xl:hidden">{user.name}</span>
+          <CaretDown className="text-muted-foreground transition-transform group-data-[state=open]:rotate-180 max-sm:hidden lg:max-xl:hidden" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-60">
-        <DropdownMenuLabel className="grid">
-          <span className="text-foreground">{user.name}</span>
-          {user.tag !== user.name && <span className="font-normal text-muted-foreground">{user.tag}</span>}
+      <DropdownMenuContent align="end" sideOffset={8} collisionPadding={12} className="w-64">
+        <DropdownMenuLabel className="flex items-center gap-2.5 px-2 py-2">
+          <Avatar>
+            <AvatarImage src={user.avatarUrl} alt="" />
+            <AvatarFallback>{user.name.slice(0, 1)}</AvatarFallback>
+          </Avatar>
+          <span className="grid min-w-0">
+            <span className="truncate text-sm text-foreground">{user.name}</span>
+            {user.tag !== user.name && <span className="truncate font-normal">{user.tag}</span>}
+          </span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => navigate("/profile")}>
