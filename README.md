@@ -1,5 +1,15 @@
 # Orianna
 
+> **Moved:** Development continues at
+> [tangled.org/zekurio.me/orianna](https://tangled.org/zekurio.me/orianna).
+> This GitHub repository is archived and no longer maintained.
+> Please file issues and contribute at the new repository.
+>
+> Clone the new repository:
+> ```sh
+> git clone zekurio.me@knot.zekurio.me:did:plc:c5tl5gu27hssisgzp4x3mmvq/orianna
+> ```
+
 Orianna is a bot for servers on a self-hosted [Fluxer](https://fluxer.app)
 instance. Invite it to as many servers as you like. Each one gets its own
 settings, which start at the defaults.
